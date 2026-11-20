@@ -17,6 +17,7 @@ fn ask(id: &str, folder: &str, agent: Option<Agent>) -> NewSessionAsk {
         folder: folder.into(),
         folder_session: None,
         agent,
+        signed: Ok(None),
     }
 }
 
@@ -335,6 +336,7 @@ fn the_replies_read_brings_requests_within_the_contract_row_by_row() {
                 folder: "rakumux".into(),
                 folder_session: Some(SessionId::from_string("01K89ZQ4D2F6H8J0K2M4N6P8R0")),
                 agent: Some(Agent::ClaudeCode),
+                signed: Ok(None),
             },
             ask(OTHER, "web", None),
         ]
@@ -405,4 +407,60 @@ fn every_agent_the_contract_names_can_be_started() {
         assert!(Agent::of(name).is_some(), "{name}");
     }
     assert_eq!(Agent::of("gemini"), None);
+}
+
+/// Once a device is paired here, a session starts only where it signed for,
+/// and its first prompt goes only into the session started for it, once.
+#[test]
+fn once_a_device_is_paired_only_signed_sessions_start_and_take_their_prompt() {
+    use crate::signing::testing::{guard, Device};
+    use crate::signing::KeyFormat;
+    const MACHINE_ID: &str = "01K8C2B3C4D5E6F7G8H9J0K1M2";
+    let phone = Device::new(KeyFormat::P256);
+    let shared = guard(MACHINE_ID, &[&phone]);
+    let signed = |folder: &str| {
+        phone.signed_now(
+            "new_session",
+            MACHINE_ID,
+            ASK,
+            serde_json::json!({ "folder": folder, "agent": "claude-code", "prompt": "fix it" }),
+        )
+    };
+    let run = |signed: serde_json::Value| {
+        let mut sync = on(&[view(OTHER, "/repos/rakumux")]).signing(shared.clone());
+        let row = serde_json::json!([{
+            "id": ASK, "machine": "studio", "folder": "rakumux", "agent": "claude-code",
+            "status": "pending", "created_at": 1, "status_at": 1, "signed": signed,
+        }]);
+        sync.read(true, asks(Some(row)));
+        (sync.next_work(NOW), sync)
+    };
+    assert_eq!(body(run(signed("web")).0)["failure"], "bad_signature");
+    assert_eq!(body(run(serde_json::Value::Null).0)["failure"], "unsigned");
+    let envelope = signed("rakumux");
+    let (work, mut sync) = run(envelope.clone());
+    assert!(matches!(work, Some(NewSessionWork::Create { .. })));
+    sync.created(ASK, Ok(view(STARTED, "/repos/rakumux")));
+    let envelope: Signed = serde_json::from_value(envelope).unwrap();
+    let now = crate::signing::now_ms();
+    let mut guard = shared.borrow_mut();
+    assert_eq!(
+        guard.first_prompt(&envelope, OTHER, "fix it", now),
+        Err(Refusal::BadSignature),
+        "never another session"
+    );
+    assert_eq!(
+        guard.first_prompt(&envelope, STARTED, "rm -rf ~", now),
+        Err(Refusal::BadSignature),
+        "never other text"
+    );
+    assert_eq!(
+        guard.first_prompt(&envelope, STARTED, "fix it", now),
+        Ok(())
+    );
+    assert_eq!(
+        guard.first_prompt(&envelope, STARTED, "fix it", now),
+        Err(Refusal::BadSignature),
+        "once"
+    );
 }

@@ -378,6 +378,11 @@ pub(crate) struct SessionSync {
     choices: bool,
     /// The cloud's last answer said it takes heartbeats.
     heartbeats: bool,
+    /// The cloud's last answer said it takes this machine's id and paired
+    /// devices.
+    signed_commands: bool,
+    /// What the list says of signing, to a cloud that takes it.
+    signing: Option<wire::ListedSigning>,
     /// rakumux.com answered a list under this name with anything but
     /// `machine_taken` (or a failure for now) since the switch was turned on:
     /// the name is this machine's, and its replies may be read.
@@ -415,6 +420,8 @@ impl SessionSync {
             output: false,
             choices: false,
             heartbeats: false,
+            signed_commands: false,
+            signing: None,
             confirmed: false,
             sessions: BTreeMap::new(),
             sent: None,
@@ -497,6 +504,15 @@ impl SessionSync {
     /// of a machine that carries them out. A change goes with the next upload.
     pub fn set_heartbeats(&mut self, supported: bool) {
         self.set_capability(super::HEARTBEATS, supported);
+    }
+
+    /// Say this machine's id and paired devices with the list (to a cloud that
+    /// takes them); sent again when they change.
+    pub fn set_signing(&mut self, signing: wire::ListedSigning) {
+        if self.signing.as_ref() != Some(&signing) {
+            self.signing = Some(signing);
+            self.sent = None;
+        }
     }
 
     /// Whether rakumux.com's last answer said it takes heartbeats.
@@ -613,12 +629,14 @@ impl SessionSync {
             return None;
         }
         let capabilities = &self.capabilities;
-        let mut request = wire::sessions_upload(
+        let signing = self.signing.as_ref().filter(|_| self.signed_commands);
+        let mut request = wire::signed_sessions_upload(
             &self.machine,
             &list,
             wall_ms,
             capabilities,
             self.version.as_deref(),
+            signing,
         )?;
         if matches!(&request, FeedRequest::Sessions { body } if body.len() > MAX_BODY_BYTES) {
             // Too large with them: the same list without places or agents'
@@ -628,12 +646,13 @@ impl SessionSync {
             without_places(&mut smaller);
             without_output(&mut smaller);
             without_choices(&mut smaller);
-            request = wire::sessions_upload(
+            request = wire::signed_sessions_upload(
                 &self.machine,
                 &smaller,
                 wall_ms,
                 capabilities,
                 self.version.as_deref(),
+                signing,
             )?;
         }
         self.sending = Some(list);
@@ -669,7 +688,14 @@ impl SessionSync {
                 self.output = stored.output;
                 self.choices = stored.choices;
                 self.heartbeats = stored.heartbeats;
-                self.sent = sent;
+                let newly = stored.signed_commands && !self.signed_commands;
+                self.signed_commands = stored.signed_commands;
+                // Said again with its id and devices once the cloud takes them.
+                self.sent = if newly && self.signing.is_some() {
+                    None
+                } else {
+                    sent
+                };
                 self.retry = RETRY_MIN;
                 self.next_send = now + SETTLE;
                 self.heartbeat_at = now + HEARTBEAT;

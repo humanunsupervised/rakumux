@@ -31,12 +31,13 @@ use crate::auth::{
 use crate::cloud::FeatureChange;
 use crate::dispatch::{DispatchError, FeaturesCompletion, FeaturesJob, StatusConsentOffer};
 use crate::feed::{
-    ActionWork, ChatSync, ChatWork, DeletionWork, FeedCompletion, FeedFailure, FeedJob, FeedPage,
-    FeedReply, FeedRequest, FeedResult, FeedSync, Fetch, Fetched, HeartbeatAction,
+    ActionWork, ChatSync, ChatWork, DeletionWork, DeviceView, FeedCompletion, FeedFailure, FeedJob,
+    FeedPage, FeedReply, FeedRequest, FeedResult, FeedSync, Fetch, Fetched, HeartbeatAction,
     HeartbeatActionFailure, HeartbeatActionSync, HeartbeatSync, HeartbeatWork, LogSync,
-    NewSessionSync, NewSessionWork, PokeEvent, PokeSync, RealtimeToken, RenameWork, ReplySync,
-    ReplyWork, ResourceSync, ResourceWork, SessionDeletionSync, SessionMessage, SessionRenameSync,
-    SessionSync, TurnRead, UpdateSync, UpdateWork, Uploads,
+    NewSessionSync, NewSessionWork, PairingAction, PairingSync, PairingView, PokeEvent, PokeSync,
+    RealtimeToken, RenameWork, ReplySync, ReplyWork, ResourceSync, ResourceWork,
+    SessionDeletionSync, SessionMessage, SessionRenameSync, SessionSync, TurnRead, UpdateSync,
+    UpdateWork, Uploads,
 };
 use crate::status::{ConsentRevision, ConsentSnapshot, FolderConsent, StatusStore};
 
@@ -118,6 +119,10 @@ enum Command {
     ),
     /// Revoke an enrolled machine's credential (its machine id).
     MachineRevoke(String, Sender<Result<(), FeedFailure>>),
+    /// What the user did with a pairing; the pairing then (`None` signed out).
+    Pairing(PairingAction, Sender<Option<PairingView>>),
+    /// The devices paired here, after forgetting the one with this key id.
+    Devices(Option<String>, Sender<Vec<DeviceView>>),
 }
 
 /// What the daemon announces of what this service uses, read at each
@@ -224,6 +229,8 @@ enum Message {
     SessionDeleted(String, Result<(), ErrorCode>),
     /// A deletion's status report finished.
     SessionDeletionReported(FeedCompletion),
+    /// A pairing's opening or report finished.
+    Paired(FeedCompletion),
     /// The daemon renamed the session a request from rakumux.com (its id)
     /// named, or refused.
     SessionRenamed(String, Result<(), ErrorCode>),
@@ -316,6 +323,8 @@ enum Work<A, C> {
     DeleteSession(String, SessionId),
     /// Report a deletion's status.
     SessionDeletionReport(FeedJob<A, C>),
+    /// Open a pairing at rakumux.com, or report a proposal.
+    Pairing(FeedJob<A, C>),
     /// Name the session a request from rakumux.com (its id) names.
     RenameSession(String, SessionId, String),
     /// Report a rename's status.
@@ -624,6 +633,22 @@ impl RefreshClient {
         answer.recv().map_err(|_| RefreshError::Stopped)
     }
 
+    /// Do `action` with this machine's pairing; the pairing then, `None`
+    /// while signed out or when there's none.
+    pub fn pairing(&self, action: PairingAction) -> Result<Option<PairingView>, RefreshError> {
+        let (reply, answer) = mpsc::channel();
+        self.send(Command::Pairing(action, reply))?;
+        answer.recv().map_err(|_| RefreshError::Stopped)
+    }
+
+    /// The devices paired with this machine, after forgetting the one with
+    /// `remove` when given.
+    pub fn devices(&self, remove: Option<String>) -> Result<Vec<DeviceView>, RefreshError> {
+        let (reply, answer) = mpsc::channel();
+        self.send(Command::Devices(remove, reply))?;
+        answer.recv().map_err(|_| RefreshError::Stopped)
+    }
+
     /// Revoke enrolled machine `machine_id`'s credential.
     pub fn machine_revoke(
         &self,
@@ -724,23 +749,44 @@ fn own<S, A, C>(
     let mut chats = ChatSync::new(machine.clone(), refresher.chat_cursors());
     let mut replies = ReplySync::new(machine.clone(), refresher.reply_state());
     let mut new_sessions = NewSessionSync::new(machine.clone(), refresher.new_session_state());
+    // The devices paired here check what rakumux.com asks, for every sync.
+    let guard: crate::signing::SharedGuard = std::rc::Rc::new(std::cell::RefCell::new(
+        crate::signing::Guard::from_env(crate::signing::PairedDevices::load(
+            refresher.paired_devices(),
+        ))
+        .with_log(
+            refresher
+                .paired_devices()
+                .map(|path| path.with_file_name(crate::signing::log::FILE_NAME)),
+        )
+        .for_machine(identity.id()),
+    ));
+    let mut pairings = PairingSync::new(machine.clone(), guard.clone());
+    replies = replies.signing(guard.clone());
+    new_sessions = new_sessions.signing(guard.clone());
     let mut deletions =
-        SessionDeletionSync::new(machine.clone(), refresher.session_deletion_state());
-    let mut renames = SessionRenameSync::new(machine.clone(), refresher.session_rename_state());
+        SessionDeletionSync::new(machine.clone(), refresher.session_deletion_state())
+            .signing(guard.clone());
+    let mut renames = SessionRenameSync::new(machine.clone(), refresher.session_rename_state())
+        .signing(guard.clone());
     let mut heartbeats = HeartbeatSync::new(machine.clone(), std::env::var("HOME").ok());
     let mut heartbeat_actions =
         HeartbeatActionSync::new(machine.clone(), refresher.heartbeat_action_state());
     // The daemon runs heartbeats (capability `heartbeats`).
     let mut daemon_heartbeats = false;
     let updater = refresher.updater();
-    let mut updates = UpdateSync::new(machine.clone(), updater.is_some(), refresher.update_state());
+    let mut updates = UpdateSync::new(machine.clone(), updater.is_some(), refresher.update_state())
+        .signing(guard.clone());
     let uploads = refresher.uploads().map(Uploads::new);
     let mut sessions = SessionSync::new(machine.clone(), uploads.is_some())
         .handling(crate::feed::NEW_SESSIONS)
         .handling(crate::feed::NEW_SESSION_AGENTS)
         .handling(crate::feed::DELETE_SESSIONS)
         .handling(crate::feed::RENAME_SESSIONS)
+        .handling(crate::signing::SIGNED_COMMANDS)
         .with_version(refresher.version());
+    sessions.set_signing(pairings.listed());
+    let mut next_pairing_read = Duration::ZERO;
     if updater.is_some() {
         sessions = sessions.handling(crate::feed::REMOTE_UPDATE);
     }
@@ -804,6 +850,13 @@ fn own<S, A, C>(
             follow_new_sessions(&refresher, &mut new_sessions, confirmed, work, now);
             follow_deletions(&refresher, &mut deletions, confirmed, work, now);
             follow_renames(&refresher, &mut renames, confirmed, work, now);
+            follow_pairings(&refresher, &mut pairings, confirmed, work, now);
+            // A pairing waits for its device: read its proposal soon.
+            if pairings.waiting() && now >= next_pairing_read {
+                replies.poked(now);
+                next_pairing_read = now + crate::feed::PAIRING_READ_EVERY;
+            }
+            sessions.set_signing(pairings.listed());
             follow_heartbeats(
                 &refresher,
                 &mut heartbeats,
@@ -979,6 +1032,7 @@ fn own<S, A, C>(
                         &mut sessions,
                         &mut new_sessions,
                         &mut deletions,
+                        &mut pairings,
                         &mut renames,
                         &mut heartbeats,
                         &mut heartbeat_actions,
@@ -1020,6 +1074,7 @@ fn own<S, A, C>(
                 if let Ok(FeedResult::Replies(read)) = &mut completion.outcome {
                     new_sessions.read(current, std::mem::take(&mut read.new_sessions));
                     deletions.read(current, std::mem::take(&mut read.session_deletions));
+                    pairings.read(current, &read.pairings, crate::signing::now_ms());
                     renames.read(current, std::mem::take(&mut read.session_renames));
                     heartbeat_actions.read(current, std::mem::take(&mut read.heartbeat_actions));
                     // So does the update asked of it, and the newest release.
@@ -1047,6 +1102,7 @@ fn own<S, A, C>(
                         &mut sessions,
                         &mut new_sessions,
                         &mut deletions,
+                        &mut pairings,
                         &mut renames,
                         &mut heartbeats,
                         &mut heartbeat_actions,
@@ -1127,6 +1183,38 @@ fn own<S, A, C>(
             Message::SessionDeleted(id, result) => {
                 deletions.deleted(&id, result);
                 follow_deletions(&refresher, &mut deletions, sessions.confirmed(), work, now);
+            }
+            Message::Paired(completion) => {
+                let current = refresher.is_current(completion.revision);
+                match completion.outcome {
+                    Ok(FeedResult::PairingOpened { taken }) => {
+                        pairings.opened(current, Ok(taken), now, crate::signing::now_ms())
+                    }
+                    Ok(FeedResult::PairingReported) => pairings.reported(current, Ok(()), now),
+                    Ok(_) => pairings.reported(current, Err(FeedFailure::Invalid), now),
+                    Err(failure) => {
+                        // Whichever was out: both back off alike.
+                        pairings.opened(current, Err(failure), now, crate::signing::now_ms());
+                        pairings.reported(current, Err(failure), now);
+                    }
+                }
+                follow_pairings(&refresher, &mut pairings, sessions.confirmed(), work, now);
+            }
+            Message::Command(Command::Pairing(action, answer)) => {
+                let signed_in = refresher.account().is_some();
+                let view = signed_in
+                    .then(|| pairings.act(action, crate::signing::now_ms()))
+                    .flatten();
+                let _ = answer.send(view);
+                follow_pairings(&refresher, &mut pairings, sessions.confirmed(), work, now);
+                sessions.set_signing(pairings.listed());
+            }
+            Message::Command(Command::Devices(remove, answer)) => {
+                if let Some(key_id) = remove {
+                    pairings.remove(&key_id);
+                }
+                let _ = answer.send(pairings.devices());
+                sessions.set_signing(pairings.listed());
             }
             Message::SessionDeletionReported(completion) => {
                 let current = refresher.is_current(completion.revision);
@@ -1332,6 +1420,7 @@ fn own<S, A, C>(
                         &mut sessions,
                         &mut new_sessions,
                         &mut deletions,
+                        &mut pairings,
                         &mut renames,
                         &mut heartbeats,
                         &mut heartbeat_actions,
@@ -1355,6 +1444,7 @@ fn own<S, A, C>(
                         &mut sessions,
                         &mut new_sessions,
                         &mut deletions,
+                        &mut pairings,
                         &mut renames,
                         &mut heartbeats,
                         &mut heartbeat_actions,
@@ -1606,7 +1696,9 @@ fn control<S, A, C>(
         | Command::FeedReply(..)
         | Command::SessionMessage(..)
         | Command::MachineEnrol(..)
-        | Command::MachineRevoke(..) => {}
+        | Command::MachineRevoke(..)
+        | Command::Pairing(..)
+        | Command::Devices(..) => {}
         Command::Summarize(session, reply) => {
             refresher.request(&session);
             let _ = reply.send(());
@@ -1726,6 +1818,7 @@ fn rename(
     sessions: &mut SessionSync,
     new_sessions: &mut NewSessionSync,
     deletions: &mut SessionDeletionSync,
+    pairings: &mut PairingSync,
     renames: &mut SessionRenameSync,
     heartbeats: &mut HeartbeatSync,
     heartbeat_actions: &mut HeartbeatActionSync,
@@ -1740,6 +1833,7 @@ fn rename(
     sessions.rename(machine.to_owned(), now);
     new_sessions.rename(machine.to_owned());
     deletions.rename(machine.to_owned());
+    pairings.rename(machine.to_owned());
     renames.rename(machine.to_owned());
     heartbeats.rename(machine.to_owned(), now);
     heartbeat_actions.rename(machine.to_owned());
@@ -1931,6 +2025,33 @@ fn follow_deletions<S, A, C>(
                 }
             },
             None => return,
+        }
+    }
+}
+
+/// Open this machine's pairing at rakumux.com, or report its proposal, when
+/// due. Only while signed in with the account's feed on and rakumux.com
+/// `confirmed` this machine's name.
+fn follow_pairings<S, A, C>(
+    refresher: &StatusRefresher<S, A, C>,
+    pairings: &mut PairingSync,
+    confirmed: bool,
+    work: &Workers<A, C>,
+    now: Duration,
+) where
+    S: StatusStore,
+    A: CredentialStore + 'static,
+    C: WallClock + 'static,
+{
+    let enabled =
+        refresher.account().is_some() && refresher.feed_switch() == Some(true) && confirmed;
+    pairings.set_enabled(enabled);
+    if let Some(request) = pairings.next_work(now, crate::signing::now_ms()) {
+        match refresher.feed_job(request) {
+            Some(job) => {
+                let _ = work.send(Work::Pairing(job));
+            }
+            None => pairings.reported(false, Err(FeedFailure::Unauthorized), now),
         }
     }
 }
@@ -2584,6 +2705,16 @@ where
                 match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
                     Ok(completion) => Message::SessionRenameReported(completion),
                     Err(_) => Message::SessionRenameReported(FeedCompletion {
+                        revision,
+                        outcome: Err(FeedFailure::Unavailable(None)),
+                    }),
+                }
+            }
+            Ok(Work::Pairing(job)) => {
+                let revision = job.revision;
+                match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
+                    Ok(completion) => Message::Paired(completion),
+                    Err(_) => Message::Paired(FeedCompletion {
                         revision,
                         outcome: Err(FeedFailure::Unavailable(None)),
                     }),

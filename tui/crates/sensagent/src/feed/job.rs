@@ -55,6 +55,10 @@ pub(crate) enum FeedResult {
     NewSessionReported,
     /// A session deletion's status was taken.
     SessionDeletionReported,
+    /// A pairing was opened, or (`taken`) another machine's holds its id.
+    PairingOpened { taken: bool },
+    /// A pairing's report was taken.
+    PairingReported,
     /// A session rename's status was taken.
     SessionRenameReported,
     /// rakumux.com took an update's status.
@@ -100,7 +104,9 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
             | FeedRequest::SessionRenameStatus { .. }
             | FeedRequest::UpdateStatus { .. }
             | FeedRequest::Heartbeats { .. }
-            | FeedRequest::HeartbeatActionStatus { .. } => String::new(),
+            | FeedRequest::HeartbeatActionStatus { .. }
+            | FeedRequest::PairingOpen { .. }
+            | FeedRequest::PairingStatus { .. } => String::new(),
         };
         let http = match &self.request {
             FeedRequest::Upload { body, .. } => FeedHttp::Upload(body),
@@ -123,6 +129,8 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
             FeedRequest::UpdateStatus { body } => FeedHttp::UpdateStatus(body),
             FeedRequest::Heartbeats { body } => FeedHttp::Heartbeats(body),
             FeedRequest::HeartbeatActionStatus { body } => FeedHttp::HeartbeatActionStatus(body),
+            FeedRequest::PairingOpen { body } => FeedHttp::PairingOpen(body),
+            FeedRequest::PairingStatus { body } => FeedHttp::PairingStatus(body),
         };
         let outcome = self
             .account
@@ -181,6 +189,11 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
                     FeedRequest::HeartbeatActionStatus { .. } => {
                         super::heartbeat_actions::reported(&reply)
                             .map(|()| FeedResult::HeartbeatActionReported)
+                    }
+                    FeedRequest::PairingOpen { .. } => super::pairings::opened(&reply)
+                        .map(|taken| FeedResult::PairingOpened { taken }),
+                    FeedRequest::PairingStatus { .. } => {
+                        super::pairings::reported(&reply).map(|()| FeedResult::PairingReported)
                     }
                 },
                 Some(Err(error)) => Err(transport(error)),

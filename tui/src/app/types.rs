@@ -419,12 +419,15 @@ pub enum SettingsItem {
     SessionHistory,
     /// Sign in to the Rakumux account (AI session titles, the agent feed).
     Account,
+    /// The devices that sign what rakumux.com asks of this machine.
+    Devices,
 }
 
 impl SettingsItem {
     /// In Settings' order: signing in first, then the rest.
-    pub const ALL: [SettingsItem; 14] = [
+    pub const ALL: [SettingsItem; 15] = [
         SettingsItem::Account,
+        SettingsItem::Devices,
         SettingsItem::Layout,
         SettingsItem::Icons,
         SettingsItem::Tips,
@@ -454,7 +457,7 @@ impl SettingsItem {
             | SettingsItem::SessionHistory
             | SettingsItem::TerminalPanel
             | SettingsItem::TerminalPlacement => "App",
-            SettingsItem::Account => "Account",
+            SettingsItem::Account | SettingsItem::Devices => "Account",
         }
     }
 
@@ -543,6 +546,48 @@ pub struct AuthEmailDialog {
 pub struct AuthCodeDialog {
     pub input: TextInput,
     pub error_message: Option<String>,
+}
+
+/// The paired devices dialog.
+#[derive(Debug, Clone)]
+pub struct DevicesDialog {
+    pub state: DevicesState,
+    /// The devices paired here, as last read.
+    pub devices: Vec<rakumux_sensagent::feed::DeviceView>,
+    pub selected: usize,
+    /// `d` was pressed once on the selected device: a second forgets it.
+    pub removing: bool,
+}
+
+/// Where the paired devices dialog is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DevicesState {
+    /// Reading the devices.
+    Loading,
+    /// The devices listed.
+    List,
+    /// Asking the service for a code.
+    Starting,
+    /// A pairing: its code, then the device to confirm, then how it ended.
+    Pairing(rakumux_sensagent::feed::PairingView),
+    Failed(String),
+}
+
+impl DevicesDialog {
+    /// Waiting for the account service (a spinner shows).
+    pub fn busy(&self) -> bool {
+        matches!(self.state, DevicesState::Loading | DevicesState::Starting)
+    }
+
+    /// A pairing that still waits for a device or the user's answer.
+    pub fn pairing_live(&self) -> bool {
+        use rakumux_sensagent::signing::pairing::PairingState as Signer;
+        matches!(
+            &self.state,
+            DevicesState::Pairing(view)
+                if matches!(view.state, Signer::Open | Signer::Proposed { .. })
+        )
+    }
 }
 
 /// The pairing dialog: what the phone app needs to connect (QR code, URL,
@@ -646,6 +691,9 @@ pub struct WelcomeState {
 #[derive(Debug, Clone)]
 pub enum AppMode {
     Normal,
+    /// Settings → Paired devices: the devices that sign what rakumux.com
+    /// asks of this machine, and pairing one.
+    Devices(DevicesDialog),
     /// Setting up your Sprite for a new session.
     Sprite(SpriteDialog),
     /// The Folders modal: the folder filter.

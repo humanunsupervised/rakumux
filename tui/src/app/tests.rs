@@ -6818,3 +6818,68 @@ async fn star_shows_the_pinned_tab_by_status_whose_rows_order_and_unpin() {
     assert_eq!(h.selected().as_deref(), Some("B"));
     assert_eq!(h.app.focus, Focus::Session);
 }
+
+/// Settings → Paired devices: a pairing's code (with its link) shows, the
+/// device sent with it is confirmed with `y`, and a device is forgotten with
+/// `d` twice.
+#[tokio::test]
+async fn a_device_is_paired_from_settings_and_forgotten() {
+    use rakumux_sensagent::feed::{DeviceView, PairingAction, PairingView};
+    use rakumux_sensagent::signing::pairing::PairingState as Signer;
+    use rakumux_sensagent::signing::KeyFormat;
+    let (mut h, account) = account_harness(testing::FakeAccount::signed_in());
+    let view = |state| PairingView {
+        code: "K7QM-4XPA-9F2D".into(),
+        link: "https://rakumux-sign.com/pair#K7QM-4XPA-9F2D".into(),
+        expires_at: 0,
+        state,
+        opened: true,
+    };
+    h.app.open_devices_dialog();
+    h.app.process_pending();
+    let rows = screen_rows(&mut h, 160, 48).join("\n");
+    assert!(rows.contains("No paired devices."), "{rows}");
+    *account.pairing.lock().unwrap() = Some(view(Signer::Open));
+    h.press(KeyCode::Enter).await;
+    h.app.process_pending();
+    let rows = screen_rows(&mut h, 160, 48).join("\n");
+    assert!(rows.contains("K7QM-4XPA-9F2D"), "{rows}");
+    *account.pairing.lock().unwrap() = Some(view(Signer::Proposed {
+        name: "iPhone".into(),
+        fingerprint: "ab12 · cd34 · 9f0e".into(),
+    }));
+    account_tick(&mut h);
+    let rows = screen_rows(&mut h, 160, 48).join("\n");
+    assert!(rows.contains("Pair iPhone?"), "{rows}");
+    assert!(rows.contains("ab12 · cd34 · 9f0e"), "{rows}");
+    *account.pairing.lock().unwrap() = Some(view(Signer::Paired {
+        name: "iPhone".into(),
+    }));
+    account.devices.lock().unwrap().push(DeviceView {
+        key_id: "a2V5".into(),
+        format: KeyFormat::P256,
+        name: "iPhone".into(),
+        fingerprint: "ab12 · cd34 · 9f0e".into(),
+        paired_at: 1,
+        last_used_at: None,
+    });
+    h.press(KeyCode::Char('y')).await;
+    h.app.process_pending();
+    assert!(account
+        .pairing_asks
+        .lock()
+        .unwrap()
+        .contains(&PairingAction::Answer { yes: true }));
+    let rows = screen_rows(&mut h, 160, 48).join("\n");
+    assert!(rows.contains("Paired iPhone."), "{rows}");
+    h.press(KeyCode::Enter).await;
+    h.app.process_pending();
+    let rows = screen_rows(&mut h, 160, 48).join("\n");
+    assert!(rows.contains("iPhone  key  ab12"), "{rows}");
+    h.press(KeyCode::Char('d')).await;
+    h.press(KeyCode::Char('d')).await;
+    h.app.process_pending();
+    assert!(account.devices.lock().unwrap().is_empty());
+    h.press(KeyCode::Esc).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+}

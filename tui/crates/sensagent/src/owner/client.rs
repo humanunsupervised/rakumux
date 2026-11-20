@@ -267,6 +267,32 @@ impl OwnerClient {
         }
     }
 
+    /// Do `action` with this machine's pairing: the pairing then (`None`
+    /// signed out, or when there's none).
+    pub fn pairing(
+        &self,
+        action: crate::feed::PairingAction,
+    ) -> Result<Option<crate::feed::PairingView>, OwnerError> {
+        match self.request(&OwnerRequest::Pairing { action })? {
+            OwnerResponse::Pairing { pairing } => Ok(pairing),
+            _ => Err(OwnerError::Protocol),
+        }
+    }
+
+    /// The devices paired with this machine, after forgetting the one with
+    /// `remove` when given.
+    pub fn devices(
+        &self,
+        remove: Option<&str>,
+    ) -> Result<Vec<crate::feed::DeviceView>, OwnerError> {
+        match self.request(&OwnerRequest::Devices {
+            remove: remove.map(str::to_owned),
+        })? {
+            OwnerResponse::Devices { devices } => Ok(devices),
+            _ => Err(OwnerError::Protocol),
+        }
+    }
+
     /// Revoke enrolled machine `machine_id`'s credential.
     pub fn machine_revoke(&self, machine_id: &str) -> Result<(), OwnerError> {
         match self.request(&OwnerRequest::MachineRevoke {

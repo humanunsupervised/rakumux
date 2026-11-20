@@ -583,6 +583,305 @@ fn a_session_asked_on_rakumux_com_to_be_deleted_goes_to_its_history_once() {
     daemon.stop();
 }
 
+/// A device paired at this machine (`rakumux devices pair`: the code, its
+/// tag over the device's key, the user's yes) signs what rakumux.com asks;
+/// from then on only what it signed is carried out: an unsigned reply, one
+/// whose text isn't what was signed and an unsigned deletion are refused,
+/// nothing typed or deleted, while the signed reply goes in and the signed
+/// deletion is carried out.
+#[test]
+fn once_a_device_is_paired_only_what_it_signed_is_carried_out() {
+    let world = World::new();
+    world.cloud.state().accepts = vec!["signed_commands"];
+    let mut daemon = world.start_daemon();
+    let client = world.client();
+    let session = world.start_claude(&client);
+    let mut service = world.start_service(1);
+    let machine: Value = serde_json::from_slice(
+        &std::fs::read(world.layout.home.join("sensagent/machine.json")).unwrap(),
+    )
+    .unwrap();
+    let machine_id = machine["id"].as_str().unwrap().to_owned();
+    world.wait("the session list to say it takes signed commands", || {
+        let state = world.cloud.state();
+        state.says("signed_commands")
+            && state.sessions.as_ref().is_some_and(|list| {
+                list["machine_id"] == machine_id.as_str()
+                    && list["paired_devices"] == json!([])
+                    && list["sessions"].as_array().is_some_and(|sessions| {
+                        sessions.iter().any(|s| s["id"] == session.id.as_str())
+                    })
+            })
+    });
+
+    // Pair at the machine: the CLI shows the code; the device sends its key
+    // with the code's tag; the user says yes to its name and fingerprint.
+    let mut pair = world
+        .command(Path::new(TUI))
+        .args(["devices", "pair"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let shown = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let reader = {
+        let shown = shown.clone();
+        let mut stdout = pair.stdout.take().unwrap();
+        std::thread::spawn(move || {
+            let mut buffer = [0u8; 1024];
+            while let Ok(read) = std::io::Read::read(&mut stdout, &mut buffer) {
+                if read == 0 {
+                    break;
+                }
+                shown
+                    .lock()
+                    .unwrap()
+                    .push_str(&String::from_utf8_lossy(&buffer[..read]));
+            }
+        })
+    };
+    let code = || {
+        let shown = shown.lock().unwrap();
+        shown
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("Code  ").map(str::to_owned))
+    };
+    world.wait("the pairing's code", || code().is_some());
+    let code = code().unwrap();
+    let pairing = code[..4].to_owned();
+    world.wait("the pairing opened at rakumux.com", || {
+        world
+            .cloud
+            .state()
+            .pairing
+            .as_ref()
+            .is_some_and(|open| open["pairing"] == pairing.as_str())
+    });
+    let opened = world.cloud.state().pairing.clone().unwrap();
+    assert!(
+        !opened.to_string().contains(&code[5..]),
+        "only the code's first group reaches rakumux.com: {opened}"
+    );
+    let phone = Phone::new();
+    let device = phone.proposed("Test phone");
+    let tag = rakumux_sensagent::signing::pairing::tag(&code, &pairing, &device);
+    world.cloud.state().proposal = Some(json!({
+        "id": ulid(), "pairing": pairing, "device": device, "tag": tag,
+    }));
+    world.wait("the device shown to confirm", || {
+        shown
+            .lock()
+            .unwrap()
+            .contains("A device asks to pair: Test phone")
+    });
+    let fingerprint = rakumux_sensagent::signing::pairing::proposed_fingerprint(&device).unwrap();
+    assert!(shown.lock().unwrap().contains(&fingerprint));
+    std::io::Write::write_all(pair.stdin.as_mut().unwrap(), b"y\n").unwrap();
+    world.wait("the pairing reported", || {
+        !world.cloud.state().pairing_reports.is_empty()
+    });
+    assert_eq!(world.cloud.state().pairing_reports[0]["status"], "paired");
+    let status = pair.wait().unwrap();
+    reader.join().unwrap();
+    assert!(status.success(), "{}", shown.lock().unwrap());
+    assert!(shown.lock().unwrap().contains("Paired Test phone."));
+    world.wait("the session list to name the device", || {
+        world.cloud.state().sessions.as_ref().is_some_and(|list| {
+            list["paired_devices"]
+                == json!([{"key_id": phone.key_id, "format": "p256", "name": "Test phone"}])
+        })
+    });
+
+    // An unsigned reply and one whose text isn't what was signed: refused,
+    // nothing typed. The signed one goes in.
+    world.allow(1);
+    let shown_session = (session.id.as_str(), session.name.as_str());
+    let unsigned = world
+        .cloud
+        .write_reply(shown_session, CONVERSATION, "rm -rf ~ please", &[]);
+    let forged = world
+        .cloud
+        .write_reply(shown_session, CONVERSATION, FIRST, &[]);
+    let signed = world
+        .cloud
+        .write_reply(shown_session, CONVERSATION, FIRST, &[]);
+    {
+        let mut state = world.cloud.state();
+        for (id, text) in [(&forged, "Something else"), (&signed, FIRST)] {
+            let reply = state
+                .replies
+                .iter_mut()
+                .find(|reply| reply.id == *id)
+                .unwrap();
+            let fields = json!({"session": reply.session_id, "entry": reply.entry, "text": text});
+            reply.signed = Some(phone.sign("reply", &machine_id, id, fields));
+        }
+    }
+    let failure = |id: &str| {
+        world
+            .cloud
+            .state()
+            .reports_for(id)
+            .first()
+            .and_then(|report| report.failure.clone())
+    };
+    world.wait("the unsigned and forged replies refused", || {
+        failure(&unsigned).is_some() && failure(&forged).is_some()
+    });
+    assert_eq!(failure(&unsigned).as_deref(), Some("unsigned"));
+    assert_eq!(failure(&forged).as_deref(), Some("bad_signature"));
+    world.wait("the signed reply typed in", || world.received().len() == 1);
+    world.wait("the signed reply delivered", || world.delivered(&signed));
+    assert_eq!(world.received().len(), 1, "{}", world.diagnostics());
+
+    // Deletions likewise: refused unsigned, carried out signed.
+    let refused = world.cloud.ask_deletion(MACHINE, session.id.as_str());
+    let deletion = world.cloud.ask_deletion(MACHINE, session.id.as_str());
+    {
+        let mut state = world.cloud.state();
+        let asked = state
+            .deletions
+            .iter_mut()
+            .find(|asked| asked["id"] == deletion.as_str())
+            .unwrap();
+        asked["signed"] = phone.sign(
+            "delete_session",
+            &machine_id,
+            &deletion,
+            json!({"session": session.id.as_str()}),
+        );
+    }
+    let reported = |id: &str| -> Option<Value> {
+        world
+            .cloud
+            .state()
+            .deletion_reports
+            .iter()
+            .find(|report| report["id"] == id)
+            .cloned()
+    };
+    world.wait("both deletions reported", || {
+        reported(&refused).is_some() && reported(&deletion).is_some()
+    });
+    assert_eq!(reported(&refused).unwrap()["failure"], "unsigned");
+    assert_eq!(
+        reported(&deletion).unwrap()["status"],
+        "deleted",
+        "{}",
+        world.diagnostics()
+    );
+    assert!(client.get(&session.id).is_err(), "{}", world.diagnostics());
+
+    // The machine's log says what became of each: the phone signed what was
+    // carried out, and the unsigned ones were refused.
+    let log = world
+        .command(Path::new(TUI))
+        .args(["devices", "log", "--json"])
+        .stdout(Stdio::piped())
+        .output()
+        .unwrap();
+    assert!(log.status.success());
+    let log: Value = serde_json::from_slice(&log.stdout).unwrap();
+    let entry = |id: &str| {
+        log["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["id"] == id)
+            .cloned()
+            .unwrap_or_else(|| panic!("{id} isn't in the log: {log}"))
+    };
+    assert_eq!(entry(&deletion)["outcome"], "accepted");
+    assert_eq!(entry(&deletion)["name"], "Test phone");
+    assert_eq!(entry(&deletion)["kind"], "delete_session");
+    assert_eq!(entry(&refused)["outcome"], "unsigned");
+    let text = world
+        .command(Path::new(TUI))
+        .args(["devices", "log"])
+        .stdout(Stdio::piped())
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&text.stdout);
+    assert!(
+        text.contains("delete_session  accepted  Test phone"),
+        "{text}"
+    );
+
+    // Forgotten, the machine takes unsigned commands again.
+    let forget = world
+        .command(Path::new(TUI))
+        .args(["devices", "rm", "Test phone"])
+        .stdout(Stdio::piped())
+        .output()
+        .unwrap();
+    assert!(forget.status.success());
+    world.wait("the session list to name no device", || {
+        world
+            .cloud
+            .state()
+            .sessions
+            .as_ref()
+            .is_some_and(|list| list["paired_devices"] == json!([]))
+    });
+    service.stop();
+    let _ = client.shutdown();
+    daemon.stop();
+}
+
+/// The phone app's key, as the test holds it: signs commands itself.
+struct Phone {
+    key: ring::signature::EcdsaKeyPair,
+    key_id: String,
+}
+
+impl Phone {
+    fn new() -> Self {
+        use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_ASN1_SIGNING};
+        let rng = ring::rand::SystemRandom::new();
+        let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng).unwrap();
+        let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, pkcs8.as_ref(), &rng)
+            .unwrap();
+        Self {
+            key,
+            key_id: b64(ulid().as_bytes()),
+        }
+    }
+
+    fn proposed(&self, name: &str) -> rakumux_sensagent::signing::pairing::ProposedDevice {
+        use ring::signature::KeyPair;
+        rakumux_sensagent::signing::pairing::ProposedDevice {
+            key_id: self.key_id.clone(),
+            format: rakumux_sensagent::signing::KeyFormat::P256,
+            public_key: b64(self.key.public_key().as_ref()),
+            name: name.into(),
+        }
+    }
+
+    /// `fields` as a command of `kind` for request `id` to machine
+    /// `machine`, signed now (`signedCommand`).
+    fn sign(&self, kind: &str, machine: &str, id: &str, fields: Value) -> Value {
+        let now = fake_cloud::now_ms();
+        let mut command = json!({"v": 1, "kind": kind, "machine": machine, "id": id,
+            "at": now, "expires": now + 10 * 60_000});
+        command
+            .as_object_mut()
+            .unwrap()
+            .extend(fields.as_object().unwrap().clone());
+        let bytes = serde_json::to_vec(&command).unwrap();
+        let signature = self
+            .key
+            .sign(&ring::rand::SystemRandom::new(), &bytes)
+            .unwrap();
+        json!({"device": self.key_id, "command": b64(&bytes), "signature": b64(signature.as_ref())})
+    }
+}
+
+fn b64(bytes: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+}
+
 /// A security checkpoint in front of rakumux.com (an HTML 403) is an outage,
 /// not the cloud's refusal: the report that met it is sent again.
 #[test]

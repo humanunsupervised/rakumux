@@ -31,6 +31,7 @@ mod auto_update;
 pub mod config;
 mod connection;
 mod detail;
+mod devices;
 pub mod drawer;
 mod feature_flags;
 pub mod feed;
@@ -330,6 +331,10 @@ pub struct App {
     account_check_at: Option<Instant>,
     /// When to ask where a sign-in is up to; a question is outstanding.
     sign_in_poll_at: Option<Instant>,
+    /// When the paired devices dialog's pairing is next read, and whether a
+    /// read is out.
+    devices_poll_at: Option<Instant>,
+    devices_polling: bool,
     sign_in_polling: bool,
     /// When to read the live sessions' AI status next; a read is out; its
     /// generation (a newer one drops a late answer).
@@ -505,6 +510,8 @@ impl App {
             account_checking: false,
             account_check_at: None,
             sign_in_poll_at: None,
+            devices_poll_at: None,
+            devices_polling: false,
             sign_in_polling: false,
             statuses_at: None,
             statuses_busy: false,
@@ -998,6 +1005,11 @@ impl App {
                     "Restart the Rakumux server in place with this build, e.g. after an update: sessions and their programs keep running and every window reconnects. Same as `rakumux daemon restart`.",
                 )
             }
+            SettingsItem::Devices => (
+                "Paired devices",
+                "Pair · …".into(),
+                "The browsers and phones that sign what rakumux.com asks of this machine. Once one is paired, this machine carries out replies, new sessions, deletions, renames and updates from rakumux.com only when a paired device signed them, so nobody who can write to rakumux.com can make it act. Same as `rakumux devices pair`.",
+            ),
             SettingsItem::Account => {
                 let value = match &self.account {
                     AccountStatus::SignedIn(account) => account.name().to_string(),
@@ -1106,6 +1118,7 @@ impl App {
                 AppMode::Upgrade(d) => d.checking || d.installing,
                 AppMode::Pairing(d) => d.busy(),
                 AppMode::Account(d) => d.busy(),
+                AppMode::Devices(d) => d.busy(),
                 _ => false,
             }
     }
@@ -1131,6 +1144,7 @@ impl App {
             }
         }
         self.account_timers(now);
+        self.devices_timers(now);
         self.feed_timers(now);
         self.beats_timers(now);
         self.rtop_timers(now);
@@ -1216,6 +1230,8 @@ impl App {
             AppEvent::Heartbeats { generation, result } => self.on_heartbeats(generation, result),
             AppEvent::HeartbeatDone { result } => self.on_heartbeat_done(result),
             AppEvent::SignIn(result) => self.on_sign_in(result),
+            AppEvent::Devices(result) => self.on_devices(result),
+            AppEvent::DevicePairing(result) => self.on_device_pairing(result),
             AppEvent::SignInCancelled(result) => {
                 if let Err(error) = result {
                     self.set_status(format!("Couldn't cancel the sign-in: {error}"));

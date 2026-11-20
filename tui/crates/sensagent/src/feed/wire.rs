@@ -157,6 +157,10 @@ pub(crate) enum FeedRequest {
     Heartbeats { body: Vec<u8> },
     /// Say how a heartbeat action asked for on rakumux.com went, as `body`.
     HeartbeatActionStatus { body: Vec<u8> },
+    /// Open a pairing at rakumux.com, as `body`.
+    PairingOpen { body: Vec<u8> },
+    /// Say what became of a pairing's proposal, as `body`.
+    PairingStatus { body: Vec<u8> },
 }
 
 impl FeedRequest {
@@ -368,17 +372,51 @@ struct SessionsUpload<'a> {
     capabilities: &'a [&'a str],
     #[serde(skip_serializing_if = "Option::is_none")]
     rakumux_version: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    paired_devices: Option<&'a [ListedDevice]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    machine_id: Option<&'a str>,
+}
+
+/// A device paired with this machine, as its session list names it
+/// (`pairedDevice`): never its public key.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct ListedDevice {
+    pub key_id: String,
+    pub format: crate::signing::KeyFormat,
+    pub name: String,
+}
+
+/// What a session list says of signing, to a cloud that accepts it: this
+/// machine's id and its paired devices.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ListedSigning {
+    pub machine_id: String,
+    pub devices: Vec<ListedDevice>,
 }
 
 /// This machine's session list as `sessions-upload`, with what else it
 /// handles (`capabilities`, left out when nothing); `None` only when it
 /// can't be encoded.
+#[cfg(test)]
 pub(crate) fn sessions_upload(
     machine: &str,
     sessions: &[super::sessions::SessionState],
     at: i64,
     capabilities: &[&str],
     rakumux_version: Option<&str>,
+) -> Option<FeedRequest> {
+    signed_sessions_upload(machine, sessions, at, capabilities, rakumux_version, None)
+}
+
+/// [`sessions_upload`], with what it says of signing when given.
+pub(crate) fn signed_sessions_upload(
+    machine: &str,
+    sessions: &[super::sessions::SessionState],
+    at: i64,
+    capabilities: &[&str],
+    rakumux_version: Option<&str>,
+    signing: Option<&ListedSigning>,
 ) -> Option<FeedRequest> {
     let body = serde_json::to_vec(&SessionsUpload {
         version: 1,
@@ -387,6 +425,8 @@ pub(crate) fn sessions_upload(
         at: at.max(1_577_836_800_000),
         capabilities,
         rakumux_version,
+        paired_devices: signing.map(|signing| signing.devices.as_slice()),
+        machine_id: signing.map(|signing| signing.machine_id.as_str()),
     })
     .ok()?;
     Some(FeedRequest::Sessions { body })
@@ -418,6 +458,9 @@ pub(crate) struct SessionsStored {
     /// It takes this machine's heartbeats, and which sessions are their runs
     /// (`accepts` has `heartbeats`).
     pub heartbeats: bool,
+    /// It takes this machine's id and paired devices (`accepts` has
+    /// `signed_commands`).
+    pub signed_commands: bool,
 }
 
 /// How many sessions rakumux.com holds for this machine now, and whether it
@@ -438,6 +481,7 @@ pub(crate) fn sessions_stored(reply: &FeedHttpReply) -> Result<SessionsStored, F
         output: stored.accepts.iter().any(|name| name == "output"),
         choices: stored.accepts.iter().any(|name| name == "choices"),
         heartbeats: stored.accepts.iter().any(|name| name == "heartbeats"),
+        signed_commands: stored.accepts.iter().any(|name| name == "signed_commands"),
     })
 }
 
@@ -806,6 +850,9 @@ struct WireReply {
     /// (see [`choice_answer`]).
     #[serde(default)]
     choice: Option<serde_json::Value>,
+    /// What a paired device signed for it (`signedCommand`), read as any JSON.
+    #[serde(default)]
+    signed: Option<serde_json::Value>,
     status: ReplyStatus,
     #[serde(default)]
     failure: Option<ReplyFailure>,
@@ -990,6 +1037,33 @@ pub(crate) enum Received {
 }
 
 impl WireReply {
+    /// Its signature, with the fields its command must say as they came.
+    fn signature(&mut self) -> crate::signing::ReplySignature {
+        let names = match &self.attachments {
+            Some(serde_json::Value::Array(files)) => files
+                .iter()
+                .map(|file| {
+                    file.get("name")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned()
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        crate::signing::ReplySignature {
+            signature: crate::signing::Signed::of(self.signed.take()),
+            fields: vec![
+                ("session", self.session.id.as_str().into()),
+                ("entry", self.entry.clone().into()),
+                ("text", self.text.as_str().into()),
+                ("answer", self.answer.clone().unwrap_or_default()),
+                ("choice", self.choice.clone().unwrap_or_default()),
+            ],
+            names,
+        }
+    }
+
     /// Within the contract's bounds, stripped of anything a terminal would act on.
     fn checked(mut self) -> Option<Received> {
         let attachments = attachments(self.attachments.take())?;
@@ -1120,6 +1194,9 @@ struct WireReplies {
     /// The update asked of this machine (`updates`).
     #[serde(default)]
     updates: Option<serde_json::Value>,
+    /// The proposal sent for this machine's open pairing (`pairings`).
+    #[serde(default)]
+    pairings: Option<serde_json::Value>,
 }
 
 /// Replies as read: those that fit the contract (replies to entries, and
@@ -1130,6 +1207,10 @@ struct WireReplies {
 pub(crate) struct RepliesRead {
     pub replies: Vec<FeedReply>,
     pub messages: Vec<SessionMessage>,
+    /// Each reply's and session message's signature, by id.
+    pub signatures: std::collections::HashMap<String, crate::signing::ReplySignature>,
+    /// The proposal sent for this machine's open pairing, when one was.
+    pub pairings: Vec<crate::signing::pairing::Proposal>,
     /// The greatest seq of the page's rows, those left out as off the
     /// contract too, so a page of rows that don't fit can't stall reads.
     pub page_seq: u64,
@@ -1189,15 +1270,22 @@ pub(crate) fn replies(reply: &FeedHttpReply) -> Result<RepliesRead, FeedFailure>
         .unwrap_or(0);
     let mut replies = Vec::new();
     let mut messages = Vec::new();
-    for received in page.replies.into_iter().filter_map(WireReply::checked) {
-        match received {
-            Received::Reply(reply) => replies.push(reply),
-            Received::Message(message) => messages.push(message),
+    let mut signatures = std::collections::HashMap::new();
+    for mut row in page.replies {
+        let signature = row.signature();
+        let id = row.id.clone();
+        match row.checked() {
+            Some(Received::Reply(reply)) => replies.push(reply),
+            Some(Received::Message(message)) => messages.push(message),
+            None => continue,
         }
+        signatures.insert(id, signature);
     }
     Ok(RepliesRead {
         replies,
         messages,
+        signatures,
+        pairings: crate::signing::pairing::proposals(page.pairings),
         page_seq,
         latest_seq: page.latest_seq,
         more: page.more,

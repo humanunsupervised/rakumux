@@ -35,6 +35,8 @@ const FEED_SESSION_RENAME_STATUS_PATH: &str = "/api/v1/feed/session-renames/stat
 const FEED_HEARTBEATS_PATH: &str = "/api/v1/feed/heartbeats";
 const FEED_HEARTBEAT_ACTION_STATUS_PATH: &str = "/api/v1/feed/heartbeat-actions/status";
 const FEED_UPDATE_STATUS_PATH: &str = "/api/v1/feed/updates/status";
+const FEED_PAIRINGS_PATH: &str = "/api/v1/feed/pairings";
+const FEED_PAIRING_STATUS_PATH: &str = "/api/v1/feed/pairings/status";
 const FEED_REALTIME_PATH: &str = "/api/v1/feed/realtime";
 /// Followed by `/{id}`, a ULID.
 const FEED_ATTACHMENTS_PATH: &str = "/api/v1/feed/replies/attachments";
@@ -71,6 +73,8 @@ pub struct CloudAIConfig {
     feed_session_rename_status: Url,
     feed_heartbeats: Url,
     feed_heartbeat_action_status: Url,
+    feed_pairings: Url,
+    feed_pairing_status: Url,
     feed_update_status: Url,
     feed_attachments: Url,
     feed_realtime: Url,
@@ -182,6 +186,10 @@ pub(crate) enum FeedHttp<'a> {
     HeartbeatActionStatus(&'a [u8]),
     /// `POST /api/v1/feed/updates/status` with an update's status.
     UpdateStatus(&'a [u8]),
+    /// `POST /api/v1/feed/pairings`: open a pairing.
+    PairingOpen(&'a [u8]),
+    /// `POST /api/v1/feed/pairings/status` with a pairing proposal's status.
+    PairingStatus(&'a [u8]),
     /// `GET /api/v1/feed/replies/attachments/{id}`: a file of `size` bytes.
     Attachment { id: &'a str, size: u64 },
     /// `GET /api/v1/feed/realtime`: where to connect to be poked.
@@ -260,6 +268,8 @@ impl CloudAIConfig {
         let feed_heartbeats = path(FEED_HEARTBEATS_PATH);
         let feed_heartbeat_action_status = path(FEED_HEARTBEAT_ACTION_STATUS_PATH);
         let feed_update_status = path(FEED_UPDATE_STATUS_PATH);
+        let feed_pairings = path(FEED_PAIRINGS_PATH);
+        let feed_pairing_status = path(FEED_PAIRING_STATUS_PATH);
         let feed_realtime = path(FEED_REALTIME_PATH);
         let feed_attachments = path(FEED_ATTACHMENTS_PATH);
         let (machine_credentials, machine_token) =
@@ -284,6 +294,8 @@ impl CloudAIConfig {
             feed_heartbeats,
             feed_heartbeat_action_status,
             feed_update_status,
+            feed_pairings,
+            feed_pairing_status,
             feed_attachments,
             feed_realtime,
             machine_credentials,
@@ -522,7 +534,9 @@ impl CloudAIClient {
             | FeedHttp::SessionRenameStatus(body)
             | FeedHttp::Heartbeats(body)
             | FeedHttp::HeartbeatActionStatus(body)
-            | FeedHttp::UpdateStatus(body) => {
+            | FeedHttp::UpdateStatus(body)
+            | FeedHttp::PairingOpen(body)
+            | FeedHttp::PairingStatus(body) => {
                 let url = match request {
                     FeedHttp::Messages(_) => &self.config.feed_messages,
                     FeedHttp::ReplyUpload(_) => &self.config.feed_replies,
@@ -536,6 +550,8 @@ impl CloudAIClient {
                     FeedHttp::Heartbeats(_) => &self.config.feed_heartbeats,
                     FeedHttp::HeartbeatActionStatus(_) => &self.config.feed_heartbeat_action_status,
                     FeedHttp::UpdateStatus(_) => &self.config.feed_update_status,
+                    FeedHttp::PairingOpen(_) => &self.config.feed_pairings,
+                    FeedHttp::PairingStatus(_) => &self.config.feed_pairing_status,
                     _ => &self.config.feed_entries,
                 };
                 let mut outgoing = Request::new(Method::POST, url.clone());

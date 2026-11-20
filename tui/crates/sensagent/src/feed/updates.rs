@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use super::wire::{self, FeedFailure, FeedRequest};
 use crate::cloud::FeedHttpReply;
 use crate::service::UpdateFailure;
+use crate::signing::{Expected, SharedGuard, Signature, Signed};
 
 /// What this machine says with its session list when it installs releases
 /// asked of it on rakumux.com (`capabilities`).
@@ -65,6 +66,8 @@ pub(crate) fn release(value: Option<serde_json::Value>) -> Option<String> {
 pub(crate) struct MachineUpdateAsk {
     pub id: String,
     pub version: String,
+    /// What a paired device signed for it.
+    pub signed: Signature,
 }
 
 /// The replies read's `updates`: the first one within the contract.
@@ -73,6 +76,8 @@ pub(crate) fn asks(value: Option<serde_json::Value>) -> Vec<MachineUpdateAsk> {
     struct Wire {
         id: String,
         version: String,
+        #[serde(default)]
+        signed: Option<serde_json::Value>,
     }
     let Some(serde_json::Value::Array(rows)) = value else {
         return Vec::new();
@@ -84,6 +89,7 @@ pub(crate) fn asks(value: Option<serde_json::Value>) -> Vec<MachineUpdateAsk> {
         .map(|ask| MachineUpdateAsk {
             id: ask.id,
             version: ask.version,
+            signed: Signed::of(ask.signed),
         })
         .collect()
 }
@@ -188,6 +194,8 @@ pub(crate) struct UpdateSync {
     reporting: bool,
     retry_at: Duration,
     retry: Duration,
+    /// Checks what's asked against the devices paired here.
+    guard: SharedGuard,
 }
 
 impl UpdateSync {
@@ -212,7 +220,14 @@ impl UpdateSync {
             reporting: false,
             retry_at: Duration::ZERO,
             retry: RETRY_MIN,
+            guard: crate::signing::unpaired(),
         }
+    }
+
+    /// Check updates asked with the service's `guard`.
+    pub fn signing(mut self, guard: SharedGuard) -> Self {
+        self.guard = guard;
+        self
     }
 
     /// Follow the account: signed in with its feed on and this machine's name
@@ -248,6 +263,25 @@ impl UpdateSync {
         }
         if self.installing.is_none() && self.hand_over.is_none() {
             if let Some(ask) = self.asked.take().filter(|ask| !self.handled(&ask.id)) {
+                let expected = Expected {
+                    kind: "update",
+                    id: &ask.id,
+                    fields: vec![("version", ask.version.as_str().into())],
+                };
+                let allowed = self.guard.borrow_mut().allows(
+                    &ask.signed,
+                    &expected,
+                    crate::signing::now_ms(),
+                );
+                if let Err(refusal) = allowed {
+                    self.decided(
+                        &ask.id,
+                        Outcome::Failed {
+                            failure: refusal.into(),
+                        },
+                    );
+                    return self.next_work(now);
+                }
                 // Never installed again from now on, whatever happens meanwhile.
                 self.decided(&ask.id, Outcome::Installing);
                 self.installing = Some(ask.id.clone());

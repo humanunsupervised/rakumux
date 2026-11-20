@@ -322,7 +322,9 @@ impl FeedSync {
                 | FeedResult::SessionRenameReported
                 | FeedResult::UpdateReported
                 | FeedResult::HeartbeatsStored
-                | FeedResult::HeartbeatActionReported,
+                | FeedResult::HeartbeatActionReported
+                | FeedResult::PairingOpened { .. }
+                | FeedResult::PairingReported,
             ) => {}
             Err(failure) => self.fail(failure, now),
         }

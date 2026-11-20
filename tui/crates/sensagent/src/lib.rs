@@ -13,6 +13,7 @@ pub mod feed;
 pub mod owner;
 pub mod refresh;
 pub mod service;
+pub mod signing;
 pub mod source;
 pub mod status;
 

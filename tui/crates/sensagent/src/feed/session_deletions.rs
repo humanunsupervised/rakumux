@@ -25,6 +25,7 @@ use super::new_sessions::kept::Kept;
 use super::new_sessions::listed_here;
 use super::wire::{self, FeedFailure, FeedRequest};
 use crate::cloud::FeedHttpReply;
+use crate::signing::{Expected, Refusal, SharedGuard, Signature, Signed};
 
 /// What this machine says with its session list when it deletes sessions
 /// asked of it on rakumux.com (`capabilities`), so the cloud sends it those.
@@ -44,6 +45,8 @@ pub(crate) struct DeletionAsk {
     pub id: String,
     pub machine: String,
     pub session: SessionId,
+    /// What a paired device signed for it.
+    pub signed: Signature,
 }
 
 #[derive(Deserialize)]
@@ -52,6 +55,8 @@ struct WireAsk {
     machine: String,
     session: String,
     status: String,
+    #[serde(default)]
+    signed: Option<serde_json::Value>,
 }
 
 impl WireAsk {
@@ -63,6 +68,7 @@ impl WireAsk {
             id: self.id,
             machine: self.machine,
             session: SessionId::from_string(self.session),
+            signed: Signed::of(self.signed),
         })
     }
 }
@@ -88,6 +94,22 @@ pub(crate) enum DeletionFailure {
     NotListed,
     /// The daemon couldn't delete it.
     Refused,
+    /// Its signature (contract `signatureFailure`).
+    Unsigned,
+    UnknownDevice,
+    BadSignature,
+    Expired,
+}
+
+impl From<Refusal> for DeletionFailure {
+    fn from(refusal: Refusal) -> Self {
+        match refusal {
+            Refusal::Unsigned => Self::Unsigned,
+            Refusal::UnknownDevice => Self::UnknownDevice,
+            Refusal::BadSignature => Self::BadSignature,
+            Refusal::Expired => Self::Expired,
+        }
+    }
 }
 
 /// What became of a request, as reported (contract
@@ -171,6 +193,8 @@ pub(crate) struct SessionDeletionSync {
     reporting: bool,
     retry_at: Duration,
     retry: Duration,
+    /// Checks what's asked against the devices paired here.
+    guard: SharedGuard,
 }
 
 impl SessionDeletionSync {
@@ -187,7 +211,14 @@ impl SessionDeletionSync {
             reporting: false,
             retry_at: Duration::ZERO,
             retry: RETRY_MIN,
+            guard: crate::signing::unpaired(),
         }
+    }
+
+    /// Check requests with the service's `guard`.
+    pub fn signing(mut self, guard: SharedGuard) -> Self {
+        self.guard = guard;
+        self
     }
 
     /// Follow the account: signed in with its feed on and this machine's
@@ -256,6 +287,25 @@ impl SessionDeletionSync {
                 .cloned()
                 .collect();
             for ask in waiting {
+                let expected = Expected {
+                    kind: "delete_session",
+                    id: &ask.id,
+                    fields: vec![("session", ask.session.as_str().into())],
+                };
+                let allowed = self.guard.borrow_mut().allows(
+                    &ask.signed,
+                    &expected,
+                    crate::signing::now_ms(),
+                );
+                if let Err(refusal) = allowed {
+                    self.kept.decided(
+                        &ask.id,
+                        Outcome::Failed {
+                            failure: refusal.into(),
+                        },
+                    );
+                    continue;
+                }
                 if !self.listed.contains(&ask.session) {
                     self.kept.decided(
                         &ask.id,
@@ -400,6 +450,60 @@ mod tests {
         let report = report_of(sync(false).next_work(NOW));
         assert_eq!(report["status"], "failed");
         assert_eq!(report["failure"], "not_listed");
+    }
+
+    #[test]
+    fn once_a_device_is_paired_only_what_it_signed_is_deleted() {
+        use crate::signing::testing::{guard, Device};
+        use crate::signing::KeyFormat;
+        const MACHINE_ID: &str = "01K8C2B3C4D5E6F7G8H9J0K1M2";
+        let phone = Device::new(KeyFormat::P256);
+        let stranger = Device::new(KeyFormat::P256);
+        let row = |signed: serde_json::Value| {
+            Some(json!([{
+                "id": REQUEST, "machine": "studio", "session": SESSION, "status": "pending",
+                "created_at": 1, "status_at": 1, "signed": signed,
+            }]))
+        };
+        let run = |signed: serde_json::Value| {
+            let mut sync = SessionDeletionSync::new("studio".into(), None)
+                .signing(guard(MACHINE_ID, &[&phone]));
+            sync.set_enabled(true, Duration::ZERO);
+            sync.listed
+                .insert(SessionId::from_string(SESSION.to_owned()));
+            sync.read(true, asks(row(signed)));
+            sync.next_work(NOW)
+        };
+        let signed = |device: &Device, session: &str| {
+            device.signed_now(
+                "delete_session",
+                MACHINE_ID,
+                REQUEST,
+                json!({ "session": session }),
+            )
+        };
+        assert!(matches!(
+            run(signed(&phone, SESSION)),
+            Some(DeletionWork::Delete { .. })
+        ));
+        assert_eq!(
+            report_of(run(serde_json::Value::Null))["failure"],
+            "unsigned"
+        );
+        assert_eq!(
+            report_of(run(signed(&stranger, SESSION)))["failure"],
+            "unknown_device"
+        );
+        // Signed for another session: never this one.
+        let other = "01K89ZQ4D2F6H8J0K2M4N6P8R1";
+        assert_eq!(
+            report_of(run(signed(&phone, other)))["failure"],
+            "bad_signature"
+        );
+        assert_eq!(
+            report_of(run(json!({ "device": "x" })))["failure"],
+            "bad_signature"
+        );
     }
 
     #[test]

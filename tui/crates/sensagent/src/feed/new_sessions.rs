@@ -32,6 +32,7 @@ use session_core::model::{ScopeRoot, SessionStatus, SessionView};
 
 use super::wire::{self, FeedFailure, FeedRequest};
 use crate::cloud::FeedHttpReply;
+use crate::signing::{Expected, Refusal, SharedGuard, Signature, Signed};
 
 pub(super) mod kept;
 use kept::Kept;
@@ -68,6 +69,22 @@ pub(crate) enum Agent {
 }
 
 impl Agent {
+    /// Its name in the contract (`agent`).
+    fn name(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "claude-code",
+            Self::Codex => "codex",
+            Self::OpenCode => "opencode",
+            Self::Copilot => "copilot",
+            Self::CursorAgent => "cursor-agent",
+            Self::Pi => "pi",
+            Self::Grok => "grok",
+            Self::Kimi => "kimi",
+            Self::Droid => "droid",
+            Self::Amp => "amp",
+        }
+    }
+
     fn of(name: &str) -> Option<Self> {
         match name {
             "claude-code" => Some(Self::ClaudeCode),
@@ -114,6 +131,8 @@ pub(crate) struct NewSessionAsk {
     pub folder_session: Option<SessionId>,
     /// The agent to start in its shell; none: the shell alone.
     pub agent: Option<Agent>,
+    /// What a paired device signed for it.
+    pub signed: Signature,
 }
 
 #[derive(Deserialize)]
@@ -126,6 +145,8 @@ struct WireAsk {
     #[serde(default)]
     agent: Option<String>,
     status: String,
+    #[serde(default)]
+    signed: Option<serde_json::Value>,
 }
 
 impl WireAsk {
@@ -140,6 +161,7 @@ impl WireAsk {
         if !fits || !one_line(&machine, 64, 256) {
             return None;
         }
+
         let agent = match self.agent {
             Some(name) => Some(Agent::of(&name)?),
             None => None,
@@ -155,6 +177,7 @@ impl WireAsk {
             folder,
             folder_session,
             agent,
+            signed: Signed::of(self.signed),
         })
     }
 }
@@ -192,6 +215,22 @@ pub(crate) enum NewSessionFailure {
     FolderUnknown,
     /// The daemon couldn't start it.
     Refused,
+    /// Its signature (contract `signatureFailure`).
+    Unsigned,
+    UnknownDevice,
+    BadSignature,
+    Expired,
+}
+
+impl From<Refusal> for NewSessionFailure {
+    fn from(refusal: Refusal) -> Self {
+        match refusal {
+            Refusal::Unsigned => Self::Unsigned,
+            Refusal::UnknownDevice => Self::UnknownDevice,
+            Refusal::BadSignature => Self::BadSignature,
+            Refusal::Expired => Self::Expired,
+        }
+    }
 }
 
 /// The session started for a request (contract `createdSession`).
@@ -307,6 +346,8 @@ pub(crate) struct NewSessionSync {
     reporting: bool,
     retry_at: Duration,
     retry: Duration,
+    /// Checks what's asked against the devices paired here.
+    guard: SharedGuard,
 }
 
 impl NewSessionSync {
@@ -323,7 +364,14 @@ impl NewSessionSync {
             reporting: false,
             retry_at: Duration::ZERO,
             retry: RETRY_MIN,
+            guard: crate::signing::unpaired(),
         }
+    }
+
+    /// Check requests with the service's `guard`.
+    pub fn signing(mut self, guard: SharedGuard) -> Self {
+        self.guard = guard;
+        self
     }
 
     /// Follow the account: signed in with its feed on and this
@@ -394,6 +442,27 @@ impl NewSessionSync {
                 .cloned()
                 .collect();
             for ask in waiting {
+                let expected = Expected {
+                    kind: "new_session",
+                    id: &ask.id,
+                    fields: vec![
+                        ("folder", ask.folder.as_str().into()),
+                        (
+                            "folder_session",
+                            ask.folder_session.as_ref().map(SessionId::as_str).into(),
+                        ),
+                        ("agent", ask.agent.map(Agent::name).into()),
+                    ],
+                };
+                let allowed = self.guard.borrow_mut().allows(
+                    &ask.signed,
+                    &expected,
+                    crate::signing::now_ms(),
+                );
+                if let Err(refusal) = allowed {
+                    self.kept.decided(&ask.id, failed(refusal.into()));
+                    continue;
+                }
                 let Some(scope) = self.folder(&ask) else {
                     self.kept
                         .decided(&ask.id, failed(NewSessionFailure::FolderUnknown));
@@ -454,6 +523,7 @@ impl NewSessionSync {
         let outcome = match result {
             Ok(view) => {
                 self.observe(&view);
+                self.guard.borrow_mut().started(id, view.id.as_str());
                 let name = wire::label(&view.name, 64).unwrap_or_else(|| "session".into());
                 Outcome::Created {
                     session: Started {

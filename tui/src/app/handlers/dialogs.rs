@@ -10,6 +10,8 @@ pub async fn handle_dialog_key(app: &mut App, key: KeyEvent) -> AppResult {
         // Ctrl-c always closes the dialog (it never quits from one).
         if matches!(app.mode, AppMode::Account(_)) {
             app.close_account_dialog();
+        } else if matches!(app.mode, AppMode::Devices(_)) {
+            app.close_devices_dialog();
         } else if !dialog_busy(&app.mode) {
             app.mode = AppMode::Normal;
         }
@@ -32,6 +34,7 @@ pub async fn handle_dialog_key(app: &mut App, key: KeyEvent) -> AppResult {
         AppMode::Sprite(_) => handle_sprite_key(app, key),
         AppMode::Pairing(_) => handle_pairing_key(app, key),
         AppMode::Account(_) => handle_account_key(app, key),
+        AppMode::Devices(_) => handle_devices_key(app, key),
         AppMode::Auth(_) | AppMode::AuthEmail(_) | AppMode::AuthCode(_) => {
             super::auth::handle_auth_key(app, key).await
         }
@@ -220,6 +223,60 @@ fn handle_pairing_key(app: &mut App, key: KeyEvent) {
             if app.phone_enabled == Some(true) =>
         {
             app.turn_phone_access_off()
+        }
+        _ => {}
+    }
+}
+
+/// The paired devices dialog: `n` (Enter with none) pairs a device, `↑`/`↓`
+/// select, `d` twice forgets the selected one; while a device waits for an
+/// answer `y` pairs it and `n` doesn't; Enter after a pairing ended goes back
+/// to the list; Esc (`q`) closes, cancelling a pairing under way.
+fn handle_devices_key(app: &mut App, key: KeyEvent) {
+    use crate::app::types::DevicesState;
+    use rakumux_sensagent::signing::pairing::PairingState as Signer;
+    let AppMode::Devices(dialog) = &mut app.mode else {
+        return;
+    };
+    if matches!(key.code, KeyCode::Esc | KeyCode::Char('q')) {
+        app.close_devices_dialog();
+        return;
+    }
+    if dialog.busy() {
+        return;
+    }
+    match (&dialog.state, key.code) {
+        (DevicesState::Pairing(view), code) => match (&view.state, code) {
+            (Signer::Proposed { .. }, KeyCode::Char('y') | KeyCode::Char('Y')) => {
+                app.answer_device(true)
+            }
+            (Signer::Proposed { .. }, KeyCode::Char('n') | KeyCode::Char('N')) => {
+                app.answer_device(false)
+            }
+            (Signer::Paired { .. } | Signer::Failed { .. }, KeyCode::Enter) => {
+                app.open_devices_dialog()
+            }
+            _ => {}
+        },
+        (DevicesState::Failed(_), KeyCode::Enter) => app.open_devices_dialog(),
+        (DevicesState::List, KeyCode::Char('n')) => app.start_device_pairing(),
+        (DevicesState::List, KeyCode::Enter) if dialog.devices.is_empty() => {
+            app.start_device_pairing()
+        }
+        (DevicesState::List, KeyCode::Up | KeyCode::Char('k')) => {
+            dialog.selected = dialog.selected.saturating_sub(1);
+            dialog.removing = false;
+        }
+        (DevicesState::List, KeyCode::Down | KeyCode::Char('j')) => {
+            dialog.selected = (dialog.selected + 1).min(dialog.devices.len().saturating_sub(1));
+            dialog.removing = false;
+        }
+        (DevicesState::List, KeyCode::Char('d')) if !dialog.devices.is_empty() => {
+            if dialog.removing {
+                app.forget_device();
+            } else {
+                dialog.removing = true;
+            }
         }
         _ => {}
     }

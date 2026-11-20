@@ -46,7 +46,7 @@ pub(crate) fn run(
         Command::Sprite { .. } => Err(CliError::internal("sprite commands are run apart")),
         Command::Daemon { .. } => Err(CliError::internal("daemon commands need no session")),
         Command::Remote { .. } => Err(CliError::internal("remote commands need no session")),
-        Command::Account { .. } | Command::StatusService => {
+        Command::Account { .. } | Command::Devices { .. } | Command::StatusService => {
             Err(CliError::internal("account commands need no session"))
         }
     }

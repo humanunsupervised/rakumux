@@ -41,6 +41,8 @@ pub struct Reply {
     /// An answer to the agent's question (`questionAnswer`): a session
     /// message, without an entry.
     pub answer: Option<Value>,
+    /// What a paired device signed for it (`signedCommand`), passed on as written.
+    pub signed: Option<Value>,
     pub status: String,
     pub failure: Option<String>,
     pub created_at: u64,
@@ -74,6 +76,9 @@ impl Reply {
         }
         if let Some(failure) = &self.failure {
             reply["failure"] = json!(failure);
+        }
+        if let Some(signed) = &self.signed {
+            reply["signed"] = signed.clone();
         }
         reply
     }
@@ -126,6 +131,12 @@ pub struct State {
     pub deletions: Vec<Value>,
     /// Deletion status reports, as sent.
     pub deletion_reports: Vec<Value>,
+    /// The machine's open pairing (`pairing-open`), as sent.
+    pub pairing: Option<Value>,
+    /// The proposal a device sent for it, while pending.
+    pub proposal: Option<Value>,
+    /// Pairing reports (`pairing-status`), as sent.
+    pub pairing_reports: Vec<Value>,
     /// Sessions asked to be renamed (`sessionRename`), as stored.
     pub renames: Vec<Value>,
     /// Rename status reports, as sent.
@@ -263,6 +274,7 @@ impl FakeCloud {
             text: text.into(),
             attachments,
             answer: None,
+            signed: None,
             status: "pending".into(),
             failure: None,
             created_at: now,
@@ -580,6 +592,11 @@ impl Served {
                         .collect();
                     read["session_deletions"] = json!(pending);
                 }
+                if let (Some(open), Some(proposal)) = (&state.pairing, &state.proposal) {
+                    if open["pairing"] == proposal["pairing"] {
+                        read["pairings"] = json!([proposal]);
+                    }
+                }
                 if state.says("rename_sessions") {
                     let pending: Vec<&Value> = state
                         .renames
@@ -606,6 +623,26 @@ impl Served {
                     read["updates"] = json!(pending);
                 }
                 answer(200, read)
+            }
+            ("POST", "/api/v1/feed/pairings") => {
+                state.pairing = Some(body.clone());
+                answer(
+                    200,
+                    json!({"version": 1, "pairing": body["pairing"], "expires_at": body["expires_at"]}),
+                )
+            }
+            ("POST", "/api/v1/feed/pairings/status") => {
+                let Some(proposal) = state.proposal.take() else {
+                    return error(404, "invalid_request");
+                };
+                state.pairing = None;
+                let status = body["status"].clone();
+                state.pairing_reports.push(body);
+                answer(
+                    200,
+                    json!({"version": 1, "id": proposal["id"], "pairing": proposal["pairing"],
+                        "machine": self.machine.name, "status": status}),
+                )
             }
             ("POST", "/api/v1/feed/session-deletions/status") => {
                 let Some(stored) = state

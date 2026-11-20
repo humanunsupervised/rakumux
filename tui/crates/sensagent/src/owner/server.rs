@@ -463,6 +463,14 @@ fn handle(
                     })
                     .map_err(|failure| enrol_refused(&failure))
             }),
+        OwnerRequest::Pairing { action } => client
+            .pairing(action)
+            .map(|pairing| OwnerResponse::Pairing { pairing })
+            .map_err(|error| OwnerErrorCode::from(&error)),
+        OwnerRequest::Devices { remove } => client
+            .devices(remove)
+            .map(|devices| OwnerResponse::Devices { devices })
+            .map_err(|error| OwnerErrorCode::from(&error)),
         OwnerRequest::MachineRevoke { machine_id } => client
             .machine_revoke(machine_id)
             .map_err(|error| OwnerErrorCode::from(&error))

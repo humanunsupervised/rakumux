@@ -511,7 +511,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    error); `not_accepted` stays in the contract for older releases, which send it while their
    `sessions.remote_sessions` is off (now ignored and dropped from `config.json`). One at a time; each
    id is marked handled before the daemon is asked and kept with the reports not yet taken in
-   `sensagent/status/new-sessions.json` (0600, an hour), so a request is started at most once
+   `sensagent/status/new-sessions.json` (0600, two hours), so a request is started at most once
    whatever happens to the service (one it stopped starting before the daemon answered isn't
    reported; rakumux.com expires it after 10 minutes). The new session is followed at once
    (before its `created` event) and, on a Sprite, held up 20 s. A first prompt asked for with
@@ -525,7 +525,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    exited, never private or another machine's), and reports `deleted`, or `failed`: `not_listed`,
    `refused` (`POST /api/v1/feed/session-deletions/status`). One at a time; each id is marked handled
    before the daemon is asked and kept with the reports not yet taken in
-   `sensagent/status/session-deletions.json` (0600, an hour), so a request is carried out at most once.
+   `sensagent/status/session-deletions.json` (0600, two hours), so a request is carried out at most once.
    **Sessions renamed from rakumux.com** (`feed/session_renames.rs`, `SessionRenameSync`; contract
    `contracts/feed/`, "Renaming sessions"): because its list says `rename_sessions`, the machine's
    replies read brings the renames asked of it (`session_renames`, with every read until reported),
@@ -537,7 +537,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    (the daemon's `invalid_argument`: another session of its folder has it), `refused`
    (`POST /api/v1/feed/session-renames/status`). Its next session list carries the new name. One at
    a time; each id is marked handled before the daemon is asked and kept with the reports not yet
-   taken in `sensagent/status/session-renames.json` (0600, an hour), so a request is carried out at
+   taken in `sensagent/status/session-renames.json` (0600, two hours), so a request is carried out at
    most once.
    **Heartbeats on rakumux.com** (`feed/heartbeats.rs`, `HeartbeatSync`; `feed/heartbeat_actions.rs`,
    `HeartbeatActionSync`; contract `contracts/feed/`, "Heartbeats"): while the daemon announces
@@ -554,8 +554,48 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    heartbeats are approved, turned on and run only on this machine (the Beats tab, `rakumux
    heartbeat`) (`POST /api/v1/feed/heartbeat-actions/status`). Each id is
    marked handled before the daemon is asked and kept with the reports not yet taken in
-   `sensagent/status/heartbeat-actions.json` (0600, an hour), so an action is carried out at most
+   `sensagent/status/heartbeat-actions.json` (0600, two hours), so an action is carried out at most
    once.
+   **Signed commands** (`rakumux_sensagent::signing`, `feed/pairings.rs`; contract
+   `contracts/feed/`, "Signed commands" and "Pairing"): what rakumux.com asks of this machine
+   (replies, session messages, answers and picks, new sessions with their first prompt,
+   deletions, renames, updates) is carried out only when a device paired with it signed it, so
+   whoever can write to rakumux.com's database or call its API can't make it act. A device is a
+   key in a browser (format `p256`: a non-extractable WebCrypto key the signer site's frame
+   keeps for rakumux.com and signs with as the user sends, no prompt) or the phone app's (the
+   same format, ECDSA P-256 over the command, signature in ASN.1 DER), or a browser's passkey
+   for the signer site (`signing::SIGNER_ORIGIN`, `https://rakumux-sign.com`;
+   `RAKUMUX_SIGNER_ORIGIN` for development: a WebAuthn assertion whose challenge is the command's
+   SHA-256, user presence and verification set). A browser key signs whatever rakumux.com's own
+   code hands its frame, so it doesn't stop someone who changes the code rakumux.com serves. Each command is its exact JSON bytes, `{v: 1, kind, machine (this machine's id), id
+   (the request's), at, expires (at most an hour on), …}`; one guard on the owner thread
+   (`signing::Guard`, shared by `ReplySync`, `NewSessionSync`, `SessionDeletionSync`,
+   `SessionRenameSync` and `UpdateSync`) compares what it would act on with what was signed (a
+   reply's text as it came, never as cleaned for typing; its files by name and SHA-256, checked
+   as each is downloaded, `Fetched::Forged`), and refuses with `unsigned`, `unknown_device`,
+   `bad_signature` or `expired`, each kind's failure. Until a device is paired, unsigned
+   commands are carried out as before; once one is, every command needs a signature, but for
+   replies and session messages this machine's own TUI wrote (`ReplySync::written`, memory
+   only) and the heartbeats' `pause`. A new session's first prompt, which rakumux.com writes as a
+   session message once the session is `created`, carries the new session's signature and goes
+   only into the session started for that request, once (`Guard::first_prompt`). Devices are
+   paired at this machine (`signing::pairing`, `PairingSync`): `rakumux devices pair` or Settings
+   → Paired devices shows a one-time code (`ABCD-EFGH-JKMN`, 60 bits, five minutes, one try), the
+   signer site's link `/pair#CODE` and its QR code (the app scans it); the service opens the
+   pairing at rakumux.com under the code's first group only (`POST /api/v1/feed/pairings`,
+   another code when `pairing_taken`), reads replies every 2 s while it waits, checks the
+   proposal's tag (HMAC-SHA256 keyed with the whole code over the pairing's id and the device),
+   shows the device's name and fingerprint (6 bytes of its key's SHA-256, which the device shows
+   too) and keeps it only on `y` (`sensagent/paired-devices.json`, 0600, at most 32), then
+   reports (`POST /api/v1/feed/pairings/status`). The session list says `signed_commands`, and to
+   a cloud that `accepts` it this machine's id and its devices (key id, format, name; never a
+   public key). `rakumux devices ls` and `rm` list and forget devices; forgetting the last one
+   makes unsigned commands work again. What became of each signed command, and of each one
+   refused, is kept in `sensagent/signed-commands.log` (`signing::log`: JSON lines, 0600, 1 MiB
+   and one older `.1`; when, kind, request id, the device's key id and name, the session; never
+   a reply's text; once per request, though a reply is checked at every read), which `rakumux
+   devices log [--json]` shows. A reply written in another machine's TUI isn't signed, so
+   a machine with paired devices refuses it (`unsigned`).
    **Logs for the owner's viewer** (`feed/logs.rs`, `LogSync`; contract `contracts/feed/`, "Logs"):
    while `GET /api/v1/features` says `logs: {level}` (rakumux.com decides per account, owners only
    unless the deployment says otherwise) and this machine's name is confirmed, the service follows
@@ -1260,7 +1300,11 @@ accidents; they don't stop a hostile process running as the same user.
                                  session-renames.json: the same for sessions deleted and
                                  renamed from rakumux.com; heartbeat-actions.json: the same for
                                  heartbeat actions), machine.json (this
-                                 machine's feed name and id), its registration and private socket
+                                 machine's feed name and id), paired-devices.json (the devices
+                                 that sign what rakumux.com asks of it, 0600),
+                                 signed-commands.log (what became of each signed
+                                 command, 0600), its registration
+                                 and private socket
   uploads/<reply id>/            0700: files attached to feed replies (0600), fetched by the
                                  account service and typed to the agent as paths; kept 7 days
 ~/.rakumux/run/                ($RAKUMUX_HOME/run), 0700: the same from every login
@@ -1623,6 +1667,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 | `rakumux session list\|get\|read\|wait\|report` | JSON commands for agents and scripts |
 | `rakumux session hook --agent A [--event NAME]` / `hook-config --agent A [--install]` | An agent's hook (JSON on stdin, always exit 0 and `{}`, Droid's `{"suppressOutput":true}`; `--event` for input that doesn't name its event) / print its hook configuration, or write it as a file of Rakumux's own the agent loads (`--install`: GitHub Copilot's `~/.copilot/hooks/rakumux.json`, Grok Build's `~/.grok/hooks/rakumux.json`; refused for agents whose hooks are merged into their settings) (`integrations/README.md`) |
 | `rakumux account login \| logout \| status [--json]` | The Rakumux account for AI session titles and the agent feed (also Settings → Account): `login` prints a link, a code and (on a terminal) a QR code and waits for approval in any browser; `logout` also revokes the sign-in at Clerk (it says when it couldn't); `status` shows who is signed in and each live session's AI description (`--json` still carries `ai_session_titles`, `ai_session_summaries` and `feed` for scripts) |
+| `rakumux devices pair \| ls [--json] \| rm DEVICE \| log [--json]` | Devices that sign what rakumux.com asks of this machine (also Settings → Paired devices): `pair` shows a one-time code, the signer site's link and its QR code, then asks to pair the device sent with it, by name and fingerprint; once one is paired, only what a paired device signed is carried out; `rm` forgets one (by name or key id); `log` shows what became of each signed command: the device that signed it, or why it was refused |
 | `rakumux remote on [--port N] \| off \| pair \| status [--json] \| token [--rotate]` | Remote access for the phone app over Tailscale (the TUI offers it once): `on` saves it in `remote.json` (stays on), restarts the API and prints the URLs, the token, an `rakumux://connect` link and (on a terminal) its QR code; `pair` shows them again; `off` turns it off; `token --rotate` makes a new token (re-pair the app) |
 | `rakumux machine add NAME URL --token T \| ls [--json] \| rm NAME` | Other machines whose sessions are listed and used here (their `rakumux-api` URL and remote token) |
 | `rakumux sprite connect [--token T] [--sprite NAME] \| status \| disconnect` | Your own Fly.io Sprite for sessions (signed in, its replies in your feed and yours typed into its agents); `rakumux new --sprite` (or `--machine NAME`) runs a session there; `disconnect` revokes its feed credential; `--replies`/`--no-replies` of 0.1.32 and earlier are accepted and ignored |
@@ -2036,7 +2081,7 @@ Settings is one scrolling page without tabs (`help::ModalTab::Settings`) under a
 typing narrows it to the settings and actions whose section or name has every word typed
 (`Backspace` deletes, `Esc` clears, then closes; `Space` changes the selected row while nothing
 is typed), and the dialog keeps its size meanwhile. The settings come first (Account, where you
-sign in, then Appearance (Layout, Icons, Tips in the footer), Keyboard and App, whose Update
+sign in and pair devices, then Appearance (Layout, Icons, Tips in the footer), Keyboard and App, whose Update
 automatically turns automatic updates on and off and whose Session history opens the session
 history modal, greyed out with a note to restart the server (S) against a daemon without
 `session.history`), then under a `Keys`

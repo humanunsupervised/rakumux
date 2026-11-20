@@ -157,6 +157,10 @@ pub enum AppEvent {
     AccountChecked(Result<Option<crate::account::Account>, String>),
     /// A sign-in started, or where it is up to.
     SignIn(Result<rakumux_sensagent::owner::protocol::SignInView, String>),
+    /// The devices paired with this machine, as read (or after one was forgotten).
+    Devices(Result<Vec<rakumux_sensagent::feed::DeviceView>, String>),
+    /// A device pairing started, was answered, or where it is up to.
+    DevicePairing(Result<Option<rakumux_sensagent::feed::PairingView>, String>),
     /// An unfinished sign-in was abandoned.
     SignInCancelled(Result<(), String>),
     SignedOut(Result<crate::account::RevocationView, String>),

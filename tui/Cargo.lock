@@ -1337,11 +1337,13 @@ dependencies = [
 name = "rakumux-sensagent"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "getrandom 0.2.16",
  "libc",
  "rakumux-session-core",
  "regex",
  "reqwest",
+ "ring",
  "rusqlite",
  "rustls",
  "serde",

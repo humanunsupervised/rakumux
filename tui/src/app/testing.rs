@@ -1038,6 +1038,11 @@ pub struct FakeAccount {
     pub reply_ids: Mutex<Vec<String>>,
     /// What `sign_out` says of the revocation at Clerk (`None`: revoked).
     pub revocation: Mutex<Option<crate::account::RevocationView>>,
+    /// What `pairing` answers next, whatever it's asked; and what it was asked.
+    pub pairing: Mutex<Option<rakumux_sensagent::feed::PairingView>>,
+    pub pairing_asks: Mutex<Vec<rakumux_sensagent::feed::PairingAction>>,
+    /// The paired devices `devices` lists (forgetting one removes it).
+    pub devices: Mutex<Vec<rakumux_sensagent::feed::DeviceView>>,
     pub calls: Mutex<Vec<&'static str>>,
 }
 
@@ -1098,6 +1103,27 @@ impl FakeAccount {
 }
 
 impl crate::account::AccountAccess for FakeAccount {
+    fn pairing(
+        &self,
+        action: rakumux_sensagent::feed::PairingAction,
+    ) -> std::result::Result<Option<rakumux_sensagent::feed::PairingView>, String> {
+        self.call("pairing");
+        self.pairing_asks.lock().unwrap().push(action);
+        Ok(self.pairing.lock().unwrap().clone())
+    }
+
+    fn devices(
+        &self,
+        remove: Option<&str>,
+    ) -> std::result::Result<Vec<rakumux_sensagent::feed::DeviceView>, String> {
+        self.call("devices");
+        let mut devices = self.devices.lock().unwrap();
+        if let Some(key_id) = remove {
+            devices.retain(|device| device.key_id != key_id);
+        }
+        Ok(devices.clone())
+    }
+
     fn account(&self) -> std::result::Result<Option<crate::account::Account>, String> {
         self.call("account");
         Ok(self.account.lock().unwrap().clone())

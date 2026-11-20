@@ -27,6 +27,7 @@ pub const SUBCOMMANDS: &[&str] = &[
     "machine",
     "sprite",
     "account",
+    "devices",
     "status-service",
     "session",
     "help",
@@ -177,6 +178,15 @@ pub enum Command {
     Account {
         #[command(subcommand)]
         command: AccountCommand,
+    },
+    /// Devices that sign what rakumux.com asks of this machine
+    ///
+    /// Once a device is paired, this machine carries out replies, new
+    /// sessions, deletions, renames and updates from rakumux.com only when a
+    /// paired device signed them.
+    Devices {
+        #[command(subcommand)]
+        command: DevicesCommand,
     },
     /// Run the account and AI title service for this Rakumux home
     /// (started on demand)
@@ -493,6 +503,27 @@ pub enum RemoteCommand {
         /// Make a new token (apps paired with the old one must be updated)
         #[arg(long)]
         rotate: bool,
+    },
+}
+
+#[derive(Subcommand, Debug, PartialEq)]
+pub enum DevicesCommand {
+    /// Pair a browser or the phone app: shows a code, a link and a QR code
+    Pair,
+    /// List the paired devices
+    Ls {
+        /// Print JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Forget a paired device (by name, or key id)
+    Rm { device: String },
+    /// What became of the commands rakumux.com brought: which device signed
+    /// each, or why it was refused
+    Log {
+        /// Print JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 

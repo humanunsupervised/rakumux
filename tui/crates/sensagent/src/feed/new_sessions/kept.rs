@@ -15,8 +15,10 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 /// Ids are kept this long: rakumux.com expires a request pending 10 minutes,
-/// and reads after that never bring it.
-const KEEP_MS: i64 = 60 * 60 * 1000;
+/// and reads after that never bring it; a signed command is good at most an
+/// hour (and its signer's clock may run 5 minutes ahead), so one replayed
+/// after its id is dropped has expired.
+const KEEP_MS: i64 = 2 * 60 * 60 * 1000;
 /// Reports rakumux.com hasn't taken this long after they were decided are
 /// dropped: their requests expired long ago.
 const REPORT_KEEP_MS: i64 = 60 * 60 * 1000;

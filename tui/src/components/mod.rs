@@ -3,6 +3,7 @@
 
 pub mod account;
 pub mod auth;
+pub mod devices;
 pub mod dialogs;
 pub mod drawer;
 pub mod feed;

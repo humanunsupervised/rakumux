@@ -10,6 +10,9 @@ homepage.workspace = true
 
 [dependencies]
 getrandom = "0.2"
+# Signed commands (signing.rs): P-256 signatures and HMAC, as the updater already uses ring.
+ring = "0.17"
+base64 = "0.21"
 libc = "0.2"
 rakumux-session-core = { path = "../session-core" }
 regex = "1"

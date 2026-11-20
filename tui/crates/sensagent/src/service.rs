@@ -87,6 +87,24 @@ pub enum UpdateFailure {
     InstallFailed,
     /// Installed, but the server couldn't restart in place.
     RestartFailed,
+    /// Not asked as a paired device signed it (contract `signatureFailure`);
+    /// never given to the updater.
+    Unsigned,
+    UnknownDevice,
+    BadSignature,
+    Expired,
+}
+
+impl From<crate::signing::Refusal> for UpdateFailure {
+    fn from(refusal: crate::signing::Refusal) -> Self {
+        use crate::signing::Refusal;
+        match refusal {
+            Refusal::Unsigned => Self::Unsigned,
+            Refusal::UnknownDevice => Self::UnknownDevice,
+            Refusal::BadSignature => Self::BadSignature,
+            Refusal::Expired => Self::Expired,
+        }
+    }
 }
 
 /// Installs a release on this machine for an update asked on rakumux.com (the
@@ -240,6 +258,7 @@ pub fn serve(
         .with_reply_state(layout.status_dir().join("replies.json"))
         .with_new_session_state(layout.status_dir().join("new-sessions.json"))
         .with_session_deletion_state(layout.status_dir().join("session-deletions.json"))
+        .with_paired_devices(layout.root().join("paired-devices.json"))
         .with_session_rename_state(layout.status_dir().join("session-renames.json"))
         .with_heartbeat_action_state(layout.status_dir().join("heartbeat-actions.json"))
         .with_update_state(layout.status_dir().join("updates.json"))

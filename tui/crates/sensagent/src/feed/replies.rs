@@ -57,6 +57,7 @@ use super::job::FeedResult;
 use super::wire::{
     self, ChoiceReply, FeedFailure, FeedRequest, QuestionReply, RepliesRead, SessionMessage,
 };
+use crate::signing::{Refusal, ReplySignature, SharedGuard};
 
 mod kept;
 use kept::{Kept, TypedInto};
@@ -272,6 +273,8 @@ pub(crate) struct Fetch {
     pub first: bool,
     /// The names of its files saved already, which this one's must differ from.
     pub taken: Vec<String>,
+    /// Its SHA-256 (hex) as a paired device signed it: the download must be that.
+    pub sha256: Option<String>,
 }
 
 impl Fetch {
@@ -284,6 +287,16 @@ impl Fetch {
     }
 }
 
+/// The failure a signature's refusal reports.
+fn refused_for(refusal: Refusal) -> ReplyFailure {
+    match refusal {
+        Refusal::Unsigned => ReplyFailure::Unsigned,
+        Refusal::UnknownDevice => ReplyFailure::UnknownDevice,
+        Refusal::BadSignature => ReplyFailure::BadSignature,
+        Refusal::Expired => ReplyFailure::Expired,
+    }
+}
+
 /// What became of a [`Fetch`].
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Fetched {
@@ -293,6 +306,8 @@ pub(crate) enum Fetched {
     Unavailable,
     /// It couldn't be saved here.
     Unsaved,
+    /// Not the file a paired device signed for: nothing is typed.
+    Forged,
     /// The request failed: tried again later, unless the answer broke the contract.
     Failed(FeedFailure),
 }
@@ -790,6 +805,13 @@ pub(crate) struct ReplySync {
     answering: Option<(String, SessionId)>,
     /// Since when each pending answer's session was seen asking nothing.
     answer_waits: HashMap<String, Duration>,
+    /// Checks replies against the devices paired here.
+    guard: SharedGuard,
+    /// Replies and session messages this machine's TUI wrote: typed in
+    /// unsigned (memory only).
+    own: HashSet<String>,
+    /// The SHA-256s signed for each pending reply's files, in order.
+    hashes: HashMap<String, Vec<String>>,
 }
 
 impl ReplySync {
@@ -828,7 +850,16 @@ impl ReplySync {
             choices: false,
             answering: None,
             answer_waits: HashMap::new(),
+            guard: crate::signing::unpaired(),
+            own: HashSet::new(),
+            hashes: HashMap::new(),
         }
+    }
+
+    /// Check replies with the service's `guard`.
+    pub fn signing(mut self, guard: SharedGuard) -> Self {
+        self.guard = guard;
+        self
     }
 
     /// Whether the daemon answers agents' questions in their own dialogs
@@ -957,12 +988,14 @@ impl ReplySync {
     /// once, so a reply written before it on rakumux.com to the same session,
     /// not read here yet, goes in first (see [`Pending::unread`]).
     pub fn written(&mut self, reply: &FeedReply, now: Duration) {
+        self.own.insert(reply.id.clone());
         self.take(reply);
         self.wait_for_read(&reply.id, now);
     }
 
     /// The same for a session message written in this machine's TUI.
     pub fn written_message(&mut self, message: &SessionMessage, now: Duration) {
+        self.own.insert(message.id.clone());
         self.take_message(message);
         self.wait_for_read(&message.id, now);
     }
@@ -1122,9 +1155,15 @@ impl ReplySync {
             Some(session) => {
                 if let Some(attachment) = self.unfetched(&id) {
                     let saved = self.files.get(&id).map_or(&[][..], Vec::as_slice);
+                    let sha256 = self
+                        .hashes
+                        .get(&id)
+                        .and_then(|hashes| hashes.get(saved.len()))
+                        .cloned();
                     let fetch = Fetch {
                         reply: id.clone(),
                         attachment: attachment.clone(),
+                        sha256,
                         first: saved.is_empty(),
                         taken: saved
                             .iter()
@@ -1480,6 +1519,7 @@ impl ReplySync {
             Fetched::Unavailable | Fetched::Unsaved | Fetched::Failed(_) => {
                 self.handle(&reply, Some(ReplyFailure::AttachmentUnavailable));
             }
+            Fetched::Forged => self.handle(&reply, Some(ReplyFailure::BadSignature)),
         }
     }
 
@@ -1631,6 +1671,8 @@ impl ReplySync {
     /// Decided: rakumux.com hears, and it's never typed (again). Its files
     /// stay for the agent once `typed_in`, else go when it failed.
     fn settle(&mut self, id: &str, failure: Option<ReplyFailure>, typed_in: bool) {
+        self.hashes.remove(id);
+        self.own.remove(id);
         let attached = self
             .pending
             .remove(id)
@@ -1729,6 +1771,7 @@ impl ReplySync {
                 for message in &read.messages {
                     self.take_message(message);
                 }
+                self.check_signatures(&read.signatures);
                 if !read.more {
                     self.forget_restored();
                 }
@@ -1750,6 +1793,29 @@ impl ReplySync {
                 self.read_retry.failed(failure, now);
                 Vec::new()
             }
+        }
+    }
+
+    /// Decide, as they're read, the replies pending here whose signature
+    /// doesn't let them be typed in (see [`crate::signing::Guard::reply`]);
+    /// keep the SHA-256s signed for the files of those that do.
+    fn check_signatures(&mut self, signatures: &HashMap<String, ReplySignature>) {
+        let now_ms = crate::signing::now_ms();
+        let mut refused = Vec::new();
+        for (id, signature) in signatures {
+            if !self.pending.contains_key(id) || self.kept.handled(id) {
+                continue;
+            }
+            let own = self.own.contains(id);
+            match self.guard.borrow_mut().reply(id, signature, own, now_ms) {
+                Ok(hashes) => {
+                    self.hashes.insert(id.clone(), hashes);
+                }
+                Err(refusal) => refused.push((id.clone(), refusal)),
+            }
+        }
+        for (id, refusal) in refused {
+            self.handle(&id, Some(refused_for(refusal)));
         }
     }
 

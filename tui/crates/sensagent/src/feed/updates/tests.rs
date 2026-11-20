@@ -6,6 +6,7 @@ fn ask(id: &str, version: &str) -> MachineUpdateAsk {
     MachineUpdateAsk {
         id: id.into(),
         version: version.into(),
+        signed: Ok(None),
     }
 }
 
@@ -168,4 +169,33 @@ fn reports_back_off_and_refused_ones_are_dropped() {
     ));
     sync.reported(true, Err(FeedFailure::Invalid), RETRY_MIN);
     assert_eq!(sync.next_work(RETRY_MIN * 10), None);
+}
+
+/// Once a device is paired here, only a release it signed for is installed.
+#[test]
+fn once_a_device_is_paired_only_a_signed_update_is_installed() {
+    use crate::signing::testing::{guard, Device};
+    use crate::signing::KeyFormat;
+    const MACHINE_ID: &str = "01K8C2B3C4D5E6F7G8H9J0K1M2";
+    let phone = Device::new(KeyFormat::P256);
+    let run = |signed: serde_json::Value| {
+        let mut sync = sync(None).signing(guard(MACHINE_ID, &[&phone]));
+        let row = serde_json::json!([{ "id": ID, "version": "0.1.62", "signed": signed }]);
+        sync.read(true, asks(Some(row)));
+        sync.next_work(Duration::ZERO)
+    };
+    let signed = |version: &str| {
+        phone.signed_now(
+            "update",
+            MACHINE_ID,
+            ID,
+            serde_json::json!({ "version": version }),
+        )
+    };
+    assert!(matches!(
+        run(signed("0.1.62")),
+        Some(UpdateWork::Install { .. })
+    ));
+    assert_eq!(body(run(signed("0.1.61")))["failure"], "bad_signature");
+    assert_eq!(body(run(serde_json::Value::Null))["failure"], "unsigned");
 }

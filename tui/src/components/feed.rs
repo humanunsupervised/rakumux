@@ -979,6 +979,16 @@ fn reply_state(reply: &FeedReply) -> &'static str {
         (ReplyStatus::Failed, Some(ReplyFailure::NotTaken)) => {
             "not taken: it may still be in the session's input box"
         }
+        (ReplyStatus::Failed, Some(ReplyFailure::Unsigned)) => {
+            "not sent: its machine takes only what a paired device signed"
+        }
+        (ReplyStatus::Failed, Some(ReplyFailure::UnknownDevice)) => {
+            "not sent: signed by a device its machine hasn't paired"
+        }
+        (ReplyStatus::Failed, Some(ReplyFailure::BadSignature)) => {
+            "not sent: its signature didn't hold"
+        }
+        (ReplyStatus::Failed, Some(ReplyFailure::Expired)) => "not sent: its signature expired",
         (ReplyStatus::Failed, _) => "not sent",
         (ReplyStatus::Expired, _) => "not sent: its agent didn't wait for an hour",
         (ReplyStatus::Unknown, _) => "",

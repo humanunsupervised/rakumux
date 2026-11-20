@@ -181,6 +181,15 @@ pub enum ReplyFailure {
     /// (answered or dismissed there first, or another question showing),
     /// or that the session's screen doesn't show: nothing was typed.
     QuestionGone,
+    /// Its machine has paired devices and none signed it.
+    Unsigned,
+    /// Signed by a device its machine hasn't paired.
+    UnknownDevice,
+    /// Its signature doesn't hold, or doesn't say what was asked (a file
+    /// that isn't the one signed among them).
+    BadSignature,
+    /// Signed over an hour before, or ahead of its machine's clock.
+    Expired,
     #[serde(other)]
     Unknown,
 }

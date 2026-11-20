@@ -1,0 +1,65 @@
+[
+  {
+    "case": "top_bit",
+    "key_id": "hCyMOLdrhHEJKk1796nm3w",
+    "public_key": "BPr4-Y-JrzSGQPopoKbhG48Df_nHVl3oG4muCNBR6FzFzYKKzKl48cy11_GI_8gL6z5kvIS6ENz0oW3SxV1tdDU",
+    "signed": {
+      "device": "hCyMOLdrhHEJKk1796nm3w",
+      "command": "eyJ2IjoxLCJraW5kIjoicmVwbHkiLCJtYWNoaW5lIjoiMDFNN1c0U1JaN0Q4MEdCVlhES1g0R0NORVEiLCJpZCI6IjAxTTdXRjAwMDAwMDAwMDAwMDAwMDAwMDAxIiwiYXQiOjE3OTUxODIwNTc2NTYsImV4cGlyZXMiOjE3OTUxODI2NTc2NTYsInNlc3Npb24iOiIwMU03V0RBUVhFRFE5UkZUTVdHRVo2SFc4UCIsImVudHJ5IjoiMDFNN1dEQVZLTUsxRTJGNkMzUDdHVzEwRkYiLCJ0ZXh0Ijoibm93IHNheSBnb29kYnllIDEifQ",
+      "signature": "MEYCIQDJ1F7QTgzGuT5_p-8tehKlcTVN1FaOUjLir8sgYwkoRgIhANILnCdoeylrBDwk0XzCj69wimZi0gFIM9ph3Clu7xoM"
+    },
+    "command": {
+      "v": 1,
+      "kind": "reply",
+      "machine": "01M7W4SRZ7D80GBVXDKX4GCNEQ",
+      "id": "01M7WF00000000000000000001",
+      "at": 1795182057656,
+      "expires": 1795182657656,
+      "session": "01M7WDAQXEDQ9RFTMWGEZ6HW8P",
+      "entry": "01M7WDAVKMK1E2F6C3P7GW10FF",
+      "text": "now say goodbye 1"
+    }
+  },
+  {
+    "case": "plain",
+    "key_id": "hCyMOLdrhHEJKk1796nm3w",
+    "public_key": "BPr4-Y-JrzSGQPopoKbhG48Df_nHVl3oG4muCNBR6FzFzYKKzKl48cy11_GI_8gL6z5kvIS6ENz0oW3SxV1tdDU",
+    "signed": {
+      "device": "hCyMOLdrhHEJKk1796nm3w",
+      "command": "eyJ2IjoxLCJraW5kIjoicmVwbHkiLCJtYWNoaW5lIjoiMDFNN1c0U1JaN0Q4MEdCVlhES1g0R0NORVEiLCJpZCI6IjAxTTdXRjAwMDAwMDAwMDAwMDAwMDAwMDA1IiwiYXQiOjE3OTUxODIwNTc2NTYsImV4cGlyZXMiOjE3OTUxODI2NTc2NTYsInNlc3Npb24iOiIwMU03V0RBUVhFRFE5UkZUTVdHRVo2SFc4UCIsImVudHJ5IjoiMDFNN1dEQVZLTUsxRTJGNkMzUDdHVzEwRkYiLCJ0ZXh0Ijoibm93IHNheSBnb29kYnllIDUifQ",
+      "signature": "MEQCIA2GLz9ERq50UOzqg7y0m0gEWjbg2bE9DmXsVMBaPXz3AiB8NeQUe-IrSSEfdP1JTyYyOH9LFLqrC02-QFhV84fciw"
+    },
+    "command": {
+      "v": 1,
+      "kind": "reply",
+      "machine": "01M7W4SRZ7D80GBVXDKX4GCNEQ",
+      "id": "01M7WF00000000000000000005",
+      "at": 1795182057656,
+      "expires": 1795182657656,
+      "session": "01M7WDAQXEDQ9RFTMWGEZ6HW8P",
+      "entry": "01M7WDAVKMK1E2F6C3P7GW10FF",
+      "text": "now say goodbye 5"
+    }
+  },
+  {
+    "case": "short",
+    "key_id": "hCyMOLdrhHEJKk1796nm3w",
+    "public_key": "BPr4-Y-JrzSGQPopoKbhG48Df_nHVl3oG4muCNBR6FzFzYKKzKl48cy11_GI_8gL6z5kvIS6ENz0oW3SxV1tdDU",
+    "signed": {
+      "device": "hCyMOLdrhHEJKk1796nm3w",
+      "command": "eyJ2IjoxLCJraW5kIjoicmVwbHkiLCJtYWNoaW5lIjoiMDFNN1c0U1JaN0Q4MEdCVlhES1g0R0NORVEiLCJpZCI6IjAxTTdXRjAwMDAwMDAwMDAwMDAwMDAwMTI4IiwiYXQiOjE3OTUxODIwNTc2NTYsImV4cGlyZXMiOjE3OTUxODI2NTc2NTYsInNlc3Npb24iOiIwMU03V0RBUVhFRFE5UkZUTVdHRVo2SFc4UCIsImVudHJ5IjoiMDFNN1dEQVZLTUsxRTJGNkMzUDdHVzEwRkYiLCJ0ZXh0Ijoibm93IHNheSBnb29kYnllIDEyOCJ9",
+      "signature": "MEMCIEIGg6Tes0EGmulVShso11WvLH23pGHYYqyiN-2eXxvxAh9mvh3YGruYNIcrAdoM9W9ti3PwgZQhymHloXVu8j3x"
+    },
+    "command": {
+      "v": 1,
+      "kind": "reply",
+      "machine": "01M7W4SRZ7D80GBVXDKX4GCNEQ",
+      "id": "01M7WF00000000000000000128",
+      "at": 1795182057656,
+      "expires": 1795182657656,
+      "session": "01M7WDAQXEDQ9RFTMWGEZ6HW8P",
+      "entry": "01M7WDAVKMK1E2F6C3P7GW10FF",
+      "text": "now say goodbye 128"
+    }
+  }
+]

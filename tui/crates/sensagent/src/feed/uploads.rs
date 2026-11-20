@@ -168,6 +168,13 @@ pub(super) fn saved(
 ) -> Fetched {
     match outcome {
         Ok(FeedResult::Download(Download::File(bytes))) => {
+            if let Some(signed) = &fetch.sha256 {
+                let hash = ring::digest::digest(&ring::digest::SHA256, &bytes);
+                let hex: String = hash.as_ref().iter().map(|b| format!("{b:02x}")).collect();
+                if &hex != signed {
+                    return Fetched::Forged;
+                }
+            }
             let saved = uploads.save(
                 &fetch.reply,
                 &fetch.attachment.name,

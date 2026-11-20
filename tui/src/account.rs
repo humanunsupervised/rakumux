@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
-use rakumux_sensagent::feed::{FeedPage, FeedStatus, FeedTurn, ReplyWrite};
+use rakumux_sensagent::feed::{
+    DeviceView, FeedPage, FeedStatus, FeedTurn, PairingAction, PairingView, ReplyWrite,
+};
 use rakumux_sensagent::owner::protocol::{OwnerState, SignInReason, SignInView, StatusLine};
 use rakumux_sensagent::owner::{OwnerClient, OwnerError, OwnerErrorCode, OwnerLayout};
 use rakumux_sensagent::service::{self, ServiceConfig, ServiceError};
@@ -121,6 +123,19 @@ pub trait AccountAccess: Send + Sync {
     fn revoke_machine(&self, machine_id: &str) -> Result<(), String> {
         let _ = machine_id;
         Ok(())
+    }
+    /// Do `action` with this machine's pairing (a device that signs what
+    /// rakumux.com asks of it): the pairing then; `None` signed out, or when
+    /// there's none.
+    fn pairing(&self, action: PairingAction) -> Result<Option<PairingView>, String> {
+        let _ = action;
+        Ok(None)
+    }
+    /// The devices paired with this machine, after forgetting the one with
+    /// `remove` when given.
+    fn devices(&self, remove: Option<&str>) -> Result<Vec<DeviceView>, String> {
+        let _ = remove;
+        Ok(Vec::new())
     }
 }
 
@@ -312,6 +327,26 @@ impl AccountAccess for LocalAccount {
         *cached = None;
         service::restart(&self.layout, &on_disk(&self.program), self.client_name)
             .map_err(|error| error.to_string())
+    }
+
+    fn pairing(&self, action: PairingAction) -> Result<Option<PairingView>, String> {
+        let start = self.has_saved_account();
+        let pairing = if action == PairingAction::Show {
+            self.with(start, |client| client.pairing(action))?
+        } else {
+            self.with_once(start, |client| client.pairing(action))?
+        };
+        Ok(pairing.flatten())
+    }
+
+    fn devices(&self, remove: Option<&str>) -> Result<Vec<DeviceView>, String> {
+        let start = self.has_saved_account();
+        let devices = if remove.is_some() {
+            self.with_once(start, |client| client.devices(remove))?
+        } else {
+            self.with(start, |client| client.devices(remove))?
+        };
+        Ok(devices.unwrap_or_default())
     }
 
     fn feed_turn(&self, entry: &str, after: Option<u64>) -> Result<FeedTurn, String> {

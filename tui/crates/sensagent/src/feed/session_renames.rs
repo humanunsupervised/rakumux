@@ -26,6 +26,7 @@ use super::new_sessions::kept::Kept;
 use super::new_sessions::listed_here;
 use super::wire::{self, FeedFailure, FeedRequest};
 use crate::cloud::FeedHttpReply;
+use crate::signing::{Expected, Refusal, SharedGuard, Signature, Signed};
 
 /// What this machine says with its session list when it renames sessions
 /// asked of it on rakumux.com (`capabilities`), so the cloud sends it those.
@@ -48,6 +49,8 @@ pub(crate) struct RenameAsk {
     pub machine: String,
     pub session: SessionId,
     pub name: String,
+    /// What a paired device signed for it.
+    pub signed: Signature,
 }
 
 #[derive(Deserialize)]
@@ -57,6 +60,8 @@ struct WireAsk {
     session: String,
     name: String,
     status: String,
+    #[serde(default)]
+    signed: Option<serde_json::Value>,
 }
 
 /// Whether `name` is one the daemon takes as it is: one line, trimmed,
@@ -79,6 +84,7 @@ impl WireAsk {
             machine: self.machine,
             session: SessionId::from_string(self.session),
             name: self.name,
+            signed: Signed::of(self.signed),
         })
     }
 }
@@ -106,6 +112,22 @@ pub(crate) enum RenameFailure {
     NameTaken,
     /// The daemon couldn't rename it.
     Refused,
+    /// Its signature (contract `signatureFailure`).
+    Unsigned,
+    UnknownDevice,
+    BadSignature,
+    Expired,
+}
+
+impl From<Refusal> for RenameFailure {
+    fn from(refusal: Refusal) -> Self {
+        match refusal {
+            Refusal::Unsigned => Self::Unsigned,
+            Refusal::UnknownDevice => Self::UnknownDevice,
+            Refusal::BadSignature => Self::BadSignature,
+            Refusal::Expired => Self::Expired,
+        }
+    }
 }
 
 /// What became of a request, as reported (contract
@@ -193,6 +215,8 @@ pub(crate) struct SessionRenameSync {
     reporting: bool,
     retry_at: Duration,
     retry: Duration,
+    /// Checks what's asked against the devices paired here.
+    guard: SharedGuard,
 }
 
 impl SessionRenameSync {
@@ -209,7 +233,14 @@ impl SessionRenameSync {
             reporting: false,
             retry_at: Duration::ZERO,
             retry: RETRY_MIN,
+            guard: crate::signing::unpaired(),
         }
+    }
+
+    /// Check requests with the service's `guard`.
+    pub fn signing(mut self, guard: SharedGuard) -> Self {
+        self.guard = guard;
+        self
     }
 
     /// Follow the account: signed in with its feed on and this machine's
@@ -278,6 +309,28 @@ impl SessionRenameSync {
                 .cloned()
                 .collect();
             for ask in waiting {
+                let expected = Expected {
+                    kind: "rename_session",
+                    id: &ask.id,
+                    fields: vec![
+                        ("session", ask.session.as_str().into()),
+                        ("name", ask.name.as_str().into()),
+                    ],
+                };
+                let allowed = self.guard.borrow_mut().allows(
+                    &ask.signed,
+                    &expected,
+                    crate::signing::now_ms(),
+                );
+                if let Err(refusal) = allowed {
+                    self.kept.decided(
+                        &ask.id,
+                        Outcome::Failed {
+                            failure: refusal.into(),
+                        },
+                    );
+                    continue;
+                }
                 if !self.listed.contains(&ask.session) {
                     self.kept.decided(
                         &ask.id,
@@ -398,6 +451,47 @@ mod tests {
             }
             other => panic!("expected a report, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn once_a_device_is_paired_only_the_name_it_signed_is_given() {
+        use crate::signing::testing::{guard, Device};
+        use crate::signing::KeyFormat;
+        const MACHINE_ID: &str = "01K8C2B3C4D5E6F7G8H9J0K1M2";
+        let phone = Device::new(KeyFormat::Webauthn);
+        let run = |signed: serde_json::Value| {
+            let mut sync =
+                SessionRenameSync::new("studio".into(), None).signing(guard(MACHINE_ID, &[&phone]));
+            sync.set_enabled(true, Duration::ZERO);
+            sync.listed
+                .insert(SessionId::from_string(SESSION.to_owned()));
+            let row = json!([{
+                "id": REQUEST, "machine": "studio", "session": SESSION, "name": "fix login",
+                "status": "pending", "created_at": 1, "status_at": 1, "signed": signed,
+            }]);
+            sync.read(true, asks(Some(row)));
+            sync.next_work(NOW)
+        };
+        let signed = |name: &str| {
+            phone.signed_now(
+                "rename_session",
+                MACHINE_ID,
+                REQUEST,
+                json!({ "session": SESSION, "name": name }),
+            )
+        };
+        assert!(matches!(
+            run(signed("fix login")),
+            Some(RenameWork::Rename { .. })
+        ));
+        let refused = |work: Option<RenameWork>| match work {
+            Some(RenameWork::Report(FeedRequest::SessionRenameStatus { body })) => {
+                serde_json::from_slice::<serde_json::Value>(&body).unwrap()["failure"].clone()
+            }
+            other => panic!("expected a report, got {other:?}"),
+        };
+        assert_eq!(refused(run(signed("rm -rf"))), "bad_signature");
+        assert_eq!(refused(run(serde_json::Value::Null)), "unsigned");
     }
 
     #[test]

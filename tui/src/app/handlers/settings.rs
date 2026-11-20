@@ -222,6 +222,7 @@ fn open_item(app: &mut App, item: SettingsItem) {
         }
         SettingsItem::Update => app.open_upgrade_dialog(),
         SettingsItem::Account => app.open_account_dialog(),
+        SettingsItem::Devices => app.open_devices_dialog(),
         SettingsItem::RestartUi => app.request_restart(),
         SettingsItem::RestartServer => app.request_server_restart(),
         SettingsItem::TerminalPanel => {

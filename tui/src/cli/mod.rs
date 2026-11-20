@@ -16,6 +16,7 @@ mod args;
 mod attach;
 mod commands;
 mod daemon;
+mod devices;
 #[cfg(test)]
 mod fake;
 mod folders;
@@ -112,6 +113,10 @@ fn execute(cli: CliArgs) -> Result<i32, CliError> {
             // The account service follows the daemon's sessions: start it first.
             let client = globals.connect(true)?;
             account::run(&client, command, &mut out)
+        }
+        Command::Devices { command } => {
+            let client = globals.connect(true)?;
+            devices::run(&client, command, &mut out)
         }
         Command::StatusService => account::serve(),
         command => {

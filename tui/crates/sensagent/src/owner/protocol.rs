@@ -14,7 +14,7 @@ use session_core::ids::SessionId;
 use session_core::model::ScopeRoot;
 
 use crate::dispatch::DispatchError;
-use crate::feed::{FeedPage, FeedTurn, ReplyWrite};
+use crate::feed::{DeviceView, FeedPage, FeedTurn, PairingAction, PairingView, ReplyWrite};
 use crate::refresh::{AIStatus, RefreshError, RefreshFailure, SignInFailure, SignInState};
 use crate::status::{
     ConsentPolicy, ConsentSnapshot, FolderConsent, StatusError, StatusStoreError, StatusView,
@@ -164,6 +164,16 @@ pub enum OwnerRequest {
     },
     /// Revoke enrolled machine `machine_id`'s credential. Answered with `Done`.
     MachineRevoke { machine_id: String },
+    /// Pair a device with this machine: open a pairing, show it, answer the
+    /// device proposed, or cancel. Answered with `Pairing` (none while signed
+    /// out, or when there's none).
+    Pairing { action: PairingAction },
+    /// The devices paired with this machine, after forgetting the one with
+    /// `remove` when given. Answered with `Devices`.
+    Devices {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        remove: Option<String>,
+    },
 }
 
 /// The owner's answers.
@@ -200,6 +210,13 @@ pub enum OwnerResponse {
     },
     MachineEnrolled {
         credential: EnrolledCredential,
+    },
+    Pairing {
+        #[serde(default)]
+        pairing: Option<PairingView>,
+    },
+    Devices {
+        devices: Vec<DeviceView>,
     },
     Done,
     /// Signed out here; what became of the sign-in at Clerk.
