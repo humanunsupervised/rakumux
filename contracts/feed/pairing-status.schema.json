@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:pairing-status",
+  "title": "POST /api/v1/feed/pairings/status request",
+  "description": "The machine a proposal came to says its user paired the device (`paired`) or it didn't (`failed`, with why). Only a pending proposal changes, and only for the machine whose pairing it is; otherwise the stored one comes back unchanged. Either way its pairing closes.",
+  "x-maxBodyBytes": 1024,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "machine", "pairing", "proposal", "status"],
+  "properties": {
+    "version": { "const": 1 },
+    "machine": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machine" },
+    "pairing": { "$ref": "urn:rakumux:feed:v1:common#/$defs/pairingId" },
+    "proposal": { "$ref": "urn:rakumux:feed:v1:common#/$defs/ulid" },
+    "status": { "type": "string", "enum": ["paired", "failed"] },
+    "failure": { "$ref": "urn:rakumux:feed:v1:common#/$defs/pairingFailure" }
+  },
+  "oneOf": [
+    { "properties": { "status": { "const": "paired" }, "failure": false } },
+    { "required": ["failure"], "properties": { "status": { "const": "failed" } } }
+  ]
+}

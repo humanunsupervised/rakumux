@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:pairing-open",
+  "title": "POST /api/v1/feed/pairings request",
+  "description": "A machine opens a pairing under the first group of the code it shows (`pairing`), until `expires_at`, replacing any pairing it had open. The cloud refuses an id another machine's open pairing holds (`pairing_taken`, 409), and the machine opens another code.",
+  "x-maxBodyBytes": 1024,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "machine", "pairing", "expires_at"],
+  "properties": {
+    "version": { "const": 1 },
+    "machine": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machine" },
+    "pairing": { "$ref": "urn:rakumux:feed:v1:common#/$defs/pairingId" },
+    "expires_at": { "description": "When the code stops working, at most ten minutes on.", "$ref": "urn:rakumux:feed:v1:common#/$defs/timestampMs" }
+  }
+}

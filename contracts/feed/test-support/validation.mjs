@@ -5,7 +5,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 /** Canonical schema documents, loaded locally without resolving network references. */
 export const schemas = Object.freeze(
   Object.fromEntries(
-    ["common", "upload", "accepted", "page", "error", "chat-upload", "chat-accepted", "turn", "reply-upload", "reply-status", "reply", "replies", "sessions-upload", "sessions-stored", "realtime", "poke", "machine-enrol", "machine-credential", "machine-credentials", "machine-token", "resources-upload", "resources-stored", "new-session-status", "new-session", "session-deletion-status", "session-deletion", "session-rename-status", "session-rename", "heartbeats-upload", "heartbeats-stored", "heartbeat-action-status", "heartbeat-action", "update-status", "machine-update", "logs-upload", "logs-stored"].map((name) => [
+    ["common", "upload", "accepted", "page", "error", "chat-upload", "chat-accepted", "turn", "reply-upload", "reply-status", "reply", "replies", "sessions-upload", "sessions-stored", "realtime", "poke", "machine-enrol", "machine-credential", "machine-credentials", "machine-token", "resources-upload", "resources-stored", "new-session-status", "new-session", "session-deletion-status", "session-deletion", "session-rename-status", "session-rename", "heartbeats-upload", "heartbeats-stored", "heartbeat-action-status", "heartbeat-action", "update-status", "machine-update", "logs-upload", "logs-stored", "pairing-open", "pairing", "pairing-propose", "pairing-proposal", "pairing-status"].map((name) => [
       name,
       JSON.parse(readFileSync(new URL(`../${name}.schema.json`, import.meta.url), "utf8")),
     ]),
@@ -78,4 +78,9 @@ export const validators = Object.freeze({
   heartbeatAction: ajv.compile(schemas["heartbeat-action"]),
   updateStatus: ajv.compile(schemas["update-status"]),
   machineUpdate: ajv.compile(schemas["machine-update"]),
+  pairingOpen: ajv.compile(schemas["pairing-open"]),
+  pairing: ajv.compile(schemas.pairing),
+  pairingPropose: ajv.compile(schemas["pairing-propose"]),
+  pairingProposal: ajv.compile(schemas["pairing-proposal"]),
+  pairingStatus: ajv.compile(schemas["pairing-status"]),
 });

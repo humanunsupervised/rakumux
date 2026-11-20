@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:pairing-propose",
+  "title": "POST /api/v1/pairings/{pairing}/proposals request",
+  "description": "A device (the signer site's pairing page, or the phone app) sends its key for the open pairing `{pairing}`, with the tag made with the whole code. Without a sign-in: the signer site has none, and the tag, which only the code makes, is what the machine checks. The cloud takes the first proposal for an open pairing; another (`pairing_closed`, 409), or one for a pairing that isn't open (`pairing_closed`, 404), changes nothing. Allowed from the signer site's origin (CORS).",
+  "x-maxBodyBytes": 4096,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "device", "tag"],
+  "properties": {
+    "version": { "const": 1 },
+    "device": { "$ref": "urn:rakumux:feed:v1:common#/$defs/proposedDevice" },
+    "tag": { "type": "string", "$ref": "urn:rakumux:feed:v1:common#/$defs/base64url", "minLength": 43, "maxLength": 43 }
+  }
+}

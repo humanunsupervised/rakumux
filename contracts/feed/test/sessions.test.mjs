@@ -47,8 +47,8 @@ test("a machine says what it handles beyond the first version", () => {
     assert.equal(validators.sessionsUpload({ ...base, capabilities }), true, JSON.stringify(capabilities));
   }
   const many = (count) => Array.from({ length: count }, (_, index) => `capability_${index}`);
-  assert.equal(validators.sessionsUpload({ ...base, capabilities: many(16) }), true);
-  assert.equal(validators.sessionsUpload({ ...base, capabilities: many(17) }), false);
+  assert.equal(validators.sessionsUpload({ ...base, capabilities: many(32) }), true);
+  assert.equal(validators.sessionsUpload({ ...base, capabilities: many(33) }), false);
 });
 
 test("stored answers validate", () => {

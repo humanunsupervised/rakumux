@@ -28,6 +28,10 @@ conformance tests, not an HTTP server, database or local runtime.
 | `POST /api/v1/feed/heartbeats` | [heartbeats-upload](heartbeats-upload.schema.json) | [heartbeats-stored](heartbeats-stored.schema.json) |
 | `POST /api/v1/feed/heartbeat-actions/status` | [heartbeat-action-status](heartbeat-action-status.schema.json) | [heartbeat-action](heartbeat-action.schema.json) |
 | `POST /api/v1/feed/updates/status` | [update-status](update-status.schema.json) | [machine-update](machine-update.schema.json) |
+| `POST /api/v1/feed/pairings` | [pairing-open](pairing-open.schema.json) | [pairing](pairing.schema.json) |
+| `POST /api/v1/feed/pairings/status` | [pairing-status](pairing-status.schema.json) | [pairing-proposal](pairing-proposal.schema.json) |
+| `POST /api/v1/pairings/{pairing}/proposals` | [pairing-propose](pairing-propose.schema.json), no sign-in | [pairing-proposal](pairing-proposal.schema.json) |
+| `GET /api/v1/pairings/{pairing}/proposals/{id}` | path only, no sign-in | [pairing-proposal](pairing-proposal.schema.json) |
 | `GET /api/v1/feed/realtime` | header only | [realtime](realtime.schema.json) |
 | WebSocket at the realtime `url` | bearer `token` | [poke](poke.schema.json) messages |
 | `POST /api/v1/machines/credentials` | [machine-enrol](machine-enrol.schema.json) | [machine-credential](machine-credential.schema.json) |
@@ -297,6 +301,53 @@ conformance tests, not an HTTP server, database or local runtime.
   a reason. Its next session list carries the new name. One still pending 10 minutes after it was
   written is `expired`. When the request is written the cloud pokes the account's machines (and
   wakes an enrolled one, below), as for a reply.
+- **Signed commands:** what rakumux.com asks of a machine is carried out only when a device the
+  user paired with that machine signed it, so whoever can write to rakumux.com, its database or
+  its deploys can't make a machine act. A machine that says `signed_commands` in its session list
+  sends its id (`machine_id`, as in `X-Rakumux-Machine-Id`) and its devices (`paired_devices`:
+  each key's id, format and name, never its public key). A **command** is a JSON object, signed
+  as its exact bytes: `{v: 1, kind, machine, id, at, expires, ...}`, where `machine` is the
+  machine's id, `id` the request's (the reply's, the new session's, the deletion's, the rename's,
+  the update's), `at` when it was signed and `expires` when it stops being good (Unix ms, at most
+  an hour after `at`; a machine allows a signer's clock 5 minutes ahead of its own). By kind, the
+  fields a machine compares with what it's asked (a field left out must be absent there too):
+  `reply` (every row of the replies read: a reply, a session message, an answer, a pick):
+  `session`, `entry`, `text`, `answer`, `choice` as the reply has them, and `attachments` as
+  `[{name, sha256}]` (the file's SHA-256 in lower-case hex, in the reply's order), which the
+  machine checks against each file it downloads before typing anything; `new_session`:
+  `folder`, `folder_session`, `agent` and `prompt`, the first prompt asked for with it (the
+  session message rakumux.com writes with that prompt once the session is `created` carries the
+  same `signed`, and the machine takes it only into the session it started for that request);
+  `delete_session`: `session`; `rename_session`: `session`, `name`; `update`: `version`.
+  Heartbeat actions are never signed: only `pause` is carried out. The signature (`signed` on
+  the request, `signedCommand` in common) is a WebAuthn assertion of a passkey for the signer
+  site (`https://rakumux-sign.com`; its challenge the command's SHA-256, user presence and
+  verification both set) or an ECDSA P-256 signature over the command by the phone app's key.
+  The cloud checks that a signed request's fields are the command's (else `invalid_request`,
+  400), stores `signed` as written and passes it on unchanged. A machine with no paired device
+  carries out an unsigned request as before; once it has one, it refuses an unsigned one
+  (`unsigned`), one a device it hasn't paired signed (`unknown_device`), one whose signature
+  doesn't hold or whose command doesn't say what it's asked (`bad_signature`), and one signed
+  over an hour before or ahead of its clock (`expired`): each kind's failure has these four.
+- **Pairing:** a device is paired at the machine. The machine shows a one-time code
+  (`ABCD-EFGH-JKMN`: Crockford base32, 60 bits, good five minutes, one try) and the signer
+  site's link `https://rakumux-sign.com/pair#CODE` (also as a QR code, which the phone app
+  scans); it opens the pairing under the code's first group, the pairing's id
+  (`POST /api/v1/feed/pairings`, `pairing-open`; `pairing_taken`, 409, when another machine's
+  open pairing has that id, and the machine shows another code). The device makes its key and
+  sends it (`POST /api/v1/pairings/{pairing}/proposals`, `pairing-propose`, without a sign-in,
+  from the signer site's origin) with its tag: HMAC-SHA256 keyed with the whole code (capitals,
+  no dashes) over `rakumux-pair-v1`, the pairing's id, the key's id, its format, its public key
+  and its name, one per line (`\n`), base64url. The cloud keeps the first proposal for an open
+  pairing (another, or one for a pairing that isn't open, is `pairing_closed`) and the machine's
+  replies read brings it (`pairings`). The machine checks the tag (a wrong one ends the
+  pairing: `wrong_code`), shows the device's name and fingerprint (the first 6 bytes of the
+  public key's SHA-256, as `ab12 · cd34 · 9f0e`), which the device shows too, and pairs it only
+  when its user says yes there; it reports `pairing-status` (`paired`, or `failed` with
+  `wrong_code`, `expired`, `refused`, `full` or `cancelled`), and the device reads where its
+  proposal is (`GET /api/v1/pairings/{pairing}/proposals/{id}`, `pairing-proposal`, without a
+  sign-in). The rest of the code never reaches the cloud: it's in the link's fragment, which
+  browsers don't send. A proposal not reported within ten minutes is `expired`.
 - **Heartbeats:** a machine whose daemon runs heartbeats (tasks on a clock, each run a new
   session) says `heartbeats` in its session list's `capabilities`. Once a `sessions-stored` answer
   `accepts` `heartbeats`, it uploads its whole list of heartbeats (`heartbeats-upload`, at most 50,
@@ -407,7 +458,8 @@ conformance tests, not an HTTP server, database or local runtime.
 
 Every object rejects additional properties. Authorization is the terminal's Clerk OAuth
 access token, or an enrolled machine's access token (above), in the `Authorization` header,
-never the body; browser cookies and `Origin` requests are refused. The user is the verified
+never the body; browser cookies and `Origin` requests are refused, except on the two
+`/api/v1/pairings/` routes, which take no sign-in and allow the signer site's origin. The user is the verified
 token's subject, never a body field.
 
 ## Validation boundaries

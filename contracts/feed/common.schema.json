@@ -305,7 +305,7 @@
     "replyFailure": {
       "description": "Why a reply wasn't delivered: the session isn't running on its machine (`session_gone`), shows another conversation now (`conversation_changed`), is private (`private`), the machine doesn't take replies from rakumux.com or other machines (`not_accepted`: only from older releases, while a setting of theirs is off), the session refused the text (`refused`), a file attached to it couldn't be fetched or wasn't what the reply said (`attachment_unavailable`), or it was typed in but its agent didn't take it as a prompt (`not_taken`: its chat showed no new prompt within 30 seconds, or another one; it may still be in the session's input box; for an answer, keys went into its dialog but it didn't take them as given, and it may be partly answered there), or an answer's question isn't asked any more (`question_gone`: answered or dismissed in the session first, another question asked, or its dialog not on the session's screen; for a pick, the session's screen doesn't show its prompt or that option any more; nothing was typed). Readers take a value they don't know as a failure without a reason.",
       "type": "string",
-      "enum": ["session_gone", "conversation_changed", "private", "not_accepted", "refused", "attachment_unavailable", "not_taken", "question_gone"]
+      "enum": ["session_gone", "conversation_changed", "private", "not_accepted", "refused", "attachment_unavailable", "not_taken", "question_gone", "unsigned", "unknown_device", "bad_signature", "expired"]
     },
     "questionAnswer": {
       "description": "What a session message answers instead of saying something: the question an agent asks in its own dialog (Claude Code's `AskUserQuestion`, GitHub Copilot's `ask_user`, Droid's `AskUser`, OpenCode's `question`, Grok Build's `ask_user_question`, Kimi Code's `AskUserQuestion`), by the tool call that asked it (`call_id`, as the chat's `tool_call` names it), and the answer to each of its questions, in the order asked: the labels of the options chosen (one for a question that takes one) and what's typed as the dialog's own free answer, if anything. Its machine gives it to that dialog, never as typed text, and only while the session shows that chat and its agent asks something; never to a prompt for permission.",
@@ -450,6 +450,10 @@
         "choice": {
           "description": "On a session message: the option it picks of the prompt its agent shows (`sessionState` `choice`), picked in place of typing `text` (which says the pick, for showing). Sent only to a reader that asks with `choice_answers=1` and whose machine advertises `choice_answers` in its session list, so older machines never see one.",
           "$ref": "#/$defs/choiceAnswer"
+        },
+        "signed": {
+          "description": "The command a device paired with the machine signed for it (`signedCommand`): a machine with paired devices carries it out only with one; absent when written without one.",
+          "$ref": "#/$defs/signedCommand"
         },
         "status": { "$ref": "#/$defs/replyStatus" },
         "failure": { "$ref": "#/$defs/replyFailure" },
@@ -603,7 +607,7 @@
     "newSessionFailure": {
       "description": "Why a machine didn't start a new session asked for on rakumux.com: it doesn't take new sessions from rakumux.com (`not_accepted`: only from older releases, while a setting of theirs is off), it lists no folder of that name now, or several and `folder_session` doesn't say which (`folder_unknown`), or its daemon couldn't start the session (`refused`). Readers take a value they don't know as a failure without a reason.",
       "type": "string",
-      "enum": ["not_accepted", "folder_unknown", "refused"]
+      "enum": ["not_accepted", "folder_unknown", "refused", "unsigned", "unknown_device", "bad_signature", "expired"]
     },
     "createdSession": {
       "description": "The session a machine started for a new session asked for on rakumux.com: its id and the name its daemon gave it. It appears in the machine's next session list.",
@@ -644,6 +648,10 @@
         "agent": {
           "description": "The agent to start in the new session's shell; absent: the shell alone. Other than `claude-code`, `codex` and `opencode`, only for a machine whose latest session list advertises `new_session_agents`.",
           "$ref": "#/$defs/agent"
+        },
+        "signed": {
+          "description": "The command a device paired with the machine signed for it (`signedCommand`): a machine with paired devices carries it out only with one; absent when written without one.",
+          "$ref": "#/$defs/signedCommand"
         },
         "status": { "$ref": "#/$defs/newSessionStatus" },
         "failure": { "$ref": "#/$defs/newSessionFailure" },
@@ -688,7 +696,7 @@
     "sessionDeletionFailure": {
       "description": "Why a machine didn't delete a session asked of it on rakumux.com: it doesn't list that session now (`not_listed`: gone already, or private) or its daemon couldn't delete it (`refused`). Readers take a value they don't know as a failure without a reason.",
       "type": "string",
-      "enum": ["not_listed", "refused"]
+      "enum": ["not_listed", "refused", "unsigned", "unknown_device", "bad_signature", "expired"]
     },
     "sessionDeletion": {
       "description": "A session asked on rakumux.com to be deleted, for the machine that lists it. It names the session by its id, never a path or a command. The machine deletes only a session it lists to rakumux.com, into its session history, and reports it.",
@@ -707,6 +715,10 @@
         "session": {
           "description": "The session to delete, by the id the machine's session list gives it.",
           "$ref": "#/$defs/ulid"
+        },
+        "signed": {
+          "description": "The command a device paired with the machine signed for it (`signedCommand`): a machine with paired devices carries it out only with one; absent when written without one.",
+          "$ref": "#/$defs/signedCommand"
         },
         "status": { "$ref": "#/$defs/sessionDeletionStatus" },
         "failure": { "$ref": "#/$defs/sessionDeletionFailure" },
@@ -740,7 +752,7 @@
     "sessionRenameFailure": {
       "description": "Why a machine didn't rename a session asked of it on rakumux.com: it doesn't list that session now (`not_listed`: gone already, or private), another session of its folder has that name (`name_taken`: names are unique within a folder), or its daemon couldn't rename it (`refused`). Readers take a value they don't know as a failure without a reason.",
       "type": "string",
-      "enum": ["not_listed", "name_taken", "refused"]
+      "enum": ["not_listed", "name_taken", "refused", "unsigned", "unknown_device", "bad_signature", "expired"]
     },
     "sessionName": {
       "description": "A session's new name: one visible line of at most 64 characters, without white space at either end.",
@@ -769,6 +781,10 @@
           "$ref": "#/$defs/ulid"
         },
         "name": { "$ref": "#/$defs/sessionName" },
+        "signed": {
+          "description": "The command a device paired with the machine signed for it (`signedCommand`): a machine with paired devices carries it out only with one; absent when written without one.",
+          "$ref": "#/$defs/signedCommand"
+        },
         "status": { "$ref": "#/$defs/sessionRenameStatus" },
         "failure": { "$ref": "#/$defs/sessionRenameFailure" },
         "created_at": { "$ref": "#/$defs/timestampMs" },
@@ -1036,7 +1052,11 @@
           "description": "The ULID rakumux.com gave the request: a machine installs at most once for an id.",
           "$ref": "#/$defs/ulid"
         },
-        "version": { "$ref": "#/$defs/rakumuxVersion" }
+        "version": { "$ref": "#/$defs/rakumuxVersion" },
+        "signed": {
+          "description": "The command a device paired with the machine signed for it (`signedCommand`): a machine with paired devices carries it out only with one; absent when written without one.",
+          "$ref": "#/$defs/signedCommand"
+        }
       }
     },
     "machineUpdateState": {
@@ -1069,7 +1089,94 @@
     "machineUpdateFailure": {
       "description": "Why a machine didn't update: its installation can't update itself (`unsupported`: npm, Homebrew or a source build, updated there by hand), the release couldn't be installed (`install_failed`: a download, signature or checksum failure, an installation it can't write), or it was installed but the server couldn't restart in place (`restart_failed`: the new version runs once Rakumux restarts). Readers take a value they don't know as a failure without a reason.",
       "type": "string",
-      "enum": ["unsupported", "install_failed", "restart_failed"]
+      "enum": ["unsupported", "install_failed", "restart_failed", "unsigned", "unknown_device", "bad_signature", "expired"]
+    },
+    "base64url": {
+      "description": "Bytes in base64url without padding.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]*$"
+    },
+    "signedCommand": {
+      "description": "A command signed by a device paired with the machine it's for (README, Signed commands): `command` is the command's exact JSON bytes, `device` the signing key's id. A passkey for the signer site (`webauthn`) signs a WebAuthn assertion whose challenge is the command's SHA-256, and sends its `authenticator_data` and `client_data` with it; a key that signs the bytes itself (`p256`, the phone app's) sends the signature alone. The cloud stores it as written and passes it on unchanged.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device", "command", "signature"],
+      "properties": {
+        "device": { "description": "The signing key's id, as paired.", "type": "string", "$ref": "#/$defs/base64url", "minLength": 1, "maxLength": 683 },
+        "command": { "description": "The command's JSON bytes.", "type": "string", "$ref": "#/$defs/base64url", "minLength": 2, "maxLength": 87382 },
+        "signature": { "description": "ECDSA P-256 with SHA-256, DER.", "type": "string", "$ref": "#/$defs/base64url", "minLength": 1, "maxLength": 200 },
+        "authenticator_data": { "description": "A passkey's authenticator data.", "type": "string", "$ref": "#/$defs/base64url", "minLength": 50, "maxLength": 2731 },
+        "client_data": { "description": "A passkey's client data JSON.", "type": "string", "$ref": "#/$defs/base64url", "minLength": 1, "maxLength": 5462 }
+      },
+      "dependentRequired": { "authenticator_data": ["client_data"], "client_data": ["authenticator_data"] }
+    },
+    "signatureFailure": {
+      "description": "Why a machine refused a command for its signature, beside each kind's own failures: it has paired devices and the command came without a signature (`unsigned`), a device it hasn't paired signed it (`unknown_device`), the signature doesn't hold or the command doesn't say what was asked (`bad_signature`), or it was signed over an hour before, or later than the machine's clock allows (`expired`).",
+      "type": "string",
+      "enum": ["unsigned", "unknown_device", "bad_signature", "expired"]
+    },
+    "keyFormat": {
+      "description": "How a device signs: a passkey for the signer site (`webauthn`), or a key that signs commands itself (`p256`: ECDSA P-256 with SHA-256, the phone app's).",
+      "type": "string",
+      "enum": ["webauthn", "p256"]
+    },
+    "deviceName": {
+      "description": "What a device calls itself (one line).",
+      "type": "string",
+      "$ref": "#/$defs/label",
+      "minLength": 1,
+      "maxLength": 64,
+      "maxUtf8Bytes": 256
+    },
+    "pairedDevice": {
+      "description": "A device paired with a machine, as its session list names it: the key's id (for a passkey, its credential id), how it signs and its name. Never its public key.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key_id", "format", "name"],
+      "properties": {
+        "key_id": { "type": "string", "$ref": "#/$defs/base64url", "minLength": 1, "maxLength": 683 },
+        "format": { "$ref": "#/$defs/keyFormat" },
+        "name": { "$ref": "#/$defs/deviceName" }
+      }
+    },
+    "pairingId": {
+      "description": "A pairing's id: the first four characters of the code the machine shows (Crockford base32 capitals). The rest of the code never leaves the machine and the device.",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{4}$"
+    },
+    "proposedDevice": {
+      "description": "The device a pairing proposal brings: its key's id, how it signs, its public key (an uncompressed P-256 point or a SubjectPublicKeyInfo) and its name.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key_id", "format", "public_key", "name"],
+      "properties": {
+        "key_id": { "type": "string", "$ref": "#/$defs/base64url", "minLength": 1, "maxLength": 683 },
+        "format": { "$ref": "#/$defs/keyFormat" },
+        "public_key": { "type": "string", "$ref": "#/$defs/base64url", "minLength": 87, "maxLength": 122 },
+        "name": { "$ref": "#/$defs/deviceName" }
+      }
+    },
+    "pairingProposal": {
+      "description": "A device sent for a machine's open pairing, as the machine's replies read brings it: the machine pairs it only when `tag` (HMAC-SHA256 keyed with the whole code over the pairing's id and the device, base64url) holds and its user confirms the device there.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "pairing", "device", "tag"],
+      "properties": {
+        "id": { "description": "The id the cloud gave the proposal.", "$ref": "#/$defs/ulid" },
+        "pairing": { "$ref": "#/$defs/pairingId" },
+        "device": { "$ref": "#/$defs/proposedDevice" },
+        "tag": { "type": "string", "$ref": "#/$defs/base64url", "minLength": 43, "maxLength": 43 }
+      }
+    },
+    "pairingFailure": {
+      "description": "Why a pairing ended without the device: its tag wasn't made with the machine's code (`wrong_code`), nothing came or the user didn't answer in time (`expired`), the user said no (`refused`), the machine keeps as many devices as it takes (`full`), or the pairing was closed at the machine (`cancelled`). Readers take a value they don't know as a failure without a reason.",
+      "type": "string",
+      "enum": ["wrong_code", "expired", "refused", "full", "cancelled"]
+    },
+    "pairingStatus": {
+      "description": "Where a pairing proposal is: waiting for its machine (`pending`), paired (`paired`), not (`failed`, with why), or not reported within ten minutes (`expired`).",
+      "type": "string",
+      "enum": ["pending", "paired", "failed", "expired"]
     }
   }
 }

@@ -15,7 +15,8 @@
         "id": { "$ref": "urn:rakumux:feed:v1:common#/$defs/ulid" },
         "entry": { "$ref": "urn:rakumux:feed:v1:common#/$defs/ulid" },
         "text": { "$ref": "urn:rakumux:feed:v1:common#/$defs/promptText" },
-        "from": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machine" }
+        "from": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machine" },
+        "signed": { "$ref": "urn:rakumux:feed:v1:common#/$defs/signedCommand" }
       }
     },
     {
@@ -36,7 +37,8 @@
           }
         },
         "text": { "$ref": "urn:rakumux:feed:v1:common#/$defs/promptText" },
-        "from": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machine" }
+        "from": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machine" },
+        "signed": { "$ref": "urn:rakumux:feed:v1:common#/$defs/signedCommand" }
       }
     }
   ]

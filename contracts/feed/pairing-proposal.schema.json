@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:pairing-proposal",
+  "title": "A pairing proposal's status",
+  "description": "The answer to a proposal (`pairing-propose`), to `GET /api/v1/pairings/{pairing}/proposals/{id}` (without a sign-in, CORS: its id is what it takes) and to the machine's report (`pairing-status`): where the proposal is, and the machine's name.",
+  "x-maxBodyBytes": 1024,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "id", "pairing", "machine", "status"],
+  "properties": {
+    "version": { "const": 1 },
+    "id": { "$ref": "urn:rakumux:feed:v1:common#/$defs/ulid" },
+    "pairing": { "$ref": "urn:rakumux:feed:v1:common#/$defs/pairingId" },
+    "machine": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machine" },
+    "status": { "$ref": "urn:rakumux:feed:v1:common#/$defs/pairingStatus" },
+    "failure": { "$ref": "urn:rakumux:feed:v1:common#/$defs/pairingFailure" }
+  },
+  "oneOf": [
+    { "properties": { "status": { "enum": ["pending", "paired", "expired"] }, "failure": false } },
+    { "required": ["failure"], "properties": { "status": { "const": "failed" } } }
+  ]
+}

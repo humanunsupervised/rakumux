@@ -45,6 +45,12 @@
       "maxItems": 20,
       "items": { "$ref": "urn:rakumux:feed:v1:common#/$defs/heartbeatAction" }
     },
+    "pairings": {
+      "description": "Only for a reader that names itself (`machine`) and has a pairing open (`pairing-open`): the proposal sent for it, while it's pending (at most one a pairing); absent otherwise.",
+      "type": "array",
+      "maxItems": 1,
+      "items": { "$ref": "urn:rakumux:feed:v1:common#/$defs/pairingProposal" }
+    },
     "release": {
       "description": "The newest stable Rakumux release rakumux.com knows of; absent while it knows none (and from an older rakumux.com).",
       "$ref": "urn:rakumux:feed:v1:common#/$defs/release"

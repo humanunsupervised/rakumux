@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:pairing",
+  "title": "POST /api/v1/feed/pairings success",
+  "description": "The pairing opened, as stored.",
+  "x-maxBodyBytes": 1024,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "pairing", "expires_at"],
+  "properties": {
+    "version": { "const": 1 },
+    "pairing": { "$ref": "urn:rakumux:feed:v1:common#/$defs/pairingId" },
+    "expires_at": { "$ref": "urn:rakumux:feed:v1:common#/$defs/timestampMs" }
+  }
+}
