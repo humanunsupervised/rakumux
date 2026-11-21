@@ -1,0 +1,211 @@
+{
+  "move": {
+    "valid": [
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+        "created_at": 1761220000000,
+        "status_at": 1761220000000,
+        "workspace": "Launch",
+        "status": "pending"
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+        "created_at": 1761220000000,
+        "status_at": 1761220000000,
+        "status": "pending"
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+        "created_at": 1761220000000,
+        "status_at": 1761220002000,
+        "workspace": "Launch",
+        "status": "moved"
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+        "created_at": 1761220000000,
+        "status_at": 1761220600000,
+        "workspace": "Launch",
+        "status": "expired"
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+        "created_at": 1761220000000,
+        "status_at": 1761220002000,
+        "workspace": "Launch",
+        "status": "failed",
+        "failure": "not_listed"
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+        "created_at": 1761220000000,
+        "status_at": 1761220002000,
+        "status": "failed",
+        "failure": "bad_signature"
+      }
+    ],
+    "invalid": [
+      {
+        "note": "a workspace name with white space at its end",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "workspace": "Launch ",
+          "status": "pending"
+        }
+      },
+      {
+        "note": "a workspace name of two lines",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "workspace": "Launch\nday",
+          "status": "pending"
+        }
+      },
+      {
+        "note": "a workspace name too long",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "workspace": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "status": "pending"
+        }
+      },
+      {
+        "note": "an empty workspace name",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "workspace": "",
+          "status": "pending"
+        }
+      },
+      {
+        "note": "a failure while pending",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "status": "pending",
+          "failure": "refused"
+        }
+      },
+      {
+        "note": "failed without why",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "status": "failed"
+        }
+      },
+      {
+        "note": "a path",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "workspace": "Launch",
+          "status": "pending",
+          "cwd": "/home/me"
+        }
+      },
+      {
+        "note": "a session that isn't an id",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "../etc",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "status": "pending"
+        }
+      }
+    ]
+  },
+  "status": {
+    "valid": [
+      {
+        "version": 1,
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "status": "moved"
+      },
+      {
+        "version": 1,
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "status": "failed",
+        "failure": "refused"
+      },
+      {
+        "version": 1,
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "status": "failed",
+        "failure": "unsigned"
+      }
+    ],
+    "invalid": [
+      {
+        "note": "moved with a failure",
+        "value": {
+          "version": 1,
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "status": "moved",
+          "failure": "refused"
+        }
+      },
+      {
+        "note": "failed without why",
+        "value": {
+          "version": 1,
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "status": "failed"
+        }
+      },
+      {
+        "note": "pending is not a report",
+        "value": {
+          "version": 1,
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "status": "pending"
+        }
+      }
+    ]
+  }
+}

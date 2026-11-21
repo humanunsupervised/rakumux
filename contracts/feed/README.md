@@ -25,6 +25,7 @@ conformance tests, not an HTTP server, database or local runtime.
 | `POST /api/v1/feed/new-sessions/status` | [new-session-status](new-session-status.schema.json) | [new-session](new-session.schema.json) |
 | `POST /api/v1/feed/session-deletions/status` | [session-deletion-status](session-deletion-status.schema.json) | [session-deletion](session-deletion.schema.json) |
 | `POST /api/v1/feed/session-renames/status` | [session-rename-status](session-rename-status.schema.json) | [session-rename](session-rename.schema.json) |
+| `POST /api/v1/feed/session-moves/status` | [session-move-status](session-move-status.schema.json) | [session-move](session-move.schema.json) |
 | `POST /api/v1/feed/heartbeats` | [heartbeats-upload](heartbeats-upload.schema.json) | [heartbeats-stored](heartbeats-stored.schema.json) |
 | `POST /api/v1/feed/heartbeat-actions/status` | [heartbeat-action-status](heartbeat-action-status.schema.json) | [heartbeat-action](heartbeat-action.schema.json) |
 | `POST /api/v1/feed/updates/status` | [update-status](update-status.schema.json) | [machine-update](machine-update.schema.json) |
@@ -221,7 +222,8 @@ conformance tests, not an HTTP server, database or local runtime.
   fetches a reply's attachments and gives the agent their paths; `resources`, it sends what it
   uses while rakumux.com asks (below); `delete_sessions`, it deletes sessions asked of it on
   rakumux.com (below); `rename_sessions`, it renames sessions asked of it on rakumux.com
-  (below); `new_sessions`, it takes new sessions asked of it on
+  (below); `workspaces`, it lists its workspaces and moves sessions between them (below);
+  `new_sessions`, it takes new sessions asked of it on
   rakumux.com (below); `new_session_agents`, it starts every agent in them, not only Claude
   Code, Codex and OpenCode (below); `question_answers`, it gives answers written on rakumux.com to
   the questions Claude Code asks in its own dialog (above); `question_answers.copilot`,
@@ -301,13 +303,31 @@ conformance tests, not an HTTP server, database or local runtime.
   a reason. Its next session list carries the new name. One still pending 10 minutes after it was
   written is `expired`. When the request is written the cloud pokes the account's machines (and
   wakes an enrolled one, below), as for a reply.
+- **Workspaces:** a machine's sessions may each be in one of its workspaces, named by the user
+  (`workspaceName`: one line, at most 64 characters, trimmed, unique on the machine), or in none.
+  A machine that says `workspaces` sends, once the cloud accepts `workspaces` (`sessions-stored`),
+  every workspace it has (`workspaces`, by name, empty ones too, at most 100) and each session's
+  (`sessionState` `workspace`, absent for none); pages put workspaces of one name on several
+  machines together. On rakumux.com the user can ask the machine that lists a session to move it
+  to a workspace, or out of any. The cloud stores the request (`sessionMove` in common, under the
+  id the page made) `pending`, only for a session that machine's latest list names and only when
+  that list advertises `workspaces`. The machine's replies read (naming itself with `machine`)
+  carries `session_moves`, its requests still pending, oldest first, at most 20, with every read
+  until reported or expired, whatever `after` says; they take no seq, so a machine takes each by
+  its `id`, at most once. The machine moves only a session it lists to rakumux.com, making a
+  workspace of that name when it has none, and reports `session-move-status`: `moved`, or
+  `failed` with why (`not_listed`, `refused`, or its signature's). Its next session list carries
+  the session's new workspace. One still pending 10 minutes after it was written is `expired`.
+  When the request is written the cloud pokes the account's machines, as for a reply. A workspace
+  made on rakumux.com before any session is in it is the account's own until a session is moved
+  into it: no machine is asked to make an empty one.
 - **Signed commands:** what rakumux.com asks of a machine is carried out only when a device the
   user paired with that machine signed it, so whoever can write to rakumux.com, its database or
   its deploys can't make a machine act. A machine that says `signed_commands` in its session list
   sends its id (`machine_id`, as in `X-Rakumux-Machine-Id`) and its devices (`paired_devices`:
   each key's id, format and name, never its public key). A **command** is a JSON object, signed
   as its exact bytes: `{v: 1, kind, machine, id, at, expires, ...}`, where `machine` is the
-  machine's id, `id` the request's (the reply's, the new session's, the deletion's, the rename's),
+  machine's id, `id` the request's (the reply's, the new session's, the deletion's, the rename's, the move's),
   `at` when it was signed and `expires` when it stops being good (Unix ms, at most
   an hour after `at`; a machine allows a signer's clock 5 minutes ahead of its own). By kind, the
   fields a machine compares with what it's asked (a field left out must be absent there too):
@@ -318,7 +338,7 @@ conformance tests, not an HTTP server, database or local runtime.
   `folder`, `folder_session`, `agent` and `prompt`, the first prompt asked for with it (the
   session message rakumux.com writes with that prompt once the session is `created` carries the
   same `signed`, and the machine takes it only into the session it started for that request);
-  `delete_session`: `session`; `rename_session`: `session`, `name`; `heartbeat_action`:
+  `delete_session`: `session`; `rename_session`: `session`, `name`; `move_session`: `session`, `workspace` (null for none); `heartbeat_action`:
   `heartbeat`, `action` (`signed` on the heartbeat action; only `pause` is carried out); `update`:
   `version` (0.1.62 only: no update is asked of a machine any more). The signature (`signed` on
   the request, `signedCommand` in common) is a WebAuthn assertion of a passkey for the signer
