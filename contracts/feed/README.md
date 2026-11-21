@@ -307,8 +307,8 @@ conformance tests, not an HTTP server, database or local runtime.
   sends its id (`machine_id`, as in `X-Rakumux-Machine-Id`) and its devices (`paired_devices`:
   each key's id, format and name, never its public key). A **command** is a JSON object, signed
   as its exact bytes: `{v: 1, kind, machine, id, at, expires, ...}`, where `machine` is the
-  machine's id, `id` the request's (the reply's, the new session's, the deletion's, the rename's,
-  the update's), `at` when it was signed and `expires` when it stops being good (Unix ms, at most
+  machine's id, `id` the request's (the reply's, the new session's, the deletion's, the rename's),
+  `at` when it was signed and `expires` when it stops being good (Unix ms, at most
   an hour after `at`; a machine allows a signer's clock 5 minutes ahead of its own). By kind, the
   fields a machine compares with what it's asked (a field left out must be absent there too):
   `reply` (every row of the replies read: a reply, a session message, an answer, a pick):
@@ -318,8 +318,9 @@ conformance tests, not an HTTP server, database or local runtime.
   `folder`, `folder_session`, `agent` and `prompt`, the first prompt asked for with it (the
   session message rakumux.com writes with that prompt once the session is `created` carries the
   same `signed`, and the machine takes it only into the session it started for that request);
-  `delete_session`: `session`; `rename_session`: `session`, `name`; `update`: `version`.
-  Heartbeat actions are never signed: only `pause` is carried out. The signature (`signed` on
+  `delete_session`: `session`; `rename_session`: `session`, `name`; `update`: `version` (0.1.62
+  only: no update is asked of a machine any more). Heartbeat actions are never signed: only `pause`
+  is carried out. The signature (`signed` on
   the request, `signedCommand` in common) is a WebAuthn assertion of a passkey for the signer
   site (`https://rakumux-sign.com`; its challenge the command's SHA-256, user presence and
   verification both set) or an ECDSA P-256 signature over the command by the phone app's key.
@@ -374,19 +375,16 @@ conformance tests, not an HTTP server, database or local runtime.
   stable Rakumux release rakumux.com knows of: GitHub's latest release, read again every few
   minutes and as one is published. A machine's account service passes it to the TUIs, which offer
   the update. A session list says the machine's own `rakumux_version` (absent from a development
-  build), and `remote_update` in `capabilities` once the machine installs releases asked of it.
-  On rakumux.com the user can ask such a machine to update; the cloud stores the request
-  (`machineUpdateState` in common: one open per machine, `pending`), pokes the account's
-  machines, and gives it to that machine only (`updates` in its replies read, `{id, version}`,
-  at most one, with every read until done or expired). It carries no command and no URL: the
-  machine installs that version through its own verified path (signed GitHub releases), never one
-  older than its own (`install_failed`, nothing fetched; from 0.1.61), restarts
-  its server in place (sessions keep running) and its services, and reports `update-status`:
-  `installing` as it starts, then `updated`, or `failed` with why (`unsupported`: npm, Homebrew
-  or a source build; `install_failed`; `restart_failed`), each at most once and only for its own
-  machine; the answer is the stored update (`machine-update`). One not reported done within 15
-  minutes is `expired`. A machine marks an id handled before installing, so it installs at most
-  once whatever happens to it meanwhile.
+  build). **A machine updates only from itself** (its TUI's `U`, or automatic updates there):
+  rakumux.com asks no machine to update, since whoever can write to it could otherwise have every
+  machine install something. Releases up to 0.1.62 said `remote_update` in `capabilities` and
+  installed the release a replies read's `updates` asked of them (`{id, version}`, at most one;
+  `machineUpdateState` in common), reporting `update-status` (`installing`, then `updated`, or
+  `failed` with why: `unsupported`, `install_failed`, `restart_failed`; the answer the stored
+  update, `machine-update`); the cloud no longer sends `updates` to any machine, and from 0.1.63 a
+  machine neither says `remote_update` nor reads `updates`. The fields, the capability and the
+  status route stay in the contract for those releases; an update asked before is still taken as
+  reported, and one not reported done within 15 minutes is `expired`.
 - **Pokes:** instead of reading its replies every few seconds, a machine can be told when to.
   `GET /api/v1/feed/realtime` (the machine id header required, else `invalid_request`) gives a
   WebSocket `url` and a `token` that admits that machine of the account once, before

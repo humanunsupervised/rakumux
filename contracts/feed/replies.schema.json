@@ -56,7 +56,7 @@
       "$ref": "urn:rakumux:feed:v1:common#/$defs/release"
     },
     "updates": {
-      "description": "Only for a reader that names itself (`machine`) and whose latest session list advertises `remote_update`: the update asked of that machine on rakumux.com that isn't done (at most one), with every read until the machine reports it `updated` or `failed` or it expires; absent otherwise.",
+      "description": "No longer sent: a machine updates only from itself (README, Releases and updates). Releases up to 0.1.62, whose session list says `remote_update`, installed the update this asked of them (at most one, with every read until reported `updated` or `failed` or expired).",
       "type": "array",
       "maxItems": 1,
       "items": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machineUpdate" }

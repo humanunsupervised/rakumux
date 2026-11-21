@@ -1043,7 +1043,7 @@
       }
     },
     "machineUpdate": {
-      "description": "An update to `version` asked of a machine on rakumux.com, as the replies read brings it to that machine (only to one whose session list says `remote_update`): the machine installs that release through its verified update path, restarts its server in place (its sessions keep running) and its services, and reports how that went (`update-status`).",
+      "description": "An update to `version` asked of a machine on rakumux.com, as the replies read brought it to releases up to 0.1.62 (whose session list says `remote_update`): the machine installed that release through its verified update path, restarted its server in place and its services, and reported how that went (`update-status`). No longer sent: a machine updates only from itself.",
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "version"],

@@ -21,7 +21,7 @@ test("the replies read brings a machine at most one update, an id and a version"
   assert.equal(validators.replies(read({ updates: [{ id: "x", version: "0.1.49" }] })), false);
 });
 
-test("a session list may say the machine's version and that it updates when asked", () => {
+test("a session list may say the machine's version, and remote_update from releases up to 0.1.62", () => {
   const list = { version: 1, machine: "studio", sessions: [], at: 1761220000000, capabilities: ["new_sessions", "remote_update"], rakumux_version: "0.1.49" };
   assert.equal(validators.sessionsUpload(list), true);
   assert.equal(validators.sessionsUpload({ ...list, rakumux_version: "0.1" }), false);
