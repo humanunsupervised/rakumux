@@ -36,6 +36,7 @@ use fake_cloud::{ulid, FakeCloud, Machine, Phone};
 use serde_json::{json, Value};
 use session_core::api::CreateSession;
 use session_core::client::{AuthMode, Client, ClientConfig, SessionApi};
+use session_core::ids::SessionId;
 use session_core::model::{Lifecycle, ScopeRoot, SessionView};
 use session_core::paths::{Layout, Registration};
 use std::os::unix::fs::PermissionsExt;
@@ -350,6 +351,138 @@ fn a_session_asked_on_rakumux_com_to_be_renamed_takes_the_name_once() {
         world.diagnostics()
     );
     assert_eq!(client.get(&session.id).unwrap().name, "by hand");
+    service.stop();
+    let _ = client.shutdown();
+    daemon.stop();
+}
+
+/// Workspaces on rakumux.com: once the cloud takes them, the session list
+/// names every workspace (an empty one too) and each session's; a signed move
+/// from rakumux.com puts a session in the workspace of that name (made on the
+/// machine when it has none, the one of that name ignoring case when it
+/// has), or out of any, and is reported `moved`; an unsigned move and one for
+/// a session this machine doesn't list are refused, nothing moved.
+#[test]
+fn sessions_move_between_workspaces_asked_on_rakumux_com_only_when_signed() {
+    let world = World::new();
+    world.cloud.state().accepts = vec!["workspaces"];
+    let mut daemon = world.start_daemon();
+    let client = world.client();
+    let launch = client.workspace_create("Launch").unwrap();
+    client.workspace_create("Empty").unwrap();
+    let create = |name: &str, workspace: Option<&session_core::ids::WorkspaceId>| {
+        client
+            .create(CreateSession {
+                scope: Some(ScopeRoot::resolve(&world.work).unwrap()),
+                name: Some(name.into()),
+                cwd: None,
+                argv: Some(vec!["/bin/sleep".into(), "600".into()]),
+                startup_cmds: Vec::new(),
+                env: Vec::new(),
+                cols: 80,
+                rows: 24,
+                machine: None,
+                prefill: None,
+                first_input: None,
+                workspace: workspace.cloned(),
+            })
+            .unwrap()
+    };
+    let lead = create("lead", Some(&launch.id));
+    let loose = create("loose", None);
+    let mut service = world.start_service(1);
+    let listed = |id: &str| -> Option<Value> {
+        let state = world.cloud.state();
+        state.sessions.as_ref().and_then(|list| {
+            list["sessions"]
+                .as_array()?
+                .iter()
+                .find(|s| s["id"] == id)
+                .cloned()
+        })
+    };
+    let workspaces = || -> Value {
+        let state = world.cloud.state();
+        state
+            .sessions
+            .as_ref()
+            .map_or(Value::Null, |list| list["workspaces"].clone())
+    };
+    world.wait("the session list to name the workspaces", || {
+        world.cloud.state().says("workspaces")
+            && workspaces() == json!(["Launch", "Empty"])
+            && listed(lead.id.as_str()).is_some_and(|s| s["workspace"] == "Launch")
+            && listed(loose.id.as_str()).is_some_and(|s| s.get("workspace").is_none())
+    });
+
+    let reported = |id: &str| -> Option<Value> {
+        world
+            .cloud
+            .state()
+            .move_reports
+            .iter()
+            .find(|report| report["id"] == id)
+            .cloned()
+    };
+    let named = |id: &SessionId| -> Option<String> {
+        let workspace = client.get(id).unwrap().workspace?;
+        client
+            .workspaces()
+            .unwrap()
+            .into_iter()
+            .find(|known| known.id == workspace)
+            .map(|known| known.name)
+    };
+    // Into a workspace the machine hasn't: made there.
+    let research = world
+        .cloud
+        .ask_move(MACHINE, loose.id.as_str(), Some("Research"), true);
+    world.wait("the move into Research reported", || {
+        reported(&research).is_some()
+    });
+    assert_eq!(
+        reported(&research).unwrap()["status"],
+        "moved",
+        "{}",
+        world.diagnostics()
+    );
+    assert_eq!(named(&loose.id).as_deref(), Some("Research"));
+    world.wait("the session list to carry Research", || {
+        workspaces() == json!(["Launch", "Empty", "Research"])
+            && listed(loose.id.as_str()).is_some_and(|s| s["workspace"] == "Research")
+    });
+    // Into one it has, named in another case: that one, none made.
+    let into_launch = world
+        .cloud
+        .ask_move(MACHINE, loose.id.as_str(), Some("launch"), true);
+    // Out of any.
+    let out = world.cloud.ask_move(MACHINE, lead.id.as_str(), None, true);
+    // Unsigned, and for a session this machine doesn't list: refused.
+    let unsigned = world
+        .cloud
+        .ask_move(MACHINE, loose.id.as_str(), Some("Empty"), false);
+    let unknown = world.cloud.ask_move(MACHINE, &ulid(), Some("Launch"), true);
+    world.wait("the four moves reported", || {
+        [&into_launch, &out, &unsigned, &unknown]
+            .iter()
+            .all(|id| reported(id).is_some())
+    });
+    assert_eq!(reported(&into_launch).unwrap()["status"], "moved");
+    assert_eq!(reported(&out).unwrap()["status"], "moved");
+    assert_eq!(reported(&unsigned).unwrap()["failure"], "unsigned");
+    assert_eq!(reported(&unknown).unwrap()["failure"], "not_listed");
+    assert_eq!(
+        named(&loose.id).as_deref(),
+        Some("Launch"),
+        "{}",
+        world.diagnostics()
+    );
+    assert_eq!(named(&lead.id), None);
+    assert_eq!(client.workspaces().unwrap().len(), 3);
+    world.wait("the session list to carry the moves", || {
+        listed(loose.id.as_str()).is_some_and(|s| s["workspace"] == "Launch")
+            && listed(lead.id.as_str()).is_some_and(|s| s.get("workspace").is_none())
+    });
     service.stop();
     let _ = client.shutdown();
     daemon.stop();

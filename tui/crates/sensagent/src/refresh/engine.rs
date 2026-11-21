@@ -176,6 +176,7 @@ pub struct StatusRefresher<S, A, C = SystemClock> {
     /// Where the devices paired with this machine are kept.
     paired_devices: Option<std::path::PathBuf>,
     session_rename_state: Option<std::path::PathBuf>,
+    session_move_state: Option<std::path::PathBuf>,
     heartbeat_action_state: Option<std::path::PathBuf>,
     /// This Rakumux's version, which the session list says.
     version: Option<String>,
@@ -223,6 +224,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             session_deletion_state: None,
             paired_devices: None,
             session_rename_state: None,
+            session_move_state: None,
             heartbeat_action_state: None,
             version: None,
             machine: None,
@@ -317,6 +319,12 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
         self
     }
 
+    /// Keep which moves asked for on rakumux.com were handled in `path`.
+    pub fn with_session_move_state(mut self, path: std::path::PathBuf) -> Self {
+        self.session_move_state = Some(path);
+        self
+    }
+
     /// Keep which heartbeat actions asked for on rakumux.com were handled in `path`.
     pub fn with_heartbeat_action_state(mut self, path: std::path::PathBuf) -> Self {
         self.heartbeat_action_state = Some(path);
@@ -336,6 +344,11 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     /// Where renames keep their state, if anywhere.
     pub(crate) fn session_rename_state(&self) -> Option<std::path::PathBuf> {
         self.session_rename_state.clone()
+    }
+
+    /// Where moves keep their state, if anywhere.
+    pub(crate) fn session_move_state(&self) -> Option<std::path::PathBuf> {
+        self.session_move_state.clone()
     }
 
     /// Where heartbeat actions keep their state, if anywhere.

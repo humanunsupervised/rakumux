@@ -151,6 +151,8 @@ pub(crate) enum FeedRequest {
     SessionDeletionStatus { body: Vec<u8> },
     /// Say whether a session rakumux.com asked to rename was renamed, as `body`.
     SessionRenameStatus { body: Vec<u8> },
+    /// Say whether a session rakumux.com asked to move was moved, as `body`.
+    SessionMoveStatus { body: Vec<u8> },
     /// Upload this machine's whole list of heartbeats, as `body`.
     Heartbeats { body: Vec<u8> },
     /// Say how a heartbeat action asked for on rakumux.com went, as `body`.
@@ -374,6 +376,8 @@ struct SessionsUpload<'a> {
     paired_devices: Option<&'a [ListedDevice]>,
     #[serde(skip_serializing_if = "Option::is_none")]
     machine_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    workspaces: Option<&'a [String]>,
 }
 
 /// A device paired with this machine, as its session list names it
@@ -404,10 +408,19 @@ pub(crate) fn sessions_upload(
     capabilities: &[&str],
     rakumux_version: Option<&str>,
 ) -> Option<FeedRequest> {
-    signed_sessions_upload(machine, sessions, at, capabilities, rakumux_version, None)
+    signed_sessions_upload(
+        machine,
+        sessions,
+        at,
+        capabilities,
+        rakumux_version,
+        None,
+        None,
+    )
 }
 
-/// [`sessions_upload`], with what it says of signing when given.
+/// [`sessions_upload`], with what it says of signing, and every workspace
+/// (`workspaces`, to a cloud that takes them), when given.
 pub(crate) fn signed_sessions_upload(
     machine: &str,
     sessions: &[super::sessions::SessionState],
@@ -415,6 +428,7 @@ pub(crate) fn signed_sessions_upload(
     capabilities: &[&str],
     rakumux_version: Option<&str>,
     signing: Option<&ListedSigning>,
+    workspaces: Option<&[String]>,
 ) -> Option<FeedRequest> {
     let body = serde_json::to_vec(&SessionsUpload {
         version: 1,
@@ -425,6 +439,7 @@ pub(crate) fn signed_sessions_upload(
         rakumux_version,
         paired_devices: signing.map(|signing| signing.devices.as_slice()),
         machine_id: signing.map(|signing| signing.machine_id.as_str()),
+        workspaces,
     })
     .ok()?;
     Some(FeedRequest::Sessions { body })
@@ -459,6 +474,9 @@ pub(crate) struct SessionsStored {
     /// It takes this machine's id and paired devices (`accepts` has
     /// `signed_commands`).
     pub signed_commands: bool,
+    /// It takes this machine's workspaces and each session's (`accepts`
+    /// has `workspaces`).
+    pub workspaces: bool,
 }
 
 /// How many sessions rakumux.com holds for this machine now, and whether it
@@ -480,6 +498,7 @@ pub(crate) fn sessions_stored(reply: &FeedHttpReply) -> Result<SessionsStored, F
         choices: stored.accepts.iter().any(|name| name == "choices"),
         heartbeats: stored.accepts.iter().any(|name| name == "heartbeats"),
         signed_commands: stored.accepts.iter().any(|name| name == "signed_commands"),
+        workspaces: stored.accepts.iter().any(|name| name == "workspaces"),
     })
 }
 
@@ -1183,6 +1202,10 @@ struct WireReplies {
     /// Sessions asked of this machine to rename (`session_renames`), read row by row.
     #[serde(default)]
     session_renames: Option<serde_json::Value>,
+    /// Sessions asked of this machine to move between workspaces
+    /// (`session_moves`), read row by row.
+    #[serde(default)]
+    session_moves: Option<serde_json::Value>,
     /// Heartbeat actions asked of this machine (`heartbeat_actions`), read row by row.
     #[serde(default)]
     heartbeat_actions: Option<serde_json::Value>,
@@ -1220,6 +1243,8 @@ pub(crate) struct RepliesRead {
     pub session_deletions: Vec<super::session_deletions::DeletionAsk>,
     /// The renames pending for this machine, when the read brought them.
     pub session_renames: Vec<super::session_renames::RenameAsk>,
+    /// The moves pending for this machine, when the read brought them.
+    pub session_moves: Vec<super::session_moves::MoveAsk>,
     /// The heartbeat actions pending for this machine, when the read brought them.
     pub heartbeat_actions: Vec<super::heartbeat_actions::ActionAsk>,
     /// The newest stable release rakumux.com knows of, when it says.
@@ -1289,6 +1314,7 @@ pub(crate) fn replies(reply: &FeedHttpReply) -> Result<RepliesRead, FeedFailure>
         new_sessions: super::new_sessions::asks(page.new_sessions),
         session_deletions: super::session_deletions::asks(page.session_deletions),
         session_renames: super::session_renames::asks(page.session_renames),
+        session_moves: super::session_moves::asks(page.session_moves),
         heartbeat_actions: super::heartbeat_actions::asks(page.heartbeat_actions),
         release: super::updates::release(page.release),
     })

@@ -56,11 +56,14 @@ pub(crate) enum FeedResult {
     /// A session deletion's status was taken.
     SessionDeletionReported,
     /// A pairing was opened, or (`taken`) another machine's holds its id.
-    PairingOpened { taken: bool },
+    PairingOpened {
+        taken: bool,
+    },
     /// A pairing's report was taken.
     PairingReported,
     /// A session rename's status was taken.
     SessionRenameReported,
+    SessionMoveReported,
     /// This machine's heartbeats were stored.
     HeartbeatsStored,
     /// A heartbeat action's status was taken.
@@ -100,6 +103,7 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
             | FeedRequest::NewSessionStatus { .. }
             | FeedRequest::SessionDeletionStatus { .. }
             | FeedRequest::SessionRenameStatus { .. }
+            | FeedRequest::SessionMoveStatus { .. }
             | FeedRequest::Heartbeats { .. }
             | FeedRequest::HeartbeatActionStatus { .. }
             | FeedRequest::PairingOpen { .. }
@@ -123,6 +127,7 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
             FeedRequest::NewSessionStatus { body } => FeedHttp::NewSessionStatus(body),
             FeedRequest::SessionDeletionStatus { body } => FeedHttp::SessionDeletionStatus(body),
             FeedRequest::SessionRenameStatus { body } => FeedHttp::SessionRenameStatus(body),
+            FeedRequest::SessionMoveStatus { body } => FeedHttp::SessionMoveStatus(body),
             FeedRequest::Heartbeats { body } => FeedHttp::Heartbeats(body),
             FeedRequest::HeartbeatActionStatus { body } => FeedHttp::HeartbeatActionStatus(body),
             FeedRequest::PairingOpen { body } => FeedHttp::PairingOpen(body),
@@ -176,6 +181,8 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
                         super::session_renames::reported(&reply)
                             .map(|()| FeedResult::SessionRenameReported)
                     }
+                    FeedRequest::SessionMoveStatus { .. } => super::session_moves::reported(&reply)
+                        .map(|()| FeedResult::SessionMoveReported),
                     FeedRequest::Heartbeats { .. } => {
                         super::heartbeats::stored(&reply).map(|()| FeedResult::HeartbeatsStored)
                     }

@@ -51,6 +51,7 @@ fn the_daemons_features_are_read_again_at_each_resubscribe() {
             agent_answers: [false; 5],
             choices: false,
             heartbeats: false,
+            workspaces: false,
         })
     );
     assert_eq!(
@@ -63,6 +64,7 @@ fn the_daemons_features_are_read_again_at_each_resubscribe() {
             agent_answers: [false, false, false, true, true],
             choices: false,
             heartbeats: false,
+            workspaces: false,
         })
     );
     // Capabilities not known (an adapter, a fake): neither.

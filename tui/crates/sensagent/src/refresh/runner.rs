@@ -15,6 +15,7 @@ use session_core::client::SessionApi;
 use session_core::heartbeat::Heartbeat;
 use session_core::ids::{ReplyId, SessionId};
 use session_core::model::{SessionStatus, SessionView};
+use session_core::workspace::Workspace;
 use thiserror::Error;
 
 use super::awake::Awake;
@@ -33,10 +34,11 @@ use crate::dispatch::{DispatchError, FeaturesCompletion, FeaturesJob, StatusCons
 use crate::feed::{
     ActionWork, ChatSync, ChatWork, DeletionWork, DeviceView, FeedCompletion, FeedFailure, FeedJob,
     FeedPage, FeedReply, FeedRequest, FeedResult, FeedSync, Fetch, Fetched, HeartbeatAction,
-    HeartbeatActionFailure, HeartbeatActionSync, HeartbeatSync, HeartbeatWork, LogSync,
+    HeartbeatActionFailure, HeartbeatActionSync, HeartbeatSync, HeartbeatWork, LogSync, MoveWork,
     NewSessionSync, NewSessionWork, PairingAction, PairingSync, PairingView, PokeEvent, PokeSync,
     RealtimeToken, RenameWork, ReplySync, ReplyWork, ResourceSync, ResourceWork,
-    SessionDeletionSync, SessionMessage, SessionRenameSync, SessionSync, TurnRead, Uploads,
+    SessionDeletionSync, SessionMessage, SessionMoveSync, SessionRenameSync, SessionSync, TurnRead,
+    Uploads,
 };
 use crate::status::{ConsentRevision, ConsentSnapshot, FolderConsent, StatusStore};
 
@@ -45,6 +47,9 @@ const TICK: Duration = Duration::from_secs(1);
 /// Requests already out under a name another machine holds are refused too:
 /// the name changes at most this often, so they don't change it again.
 const RENAME_EVERY: Duration = Duration::from_secs(20);
+/// How often the daemon's workspaces are read again at least, while it has
+/// them (sooner when a session names one not read yet).
+const WORKSPACES_EVERY: Duration = Duration::from_secs(60);
 /// How often stream readers check for a stop.
 const POLL: Duration = Duration::from_millis(100);
 /// First and longest wait before resubscribing to the daemon.
@@ -147,6 +152,9 @@ struct DaemonFeatures {
     /// It runs heartbeats (capability `heartbeats`): they're uploaded, and
     /// actions on them taken, only then.
     heartbeats: bool,
+    /// It has workspaces (capability `workspaces`): they're listed, and
+    /// sessions moved between them, only then.
+    workspaces: bool,
 }
 
 impl DaemonFeatures {
@@ -163,6 +171,7 @@ impl DaemonFeatures {
                 .map(|(daemon, _)| has(CAPABILITY_ANSWER) && has(daemon)),
             choices: has(session_core::api::CAPABILITY_CHOOSE),
             heartbeats: has(CAPABILITY_HEARTBEATS),
+            workspaces: has(session_core::api::CAPABILITY_WORKSPACES),
         }
     }
 }
@@ -235,6 +244,13 @@ enum Message {
     SessionRenamed(String, Result<(), ErrorCode>),
     /// A rename's status report finished.
     SessionRenameReported(FeedCompletion),
+    /// The daemon moved the session a request from rakumux.com (its id)
+    /// named, or refused.
+    SessionMoved(String, Result<(), ErrorCode>),
+    /// A move's status report finished.
+    SessionMoveReported(FeedCompletion),
+    /// The daemon's workspaces, as read (or why not).
+    Workspaces(Result<Vec<Workspace>, ErrorCode>),
     /// The daemon's heartbeats, as read (or why not).
     Heartbeats(Result<Vec<Heartbeat>, ErrorCode>),
     /// The heartbeats' upload finished.
@@ -324,6 +340,13 @@ enum Work<A, C> {
     RenameSession(String, SessionId, String),
     /// Report a rename's status.
     SessionRenameReport(FeedJob<A, C>),
+    /// Move the session a request from rakumux.com (its id) names into the
+    /// workspace of that name, or out of any.
+    MoveSession(String, SessionId, Option<String>),
+    /// Report a move's status.
+    SessionMoveReport(FeedJob<A, C>),
+    /// Ask the daemon for its workspaces.
+    ReadWorkspaces,
     /// Ask the daemon for its heartbeats.
     ReadHeartbeats,
     /// Upload this machine's heartbeats.
@@ -360,6 +383,8 @@ impl<A, C> Workers<A, C> {
             | Work::CreateSession(..)
             | Work::DeleteSession(..)
             | Work::RenameSession(..)
+            | Work::MoveSession(..)
+            | Work::ReadWorkspaces
             | Work::ReadHeartbeats
             | Work::HeartbeatAct(..) => self.replies.send(work),
             work => self.shared.send(work),
@@ -762,6 +787,12 @@ fn own<S, A, C>(
             .signing(guard.clone());
     let mut renames = SessionRenameSync::new(machine.clone(), refresher.session_rename_state())
         .signing(guard.clone());
+    let mut moves = SessionMoveSync::new(machine.clone(), refresher.session_move_state())
+        .signing(guard.clone());
+    // The daemon has workspaces (capability `workspaces`), and when they're
+    // read next.
+    let mut daemon_workspaces = false;
+    let mut workspaces_read = WorkspaceRead::default();
     let mut heartbeats = HeartbeatSync::new(machine.clone(), std::env::var("HOME").ok());
     let mut heartbeat_actions =
         HeartbeatActionSync::new(machine.clone(), refresher.heartbeat_action_state())
@@ -839,6 +870,10 @@ fn own<S, A, C>(
             follow_new_sessions(&refresher, &mut new_sessions, confirmed, work, now);
             follow_deletions(&refresher, &mut deletions, confirmed, work, now);
             follow_renames(&refresher, &mut renames, confirmed, work, now);
+            follow_moves(&refresher, &mut moves, confirmed, work, now);
+            if daemon_workspaces && now >= workspaces_read.next {
+                workspaces_read.ask(work, now);
+            }
             follow_pairings(&refresher, &mut pairings, confirmed, work, now);
             // A pairing waits for its device: read its proposal soon.
             if pairings.waiting() && now >= next_pairing_read {
@@ -926,6 +961,11 @@ fn own<S, A, C>(
                 sessions.set_choices(daemon.choices);
                 sessions.set_heartbeats(daemon.heartbeats);
                 daemon_heartbeats = daemon.heartbeats;
+                sessions.set_workspaces(daemon.workspaces);
+                daemon_workspaces = daemon.workspaces;
+                if daemon_workspaces {
+                    workspaces_read.ask(work, now);
+                }
                 heartbeats.connected(now);
                 replies.set_answers(daemon.answers);
                 replies.set_choices(daemon.choices);
@@ -944,6 +984,7 @@ fn own<S, A, C>(
                 new_sessions.connected(&views);
                 deletions.connected(&views);
                 renames.connected(&views);
+                moves.connected(&views);
                 let _ = work.send(Work::Replies(after));
             }
             Message::Event(event) => {
@@ -960,6 +1001,10 @@ fn own<S, A, C>(
                         new_sessions.observe(session);
                         deletions.observe(session);
                         renames.observe(session);
+                        moves.observe(session);
+                        if daemon_workspaces && !sessions.knows_workspace(session) {
+                            workspaces_read.ask(work, now);
+                        }
                     }
                     SessionEvent::Removed => {
                         feed.forget(&event.session_id);
@@ -969,6 +1014,7 @@ fn own<S, A, C>(
                         new_sessions.forget(&event.session_id);
                         deletions.forget(&event.session_id);
                         renames.forget(&event.session_id);
+                        moves.forget(&event.session_id);
                     }
                     _ => {}
                 }
@@ -1014,6 +1060,7 @@ fn own<S, A, C>(
                         &mut deletions,
                         &mut pairings,
                         &mut renames,
+                        &mut moves,
                         &mut heartbeats,
                         &mut heartbeat_actions,
                         now,
@@ -1056,6 +1103,7 @@ fn own<S, A, C>(
                     deletions.read(current, std::mem::take(&mut read.session_deletions));
                     pairings.read(current, &read.pairings, crate::signing::now_ms());
                     renames.read(current, std::mem::take(&mut read.session_renames));
+                    moves.read(current, std::mem::take(&mut read.session_moves));
                     heartbeat_actions.read(current, std::mem::take(&mut read.heartbeat_actions));
                     // So does the newest release.
                     if let Some(release) = read.release.take().filter(|_| current) {
@@ -1083,6 +1131,7 @@ fn own<S, A, C>(
                         &mut deletions,
                         &mut pairings,
                         &mut renames,
+                        &mut moves,
                         &mut heartbeats,
                         &mut heartbeat_actions,
                         now,
@@ -1106,6 +1155,7 @@ fn own<S, A, C>(
                 );
                 follow_deletions(&refresher, &mut deletions, sessions.confirmed(), work, now);
                 follow_renames(&refresher, &mut renames, sessions.confirmed(), work, now);
+                follow_moves(&refresher, &mut moves, sessions.confirmed(), work, now);
                 follow_heartbeat_actions(
                     &refresher,
                     &mut heartbeat_actions,
@@ -1193,6 +1243,36 @@ fn own<S, A, C>(
                 });
                 deletions.reported(current, outcome, now);
                 follow_deletions(&refresher, &mut deletions, sessions.confirmed(), work, now);
+            }
+            Message::SessionMoved(id, result) => {
+                moves.moved(&id, result);
+                // Its workspace may be a new one: read them at once.
+                if daemon_workspaces {
+                    workspaces_read.ask(work, now);
+                }
+                follow_moves(&refresher, &mut moves, sessions.confirmed(), work, now);
+            }
+            Message::SessionMoveReported(completion) => {
+                let current = refresher.is_current(completion.revision);
+                let outcome = completion.outcome.and_then(|result| match result {
+                    FeedResult::SessionMoveReported => Ok(()),
+                    _ => Err(FeedFailure::Invalid),
+                });
+                moves.reported(current, outcome, now);
+                follow_moves(&refresher, &mut moves, sessions.confirmed(), work, now);
+            }
+            Message::Workspaces(result) => {
+                workspaces_read.reading = false;
+                // An older daemon after all: the list stops saying it has them.
+                match result {
+                    Ok(list) => sessions.set_workspace_list(list),
+                    Err(ErrorCode::Unsupported) => {
+                        daemon_workspaces = false;
+                        sessions.set_workspaces(false);
+                    }
+                    Err(_) => {}
+                }
+                follow_sessions(&refresher, &mut sessions, work, now);
             }
             Message::Heartbeats(result) => {
                 heartbeats.read_done(result, now);
@@ -1362,6 +1442,7 @@ fn own<S, A, C>(
                         &mut deletions,
                         &mut pairings,
                         &mut renames,
+                        &mut moves,
                         &mut heartbeats,
                         &mut heartbeat_actions,
                         now,
@@ -1386,6 +1467,7 @@ fn own<S, A, C>(
                         &mut deletions,
                         &mut pairings,
                         &mut renames,
+                        &mut moves,
                         &mut heartbeats,
                         &mut heartbeat_actions,
                         now,
@@ -1760,6 +1842,7 @@ fn rename(
     deletions: &mut SessionDeletionSync,
     pairings: &mut PairingSync,
     renames: &mut SessionRenameSync,
+    moves: &mut SessionMoveSync,
     heartbeats: &mut HeartbeatSync,
     heartbeat_actions: &mut HeartbeatActionSync,
     now: Duration,
@@ -1775,6 +1858,7 @@ fn rename(
     deletions.rename(machine.to_owned());
     pairings.rename(machine.to_owned());
     renames.rename(machine.to_owned());
+    moves.rename(machine.to_owned());
     heartbeats.rename(machine.to_owned(), now);
     heartbeat_actions.rename(machine.to_owned());
 }
@@ -1992,6 +2076,67 @@ fn follow_pairings<S, A, C>(
                 let _ = work.send(Work::Pairing(job));
             }
             None => pairings.reported(false, Err(FeedFailure::Unauthorized), now),
+        }
+    }
+}
+
+/// When the daemon's workspaces are read next, and whether a read is out.
+#[derive(Default)]
+struct WorkspaceRead {
+    next: Duration,
+    reading: bool,
+}
+
+impl WorkspaceRead {
+    /// Read them now, unless a read is out already (its answer comes soon).
+    fn ask<A, C>(&mut self, work: &Workers<A, C>, now: Duration) {
+        if self.reading {
+            return;
+        }
+        self.reading = true;
+        self.next = now + WORKSPACES_EVERY;
+        let _ = work.send(Work::ReadWorkspaces);
+    }
+}
+
+/// Start what sessions asked on rakumux.com to move between workspaces need
+/// next: move one (or decide it can't be), then report. Only while signed in
+/// with the account's feed on and rakumux.com `confirmed` this machine's
+/// name.
+fn follow_moves<S, A, C>(
+    refresher: &StatusRefresher<S, A, C>,
+    moves: &mut SessionMoveSync,
+    confirmed: bool,
+    work: &Workers<A, C>,
+    now: Duration,
+) where
+    S: StatusStore,
+    A: CredentialStore + 'static,
+    C: WallClock + 'static,
+{
+    let enabled =
+        refresher.account().is_some() && refresher.feed_switch() == Some(true) && confirmed;
+    moves.set_enabled(enabled, now);
+    // One move and one report out at a time: a few rounds at most.
+    for _ in 0..4 {
+        match moves.next_work(now) {
+            Some(MoveWork::Move {
+                id,
+                session,
+                workspace,
+            }) => {
+                let _ = work.send(Work::MoveSession(id, session, workspace));
+            }
+            Some(MoveWork::Report(request)) => match refresher.feed_job(request) {
+                Some(job) => {
+                    let _ = work.send(Work::SessionMoveReport(job));
+                }
+                None => {
+                    moves.reported(false, Err(FeedFailure::Unauthorized), now);
+                    return;
+                }
+            },
+            None => return,
         }
     }
 }
@@ -2553,6 +2698,24 @@ where
                     .map(|_| ())
                     .map_err(|error| error.code);
                 Message::SessionRenamed(id, result)
+            }
+            Ok(Work::MoveSession(id, session, workspace)) => {
+                let result =
+                    crate::feed::carry_out_session_move(api, &session, workspace.as_deref());
+                Message::SessionMoved(id, result)
+            }
+            Ok(Work::ReadWorkspaces) => {
+                Message::Workspaces(api.workspaces().map_err(|error| error.code))
+            }
+            Ok(Work::SessionMoveReport(job)) => {
+                let revision = job.revision;
+                match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
+                    Ok(completion) => Message::SessionMoveReported(completion),
+                    Err(_) => Message::SessionMoveReported(FeedCompletion {
+                        revision,
+                        outcome: Err(FeedFailure::Unavailable(None)),
+                    }),
+                }
             }
             Ok(Work::ReadHeartbeats) => {
                 Message::Heartbeats(api.heartbeats(None).map_err(|error| error.code))

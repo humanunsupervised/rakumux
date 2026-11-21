@@ -44,6 +44,7 @@ fn stored(places: bool) -> wire::SessionsStored {
         choices: false,
         heartbeats: false,
         signed_commands: false,
+        workspaces: false,
     }
 }
 
@@ -214,6 +215,7 @@ fn rakumux_com_says_how_many_it_holds() {
             choices: false,
             heartbeats: false,
             signed_commands: false,
+            workspaces: false,
         })
     );
     // A cloud that takes places says so; names it doesn't know are ignored.
@@ -230,6 +232,7 @@ fn rakumux_com_says_how_many_it_holds() {
             choices: false,
             heartbeats: false,
             signed_commands: false,
+            workspaces: false,
         })
     );
     // One that takes subagents' messages in chats says that too.
@@ -246,6 +249,7 @@ fn rakumux_com_says_how_many_it_holds() {
             choices: false,
             heartbeats: false,
             signed_commands: false,
+            workspaces: false,
         })
     );
     // And one that takes agents' latest steps.
@@ -262,6 +266,7 @@ fn rakumux_com_says_how_many_it_holds() {
             choices: false,
             heartbeats: false,
             signed_commands: false,
+            workspaces: false,
         })
     );
     assert_eq!(
@@ -610,4 +615,75 @@ fn a_prompt_with_numbered_options_goes_while_the_daemon_picks_and_the_cloud_take
     sessions.connected(&[asking]);
     let upload = body(sessions.next_request(NOW + 2 * HEARTBEAT, WALL));
     assert!(upload["sessions"][0].get("choice").is_none(), "{upload}");
+}
+
+#[test]
+fn workspaces_go_by_name_while_the_daemon_has_them_and_rakumux_com_takes_them() {
+    let launch = Workspace {
+        id: WorkspaceId::generate(),
+        name: "Launch".into(),
+        created_at: 1,
+    };
+    let empty = Workspace {
+        id: WorkspaceId::generate(),
+        name: "Empty".into(),
+        created_at: 2,
+    };
+    let mut in_launch = view("01K89ZQ4D2F6H8J0K2M4N6P8R0");
+    in_launch.workspace = Some(launch.id.clone());
+    let loose = view("01K89ZQ4D2F6H8J0K2M4N6P8R1");
+    let mut sessions = on(&[in_launch.clone(), loose]);
+    // Not read yet: the session names a workspace the list doesn't know.
+    assert!(!sessions.knows_workspace(&in_launch));
+    sessions.set_workspace_list(vec![launch.clone(), empty]);
+    assert!(sessions.knows_workspace(&in_launch));
+    // The daemon hasn't said it has them: none, and no capability.
+    let first = body(sessions.next_request(NOW, WALL));
+    assert!(first.get("workspaces").is_none(), "{first}");
+    assert!(!first.to_string().contains("Launch"), "{first}");
+    sessions.done(true, Ok(stored(false)), NOW);
+    sessions.set_workspaces(true);
+    // Said, but the cloud hasn't said it takes them.
+    let said = body(sessions.next_request(NOW + SETTLE, WALL));
+    assert!(said["capabilities"]
+        .as_array()
+        .unwrap()
+        .contains(&"workspaces".into()));
+    assert!(said.get("workspaces").is_none(), "{said}");
+    let mut takes = stored(false);
+    takes.workspaces = true;
+    sessions.done(true, Ok(takes.clone()), NOW + SETTLE);
+    // Once it does, at once: every name, oldest first, empty ones too, and
+    // each session's.
+    let upload = body(sessions.next_request(NOW + SETTLE * 2, WALL));
+    assert_eq!(upload["workspaces"], serde_json::json!(["Launch", "Empty"]));
+    let by_id = |id: &str| {
+        upload["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|session| session["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(by_id("01K89ZQ4D2F6H8J0K2M4N6P8R0")["workspace"], "Launch");
+    assert!(by_id("01K89ZQ4D2F6H8J0K2M4N6P8R1")
+        .get("workspace")
+        .is_none());
+    sessions.done(true, Ok(takes), NOW + SETTLE * 2);
+    // A new workspace with no session in it goes as soon as it's read.
+    assert_eq!(sessions.next_request(NOW + SETTLE * 3, WALL), None);
+    sessions.set_workspace_list(vec![
+        launch,
+        Workspace {
+            id: WorkspaceId::generate(),
+            name: "Research".into(),
+            created_at: 3,
+        },
+    ]);
+    let upload = body(sessions.next_request(NOW + SETTLE * 3, WALL));
+    assert_eq!(
+        upload["workspaces"],
+        serde_json::json!(["Launch", "Research"])
+    );
 }

@@ -74,6 +74,7 @@ fn page_of(
         signatures: Default::default(),
         pairings: Vec::new(),
         session_renames: Vec::new(),
+        session_moves: Vec::new(),
         heartbeat_actions: Vec::new(),
         release: None,
     }))
@@ -554,6 +555,7 @@ fn reads_come_as_soon_as_rakumux_com_says() {
             signatures: Default::default(),
             pairings: Vec::new(),
             session_renames: Vec::new(),
+            session_moves: Vec::new(),
             heartbeat_actions: Vec::new(),
             release: None,
         }))
@@ -616,6 +618,7 @@ fn read_messages(messages: Vec<SessionMessage>) -> Result<FeedResult, FeedFailur
         signatures: Default::default(),
         pairings: Vec::new(),
         session_renames: Vec::new(),
+        session_moves: Vec::new(),
         heartbeat_actions: Vec::new(),
         release: None,
     }))
@@ -1391,6 +1394,7 @@ fn a_sessions_replies_and_messages_go_in_in_the_order_they_were_written() {
         signatures: Default::default(),
         pairings: Vec::new(),
         session_renames: Vec::new(),
+        session_moves: Vec::new(),
         heartbeat_actions: Vec::new(),
         release: None,
     }));

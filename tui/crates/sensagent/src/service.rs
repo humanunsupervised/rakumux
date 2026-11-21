@@ -197,6 +197,7 @@ pub fn serve(
         .with_session_deletion_state(layout.status_dir().join("session-deletions.json"))
         .with_paired_devices(layout.root().join("paired-devices.json"))
         .with_session_rename_state(layout.status_dir().join("session-renames.json"))
+        .with_session_move_state(layout.status_dir().join("session-moves.json"))
         .with_heartbeat_action_state(layout.status_dir().join("heartbeat-actions.json"))
         .with_version(version)
         .with_titles(layout.status_dir().join("titles.json"))

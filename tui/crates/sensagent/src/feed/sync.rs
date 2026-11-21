@@ -320,6 +320,7 @@ impl FeedSync {
                 | FeedResult::NewSessionReported
                 | FeedResult::SessionDeletionReported
                 | FeedResult::SessionRenameReported
+                | FeedResult::SessionMoveReported
                 | FeedResult::HeartbeatsStored
                 | FeedResult::HeartbeatActionReported
                 | FeedResult::PairingOpened { .. }

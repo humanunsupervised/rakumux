@@ -29,6 +29,7 @@ mod poke;
 mod replies;
 mod resources;
 mod session_deletions;
+mod session_moves;
 mod session_renames;
 mod sessions;
 mod sync;
@@ -60,6 +61,9 @@ pub(crate) use replies::{Fetch, Fetched, ReplySync, ReplyWork, TYPING_QUIET};
 pub use replies::{ReplyWrite, ReplyWriteStatus};
 pub(crate) use resources::{ResourceSync, ResourceWork};
 pub(crate) use session_deletions::{DeletionWork, SessionDeletionSync, DELETE_SESSIONS};
+pub(crate) use session_moves::{
+    carry_out as carry_out_session_move, MoveWork, SessionMoveSync, WORKSPACES,
+};
 pub(crate) use session_renames::{RenameWork, SessionRenameSync, RENAME_SESSIONS};
 pub(crate) use sessions::is_shell;
 pub(crate) use sessions::SessionSync;

@@ -14,8 +14,9 @@ use std::time::Duration;
 
 use serde::Serialize;
 use session_core::activity::ActivityPhase;
-use session_core::ids::SessionId;
+use session_core::ids::{SessionId, WorkspaceId};
 use session_core::model::{Lifecycle, ScopeRoot, SessionPlace, SessionStatus, SessionView};
+use session_core::workspace::Workspace;
 
 use super::wire::{self, FeedFailure, FeedRequest};
 
@@ -33,6 +34,8 @@ const MAX_PLACES: usize = 8;
 /// The largest upload the contract takes (`x-maxBodyBytes`): a list that
 /// would be larger goes without its places and its agents' latest steps.
 const MAX_BODY_BYTES: usize = 262_144;
+/// The most workspaces a list names (the contract's bound).
+const MAX_WORKSPACES: usize = 100;
 /// The most characters of an agent's latest step (`output`; the contract's
 /// bound).
 const MAX_OUTPUT: usize = 300;
@@ -70,6 +73,12 @@ pub(crate) struct SessionState {
     /// The heartbeat this session is a run of.
     #[serde(skip_serializing_if = "Option::is_none")]
     heartbeat: Option<HeartbeatRef>,
+    /// The workspace it's in, by name (filled in as the list is made).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    workspace: Option<String>,
+    /// The workspace it's in, as the daemon names it.
+    #[serde(skip)]
+    workspace_id: Option<WorkspaceId>,
 }
 
 /// The heartbeat a session is a run of (`contracts/feed/` `heartbeatRunRef`).
@@ -295,6 +304,8 @@ impl SessionState {
                     run: run.run,
                 })
             }),
+            workspace: None,
+            workspace_id: view.workspace.clone(),
         })
     }
 }
@@ -381,6 +392,10 @@ pub(crate) struct SessionSync {
     /// The cloud's last answer said it takes this machine's id and paired
     /// devices.
     signed_commands: bool,
+    /// The cloud's last answer said it takes workspaces.
+    workspaces_accepted: bool,
+    /// The daemon's workspaces, oldest first, as last read.
+    workspaces: Vec<Workspace>,
     /// What the list says of signing, to a cloud that takes it.
     signing: Option<wire::ListedSigning>,
     /// rakumux.com answered a list under this name with anything but
@@ -421,6 +436,8 @@ impl SessionSync {
             choices: false,
             heartbeats: false,
             signed_commands: false,
+            workspaces_accepted: false,
+            workspaces: Vec::new(),
             signing: None,
             confirmed: false,
             sessions: BTreeMap::new(),
@@ -459,6 +476,7 @@ impl SessionSync {
         self.output = false;
         self.choices = false;
         self.heartbeats = false;
+        self.workspaces_accepted = false;
         self.confirmed = false;
         self.sent = None;
         self.retry = RETRY_MIN;
@@ -504,6 +522,57 @@ impl SessionSync {
     /// of a machine that carries them out. A change goes with the next upload.
     pub fn set_heartbeats(&mut self, supported: bool) {
         self.set_capability(super::HEARTBEATS, supported);
+    }
+
+    /// Whether the daemon has workspaces (capability `workspaces`): the list
+    /// says `workspaces` only then, so rakumux.com asks moves only of a
+    /// machine that carries them out. A change goes with the next upload.
+    pub fn set_workspaces(&mut self, supported: bool) {
+        self.set_capability(super::WORKSPACES, supported);
+    }
+
+    /// The daemon's workspaces now, oldest first: their names go with the
+    /// list (to a cloud that takes them), sent again when they change.
+    pub fn set_workspace_list(&mut self, workspaces: Vec<Workspace>) {
+        let names = |list: &[Workspace]| -> Vec<(WorkspaceId, String)> {
+            list.iter()
+                .map(|workspace| (workspace.id.clone(), workspace.name.clone()))
+                .collect()
+        };
+        if names(&workspaces) != names(&self.workspaces) {
+            self.workspaces = workspaces;
+            self.sent = None;
+        }
+    }
+
+    /// Whether the workspace `view` is in is one the last read had (or it's
+    /// in none): else the daemon's workspaces are read again.
+    pub fn knows_workspace(&self, view: &SessionView) -> bool {
+        view.workspace
+            .as_ref()
+            .is_none_or(|id| self.workspaces.iter().any(|workspace| &workspace.id == id))
+    }
+
+    /// Whether the list names workspaces: the daemon has them and the cloud
+    /// takes them.
+    fn names_workspaces(&self) -> bool {
+        self.workspaces_accepted && self.capabilities.contains(&super::WORKSPACES)
+    }
+
+    /// Every workspace's name, oldest first, within the contract.
+    fn workspace_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = Vec::new();
+        for workspace in &self.workspaces {
+            if names.len() == MAX_WORKSPACES {
+                break;
+            }
+            if let Some(name) = workspace_name(&workspace.name) {
+                if !names.contains(&name) {
+                    names.push(name);
+                }
+            }
+        }
+        names
     }
 
     /// Say this machine's id and paired devices with the list (to a cloud that
@@ -613,6 +682,15 @@ impl SessionSync {
                 session.heartbeat = None;
             }
         }
+        let names_workspaces = self.names_workspaces();
+        for session in &mut list {
+            session.workspace = session
+                .workspace_id
+                .as_ref()
+                .filter(|_| names_workspaces)
+                .and_then(|id| self.workspaces.iter().find(|workspace| &workspace.id == id))
+                .and_then(|workspace| workspace_name(&workspace.name));
+        }
         list
     }
 
@@ -630,6 +708,8 @@ impl SessionSync {
         }
         let capabilities = &self.capabilities;
         let signing = self.signing.as_ref().filter(|_| self.signed_commands);
+        let workspaces = self.names_workspaces().then(|| self.workspace_names());
+        let workspaces = workspaces.as_deref();
         let mut request = wire::signed_sessions_upload(
             &self.machine,
             &list,
@@ -637,6 +717,7 @@ impl SessionSync {
             capabilities,
             self.version.as_deref(),
             signing,
+            workspaces,
         )?;
         if matches!(&request, FeedRequest::Sessions { body } if body.len() > MAX_BODY_BYTES) {
             // Too large with them: the same list without places or agents'
@@ -653,6 +734,7 @@ impl SessionSync {
                 capabilities,
                 self.version.as_deref(),
                 signing,
+                workspaces,
             )?;
         }
         self.sending = Some(list);
@@ -690,8 +772,11 @@ impl SessionSync {
                 self.heartbeats = stored.heartbeats;
                 let newly = stored.signed_commands && !self.signed_commands;
                 self.signed_commands = stored.signed_commands;
+                // Said again with its workspaces once the cloud takes them.
+                let workspaces = stored.workspaces && !self.workspaces_accepted;
+                self.workspaces_accepted = stored.workspaces;
                 // Said again with its id and devices once the cloud takes them.
-                self.sent = if newly && self.signing.is_some() {
+                self.sent = if workspaces || (newly && self.signing.is_some()) {
                     None
                 } else {
                     sent
@@ -711,6 +796,14 @@ impl SessionSync {
             }
         }
     }
+}
+
+/// A workspace's name within the contract (`workspaceName`): one line,
+/// trimmed, at most 64 characters; `None` otherwise.
+fn workspace_name(name: &str) -> Option<String> {
+    let count = name.chars().count();
+    (name.trim() == name && (1..=64).contains(&count) && !name.chars().any(char::is_control))
+        .then(|| name.to_owned())
 }
 
 /// `list` without its sessions' places.
