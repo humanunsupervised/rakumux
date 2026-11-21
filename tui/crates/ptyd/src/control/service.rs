@@ -53,6 +53,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 mod heartbeats;
+mod workspaces;
 
 /// At most one `Activity` event per session per this interval.
 const ACTIVITY_INTERVAL_MS: i64 = 1000;
@@ -226,6 +227,10 @@ struct State {
     heartbeats: std::collections::BTreeMap<HeartbeatId, Heartbeat>,
     /// Which sessions are heartbeats' runs (`SessionView::heartbeat`).
     runs: HashMap<SessionId, HeartbeatRunRef>,
+    /// Every workspace, oldest first, as the registry holds them.
+    workspaces: Vec<session_core::workspace::Workspace>,
+    /// The workspace each session is in (`SessionView::workspace`).
+    session_workspaces: HashMap<SessionId, session_core::ids::WorkspaceId>,
 }
 
 struct Binding {
@@ -325,6 +330,7 @@ impl Inner {
             .map(|(id, at)| (id, LastMessage { at, saved: at }))
             .collect();
         let (heartbeats, runs) = heartbeats::load(&registry, clock());
+        let (workspaces, session_workspaces) = workspaces::load(&registry);
         Self {
             places_excluded: places::Excluded::of_this_machine(),
             store: ScrollbackStore::new(config.layout.clone()),
@@ -350,6 +356,8 @@ impl Inner {
                 last_messages,
                 heartbeats,
                 runs,
+                workspaces,
+                session_workspaces,
             }),
             changed: Condvar::new(),
             events: EventBus::default(),
@@ -648,6 +656,12 @@ impl Inner {
             Request::HeartbeatEnable { id, enabled } => self.heartbeat_enable(caller, &id, enabled),
             Request::HeartbeatDelete { id } => self.heartbeat_delete(caller, &id),
             Request::HeartbeatRun { id } => self.heartbeat_run(caller, &id),
+            Request::WorkspaceList => self.workspace_list(caller),
+            Request::WorkspaceCreate { name } => self.workspace_create(caller, &name),
+            Request::WorkspaceDelete { id } => self.workspace_delete(caller, &id),
+            Request::SessionWorkspace { id, workspace } => {
+                self.session_workspace(caller, &id, workspace.as_ref())
+            }
             Request::MachineAdd { .. } | Request::MachineList | Request::MachineRemove { .. } => {
                 Err(no_machines())
             }
@@ -1004,10 +1018,12 @@ impl Inner {
             machine,
             prefill,
             first_input,
+            workspace,
         } = request;
         if machine.is_some() {
             return Err(no_machines());
         }
+        let workspace = self.new_session_workspace(state, caller, workspace)?;
         if let Some(text) = &prefill {
             validate_prefill(text)?;
         }
@@ -1085,6 +1101,12 @@ impl Inner {
         // exist before the terminal can emit events, and the unique index
         // settles name races.
         registry.insert(&record)?;
+        if let Some(workspace) = &workspace {
+            registry.set_session_workspace(&id, Some(workspace))?;
+            state
+                .session_workspaces
+                .insert(id.clone(), workspace.clone());
+        }
         let argv = argv.unwrap_or_else(|| env::login_shell(&base_env));
         let start = Start {
             resume: None,
@@ -3539,6 +3561,7 @@ impl Inner {
             terminal: runtime.view,
             machine: None,
             heartbeat: state.runs.get(&record.id).cloned(),
+            workspace: state.session_workspaces.get(&record.id).cloned(),
         }
     }
 

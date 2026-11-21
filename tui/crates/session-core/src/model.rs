@@ -258,6 +258,10 @@ pub struct SessionView {
     /// The heartbeat this session is a run of (capability `heartbeats`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub heartbeat: Option<crate::heartbeat::HeartbeatRunRef>,
+    /// The workspace the session is in; `None` for none (capability
+    /// `workspaces`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<crate::ids::WorkspaceId>,
 }
 
 /// A deleted session in the session history (`session_history`): its
@@ -516,6 +520,7 @@ mod tests {
             places: vec![],
             machine: None,
             heartbeat: None,
+            workspace: None,
         };
         let json = serde_json::to_string(&view).unwrap();
         assert!(!json.contains("exit_code"));

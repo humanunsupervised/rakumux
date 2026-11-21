@@ -257,6 +257,7 @@ impl World {
                 machine: None,
                 prefill: None,
                 first_input: None,
+                workspace: None,
             })
             .unwrap();
         self.wait("the login shell in the foreground", || {

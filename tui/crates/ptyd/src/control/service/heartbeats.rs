@@ -668,6 +668,7 @@ impl Inner {
                 text: heartbeat.prompt.clone(),
                 submit: true,
             }),
+            workspace: None,
         };
         let created = self.create_session(state, &caller, request);
         self.audit_outcome(

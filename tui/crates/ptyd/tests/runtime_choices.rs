@@ -106,6 +106,7 @@ fn a_prompt_for_permission_is_read_off_the_screen_and_answered_by_its_number() {
             machine: None,
             prefill: None,
             first_input: None,
+            workspace: None,
         })
         .unwrap()
         .id;

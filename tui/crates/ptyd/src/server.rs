@@ -83,6 +83,7 @@ pub const CAPABILITIES: &[&str] = &[
     session_core::api::CAPABILITY_HISTORY,
     session_core::api::CAPABILITY_HEARTBEATS,
     session_core::api::CAPABILITY_FIRST_INPUT,
+    session_core::api::CAPABILITY_WORKSPACES,
     "attach",
     "subscribe",
     "list",
@@ -160,6 +161,10 @@ const KNOWN_OPS: &[&str] = &[
     "heartbeat_enable",
     "heartbeat_delete",
     "heartbeat_run",
+    "workspace_list",
+    "workspace_create",
+    "workspace_delete",
+    "session_workspace",
 ];
 
 /// `kind` tags of `api::Auth`.
@@ -1982,6 +1987,7 @@ mod tests {
                 machine: None,
                 prefill: None,
                 first_input: None,
+                workspace: None,
             }),
             Request::SessionRename {
                 id: id.clone(),
@@ -2119,6 +2125,17 @@ mod tests {
             },
             Request::HeartbeatDelete { id: hb.clone() },
             Request::HeartbeatRun { id: hb.clone() },
+            Request::WorkspaceList,
+            Request::WorkspaceCreate {
+                name: "Launch".into(),
+            },
+            Request::WorkspaceDelete {
+                id: session_core::ids::WorkspaceId::generate(),
+            },
+            Request::SessionWorkspace {
+                id: id.clone(),
+                workspace: None,
+            },
         ];
         assert_eq!(requests.len(), KNOWN_OPS.len());
         // A new variant breaks this match: list it above and in KNOWN_OPS.
@@ -2163,6 +2180,10 @@ mod tests {
                 | Request::HeartbeatEnable { .. }
                 | Request::HeartbeatDelete { .. }
                 | Request::HeartbeatRun { .. }
+                | Request::WorkspaceList
+                | Request::WorkspaceCreate { .. }
+                | Request::WorkspaceDelete { .. }
+                | Request::SessionWorkspace { .. }
                 | Request::DaemonStatus
                 | Request::ResourceUsage
                 | Request::DaemonShutdown

@@ -237,6 +237,7 @@ impl FakeControl {
             }),
             machine: None,
             heartbeat: None,
+            workspace: None,
         }
     }
 
@@ -489,6 +490,7 @@ impl TestClient {
             machine: None,
             prefill: None,
             first_input: None,
+            workspace: None,
         }));
         match response {
             Response::Session { session } => session,

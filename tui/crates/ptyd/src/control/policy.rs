@@ -17,6 +17,9 @@
 //!   folder (what they make or change waits for the user's approval, paused:
 //!   the service sees to that); enabling, running and deleting one are the
 //!   user's.
+//! - Workspaces: session callers list them and move themselves between them
+//!   (the sessions they create start in theirs); making and forgetting one
+//!   are the user's.
 
 use crate::control_api::Caller;
 use session_core::api::{ApiError, CallerInfo, ErrorCode};
@@ -64,6 +67,10 @@ pub(crate) enum Op {
     HeartbeatEnable,
     HeartbeatDelete,
     HeartbeatRun,
+    WorkspaceList,
+    WorkspaceCreate,
+    WorkspaceDelete,
+    SessionWorkspace,
 }
 
 impl Op {
@@ -107,6 +114,10 @@ impl Op {
             Op::HeartbeatEnable => "heartbeat.enable",
             Op::HeartbeatDelete => "heartbeat.delete",
             Op::HeartbeatRun => "heartbeat.run",
+            Op::WorkspaceList => "workspace.list",
+            Op::WorkspaceCreate => "workspace.create",
+            Op::WorkspaceDelete => "workspace.delete",
+            Op::SessionWorkspace => "session.workspace",
         }
     }
 
@@ -140,6 +151,9 @@ impl Op {
                 | Op::HeartbeatEnable
                 | Op::HeartbeatDelete
                 | Op::HeartbeatRun
+                | Op::WorkspaceCreate
+                | Op::WorkspaceDelete
+                | Op::SessionWorkspace
         )
     }
 }
@@ -175,7 +189,11 @@ pub(crate) fn authorize(
         Op::Create => Ok(()),
         // Binds conversations to the caller itself (the service checks).
         Op::Bind => Ok(()),
-        Op::Report | Op::Touch | Op::Rename | Op::Pin => match on_self {
+        Op::WorkspaceList => Ok(()),
+        Op::WorkspaceCreate | Op::WorkspaceDelete => {
+            Err(denied(op, "workspaces are made and forgotten by the user"))
+        }
+        Op::Report | Op::Touch | Op::Rename | Op::Pin | Op::SessionWorkspace => match on_self {
             true => Ok(()),
             false => Err(denied(op, "a session may only do this to itself")),
         },

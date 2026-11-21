@@ -265,6 +265,7 @@ fn a_session_asked_on_rakumux_com_to_be_renamed_takes_the_name_once() {
             machine: None,
             prefill: None,
             first_input: None,
+            workspace: None,
         })
         .unwrap();
     let mut service = world.start_service(1);
@@ -1124,6 +1125,7 @@ impl World {
                 machine: None,
                 prefill: None,
                 first_input: None,
+                workspace: None,
             })
             .unwrap();
         let mut view = None;

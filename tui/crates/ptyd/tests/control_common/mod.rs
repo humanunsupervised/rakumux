@@ -670,6 +670,7 @@ impl Harness {
             machine: None,
             prefill: None,
             first_input: None,
+            workspace: None,
         }
     }
 

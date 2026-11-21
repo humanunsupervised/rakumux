@@ -110,6 +110,7 @@ impl App {
                             machine: Some(machine.id),
                             prefill,
                             first_input: None,
+                            workspace: None,
                         }),
                     };
                     // Said after the session's "Created".

@@ -22,6 +22,7 @@ pub mod paths;
 pub mod remote;
 pub mod sprite;
 pub mod tailscale;
+pub mod workspace;
 
 /// Wire protocol version. Bump only for incompatible changes; additive
 /// changes keep the version and add optional fields or new ops.

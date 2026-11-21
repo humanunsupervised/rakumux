@@ -415,6 +415,7 @@ impl App {
                     text: setup_prompt(&heartbeat),
                     submit: false,
                 }),
+                workspace: None,
             };
             AppEvent::Created {
                 result: api.create(request),

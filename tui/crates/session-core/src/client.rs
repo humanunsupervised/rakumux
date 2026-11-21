@@ -72,6 +72,29 @@ pub trait SessionApi: Send + Sync {
         let _ = scope;
         Err(unsupported("heartbeats"))
     }
+    /// Every workspace, oldest first (capability `workspaces`).
+    fn workspaces(&self) -> Result<Vec<crate::workspace::Workspace>> {
+        Err(unsupported("workspaces"))
+    }
+    /// A new workspace named `name`.
+    fn workspace_create(&self, name: &str) -> Result<crate::workspace::Workspace> {
+        let _ = name;
+        Err(unsupported("workspaces"))
+    }
+    /// Forget a workspace; its sessions are then in none.
+    fn workspace_delete(&self, id: &crate::ids::WorkspaceId) -> Result<()> {
+        let _ = id;
+        Err(unsupported("workspaces"))
+    }
+    /// Put session `id` in `workspace`, or in none.
+    fn set_workspace(
+        &self,
+        id: &SessionId,
+        workspace: Option<&crate::ids::WorkspaceId>,
+    ) -> Result<SessionView> {
+        let _ = (id, workspace);
+        Err(unsupported("workspaces"))
+    }
     /// One heartbeat, by id.
     fn heartbeat(&self, id: &HeartbeatId) -> Result<Heartbeat> {
         let _ = id;
@@ -761,6 +784,40 @@ impl SessionApi for Client {
         self.expect_session(&Request::SessionRevive(request))
     }
 
+    fn workspaces(&self) -> Result<Vec<crate::workspace::Workspace>> {
+        match self.request(&Request::WorkspaceList)? {
+            Response::Workspaces { workspaces } => Ok(workspaces),
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    fn workspace_create(&self, name: &str) -> Result<crate::workspace::Workspace> {
+        match self.request(&Request::WorkspaceCreate {
+            name: name.to_owned(),
+        })? {
+            Response::Workspace { workspace } => Ok(workspace),
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    fn workspace_delete(&self, id: &crate::ids::WorkspaceId) -> Result<()> {
+        match self.request(&Request::WorkspaceDelete { id: id.clone() })? {
+            Response::Ok => Ok(()),
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    fn set_workspace(
+        &self,
+        id: &SessionId,
+        workspace: Option<&crate::ids::WorkspaceId>,
+    ) -> Result<SessionView> {
+        self.expect_session(&Request::SessionWorkspace {
+            id: id.clone(),
+            workspace: workspace.cloned(),
+        })
+    }
+
     fn heartbeats(&self, scope: Option<&ScopeRoot>) -> Result<Vec<Heartbeat>> {
         match self.request(&Request::HeartbeatList {
             scope: scope.cloned(),
@@ -1395,6 +1452,8 @@ fn is_idempotent(request: &Request) -> bool {
             | Request::SessionList { .. }
             | Request::ProjectList
             | Request::SessionPin { .. }
+            | Request::SessionWorkspace { .. }
+            | Request::WorkspaceList
             | Request::SessionGet { .. }
             | Request::SessionRead(_)
             | Request::SessionTurn { .. }
@@ -1757,6 +1816,7 @@ mod tests {
             terminal: None,
             machine: None,
             heartbeat: None,
+            workspace: None,
         }
     }
 
@@ -2080,6 +2140,10 @@ mod tests {
                     home: None,
                 }),
                 Request::SessionPin { .. }
+                | Request::WorkspaceList
+                | Request::WorkspaceCreate { .. }
+                | Request::WorkspaceDelete { .. }
+                | Request::SessionWorkspace { .. }
                 | Request::ResourceUsage
                 | Request::TerminalOpen(_)
                 | Request::TerminalAttach(_)
@@ -2423,6 +2487,7 @@ mod tests {
             machine: None,
             prefill: None,
             first_input: None,
+            workspace: None,
         };
         assert_eq!(client.create(create.clone()).unwrap().name, "web");
         assert_eq!(client.rename(&s1, "renamed").unwrap().name, "renamed");
@@ -2574,6 +2639,7 @@ mod tests {
             machine: None,
             prefill: None,
             first_input: None,
+            workspace: None,
         };
         assert_eq!(client.create(create).unwrap().name, "again");
         assert_eq!(daemon.hello_count(), 2);

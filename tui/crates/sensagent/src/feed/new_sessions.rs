@@ -587,6 +587,7 @@ fn create(scope: ScopeRoot, agent: Option<Agent>) -> CreateSession {
         machine: None,
         prefill: None,
         first_input: None,
+        workspace: None,
     }
 }
 

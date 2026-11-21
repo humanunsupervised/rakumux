@@ -52,6 +52,7 @@ pub fn session(id: &str, name: &str) -> SessionView {
         terminal: None,
         machine: None,
         heartbeat: None,
+        workspace: None,
     }
 }
 

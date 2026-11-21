@@ -1109,6 +1109,8 @@ fn stamped(remote: &Remote, record: &Record) -> SessionView {
     let remote_scope = view.scope.path().to_path_buf();
     view.scope = remote.local_scope.clone();
     view.is_self = false;
+    // Its workspace is the other machine's: no workspace here names it.
+    view.workspace = None;
     view.machine = Some(MachineRef {
         id: record.id.clone(),
         name: record.name.clone(),
@@ -1405,6 +1407,7 @@ mod tests {
             places: vec![],
             machine: None,
             heartbeat: None,
+            workspace: None,
         }
     }
 

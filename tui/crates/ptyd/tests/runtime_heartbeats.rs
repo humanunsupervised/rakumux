@@ -178,6 +178,7 @@ fn a_run_gives_a_real_agent_its_task_once_its_prompt_shows() {
                 text: "Heartbeat hb_X is empty".into(),
                 submit: false,
             }),
+            workspace: None,
         })
         .unwrap();
     assert!(

@@ -427,6 +427,7 @@ fn copilot_in_a_session_end_to_end() {
             machine: None,
             prefill: None,
             first_input: None,
+            workspace: None,
         })
         .unwrap();
     let id = session.id.clone();

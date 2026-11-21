@@ -108,6 +108,7 @@ fn new(
         machine,
         prefill,
         first_input: None,
+        workspace: None,
     };
     let session = api.create(request)?;
     if args.detach {

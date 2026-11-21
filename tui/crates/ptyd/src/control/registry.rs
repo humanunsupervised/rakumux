@@ -41,6 +41,7 @@ pub(crate) const HISTORY_RETENTION_MS: i64 =
     session_core::api::HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
 mod heartbeats;
+mod workspaces;
 pub(crate) use heartbeats::RunRow;
 
 const BUSY_TIMEOUT: Duration = Duration::from_millis(2000);
@@ -309,6 +310,7 @@ impl Registry {
             conn.execute_batch(SCHEMA).map_err(sql_io)?;
         }
         conn.execute_batch(heartbeats::SCHEMA).map_err(sql_io)?;
+        conn.execute_batch(workspaces::SCHEMA).map_err(sql_io)?;
         restrict_file(path);
         let registry = Self { conn };
         registry
@@ -664,6 +666,10 @@ impl Registry {
             "DELETE FROM session_last_message WHERE session_id = ?1",
             [id.as_str()],
         )?;
+        tx.execute(
+            "DELETE FROM session_workspaces WHERE session_id = ?1",
+            [id.as_str()],
+        )?;
         tx.commit()?;
         Ok(orphans)
     }
@@ -802,6 +808,7 @@ impl Registry {
                 "DELETE FROM session_last_message WHERE session_id = ?1",
                 [id],
             )?;
+            tx.execute("DELETE FROM session_workspaces WHERE session_id = ?1", [id])?;
         }
         tx.commit()?;
         Ok(ids.into_iter().map(SessionId::from_string).collect())

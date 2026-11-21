@@ -12,7 +12,7 @@
 //! an op never changes meaning (add a new op instead).
 
 use crate::heartbeat::{Heartbeat, HeartbeatEdit, HeartbeatSpec};
-use crate::ids::{HeartbeatId, MachineId, PaneId, ReplyId, SessionId};
+use crate::ids::{HeartbeatId, MachineId, PaneId, ReplyId, SessionId, WorkspaceId};
 use crate::model::{
     AgentInfo, DeletedSession, Lifecycle, MachineView, ProjectView, ReportResult, Reported,
     ScopeRoot, SessionStatus, SessionView,
@@ -377,6 +377,25 @@ pub enum Request {
     HeartbeatRun {
         id: HeartbeatId,
     },
+    /// Every workspace, oldest first (capability `workspaces`). Answered with
+    /// `Workspaces`.
+    WorkspaceList,
+    /// User only: a new workspace named `name` (trimmed; unique, else
+    /// `invalid_argument`). Answered with `Workspace`.
+    WorkspaceCreate {
+        name: String,
+    },
+    /// User only: forget a workspace; its sessions are then in none.
+    WorkspaceDelete {
+        id: WorkspaceId,
+    },
+    /// User only: put a session in a workspace, or in none. Answered with
+    /// `Session`.
+    SessionWorkspace {
+        id: SessionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workspace: Option<WorkspaceId>,
+    },
     /// User only (capability `session.transcript`): the messages of a live
     /// session's agent conversation (Claude Code, Codex, OpenCode) after
     /// `after` (from its start without one, or when it names another
@@ -440,6 +459,10 @@ pub struct CreateSession {
     /// shell (capability `session.first_input`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_input: Option<FirstInput>,
+    /// The workspace the session starts in (capability `workspaces`; user
+    /// callers). A daemon without it starts the session in none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<crate::ids::WorkspaceId>,
 }
 
 /// Text for a new session's agent (`CreateSession::first_input`): the daemon
@@ -676,6 +699,10 @@ pub const CAPABILITY_SESSIONS_ALL: &str = "sessions.all";
 /// `heartbeat_*` requests and `SessionView::heartbeat`: tasks the daemon
 /// runs on a clock.
 pub const CAPABILITY_HEARTBEATS: &str = "heartbeats";
+
+/// `workspace_*` requests, `session_workspace`, `SessionView::workspace` and
+/// `CreateSession::workspace`: named groups of sessions.
+pub const CAPABILITY_WORKSPACES: &str = "workspaces";
 
 /// `CreateSession::first_input`: text typed into a new session's agent once
 /// its prompt shows.
@@ -1063,6 +1090,14 @@ pub enum Response {
     /// The answer to the other `heartbeat_*` requests.
     Heartbeat {
         heartbeat: Heartbeat,
+    },
+    /// The answer to `workspace_list`.
+    Workspaces {
+        workspaces: Vec<crate::workspace::Workspace>,
+    },
+    /// The answer to `workspace_create`.
+    Workspace {
+        workspace: crate::workspace::Workspace,
     },
     Error {
         error: ApiError,
@@ -1498,6 +1533,7 @@ mod tests {
             machine: None,
             prefill: None,
             first_input: None,
+            workspace: None,
         };
         let json = serde_json::to_string(&Request::SessionCreate(create.clone())).unwrap();
         assert!(

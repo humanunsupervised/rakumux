@@ -314,6 +314,7 @@ fn answers(agent: &Agent) {
             machine: None,
             prefill: None,
             first_input: None,
+            workspace: None,
         })
         .unwrap();
     let screen = || {

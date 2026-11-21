@@ -202,6 +202,12 @@ impl ControlService {
             Request::SessionCreate(create) => match create.machine.clone() {
                 Some(machine) => {
                     let local = create.scope.clone();
+                    // A workspace is this machine's: the session starts
+                    // there in none.
+                    let create = session_core::api::CreateSession {
+                        workspace: None,
+                        ..create
+                    };
                     let created = reaches_machines(caller)
                         .and_then(|()| self.machines.create(&machine, create))
                         .map(|session| Response::Session { session });
@@ -244,6 +250,14 @@ impl ControlService {
                     }
                     other => other,
                 })
+            }
+            Request::SessionWorkspace { ref id, .. }
+                if self.machines.owner(id).is_some() && caller.reaches_machines() =>
+            {
+                Break(answer(Err(ApiError::new(
+                    session_core::api::ErrorCode::InvalidArgument,
+                    "a session on another machine isn't put in this machine's workspaces",
+                ))))
             }
             request => {
                 let Some(id) = remote_target(&request).cloned() else {
