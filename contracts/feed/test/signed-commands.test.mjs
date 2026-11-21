@@ -64,3 +64,14 @@ test("pairing errors are static", () => {
   assert.equal(validators.error({ error: { code: "pairing_taken", message: "Another pairing uses this code." } }), true);
   assert.equal(validators.error({ error: { code: "pairing_closed", message: "No pairing waits for this code." } }), true);
 });
+
+test("a machine that takes only signed commands says so, and pause is signed", () => {
+  const list = { version: 1, machine: "studio", sessions: [], at: 1761220000000, capabilities: ["signed_commands", "signed_only"], paired_devices: [], machine_id: "01K89ZQ4D2F6H8J0K2M4N6P8R1" };
+  assert.equal(validators.sessionsUpload(list), true);
+  const pause = { id: deletion.id, machine: "studio", heartbeat: deletion.session, action: "pause", status: "pending", created_at: 1761220000000, status_at: 1761220000000 };
+  assert.equal(validators.heartbeatAction({ version: 1, heartbeat_action: { ...pause, signed: phone } }), true);
+  assert.equal(validators.heartbeatAction({ version: 1, heartbeat_action: { ...pause, signed: { ...phone, signature: "not base64!" } } }), false);
+  for (const failure of ["unsigned", "unknown_device", "bad_signature", "expired"]) {
+    assert.equal(validators.heartbeatActionStatus({ version: 1, id: deletion.id, machine: "studio", status: "failed", failure }), true, failure);
+  }
+});

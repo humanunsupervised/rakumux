@@ -318,18 +318,22 @@ conformance tests, not an HTTP server, database or local runtime.
   `folder`, `folder_session`, `agent` and `prompt`, the first prompt asked for with it (the
   session message rakumux.com writes with that prompt once the session is `created` carries the
   same `signed`, and the machine takes it only into the session it started for that request);
-  `delete_session`: `session`; `rename_session`: `session`, `name`; `update`: `version` (0.1.62
-  only: no update is asked of a machine any more). Heartbeat actions are never signed: only `pause`
-  is carried out. The signature (`signed` on
+  `delete_session`: `session`; `rename_session`: `session`, `name`; `heartbeat_action`:
+  `heartbeat`, `action` (`signed` on the heartbeat action; only `pause` is carried out); `update`:
+  `version` (0.1.62 only: no update is asked of a machine any more). The signature (`signed` on
   the request, `signedCommand` in common) is a WebAuthn assertion of a passkey for the signer
   site (`https://rakumux-sign.com`; its challenge the command's SHA-256, user presence and
   verification both set) or an ECDSA P-256 signature over the command by the phone app's key.
   The cloud checks that a signed request's fields are the command's (else `invalid_request`,
-  400), stores `signed` as written and passes it on unchanged. A machine with no paired device
-  carries out an unsigned request as before; once it has one, it refuses an unsigned one
-  (`unsigned`), one a device it hasn't paired signed (`unknown_device`), one whose signature
+  400), stores `signed` as written and passes it on unchanged. A machine that also says `signed_only`
+  refuses every unsigned request, a device paired with it or not (until one is, it carries out
+  nothing asked on rakumux.com), heartbeat actions included; the one exception is a reply written
+  in its own TUI, which it knows by its id. An older machine with no paired device carries out an
+  unsigned request as before; once it has one, it refuses an unsigned one (`unsigned`), one a device it hasn't paired signed (`unknown_device`), one whose signature
   doesn't hold or whose command doesn't say what it's asked (`bad_signature`), and one signed
-  over an hour before or ahead of its clock (`expired`): each kind's failure has these four.
+  over an hour before or ahead of its clock (`expired`): each kind's failure has these four. Pages and the app never write a
+  command unsigned: the cloud refuses one written without `signed` (403 `forbidden`), except a
+  reply a machine writes (`from`) to one of its own sessions.
 - **Pairing:** a device is paired at the machine. The machine shows a one-time code
   (`ABCD-EFGH-JKMN`: Crockford base32, 60 bits, good five minutes, one try) and the signer
   site's link `https://rakumux-sign.com/pair#CODE` (also as a QR code, which the phone app

@@ -959,9 +959,9 @@
       "enum": ["pending", "done", "failed", "expired"]
     },
     "heartbeatActionFailure": {
-      "description": "Why a machine didn't carry out a heartbeat action asked of it on rakumux.com: it has no such heartbeat now (`not_listed`), the heartbeat changed since the version approved (`changed`: read it again), it has no command, task or schedule to run with (`incomplete`), or its daemon refused (`refused`). Readers take a value they don't know as a failure without a reason.",
+      "description": "Why a machine didn't carry out a heartbeat action asked of it on rakumux.com: it has no such heartbeat now (`not_listed`), the heartbeat changed since the version approved (`changed`: read it again), it has no command, task or schedule to run with (`incomplete`), or its daemon refused (`refused`); or, from a machine that takes only signed commands, the signature refusals of every kind (`unsigned`, `unknown_device`, `bad_signature`, `expired`; README, Signed commands). Readers take a value they don't know as a failure without a reason.",
       "type": "string",
-      "enum": ["not_listed", "changed", "incomplete", "refused"]
+      "enum": ["not_listed", "changed", "incomplete", "refused", "unsigned", "unknown_device", "bad_signature", "expired"]
     },
     "heartbeatAction": {
       "description": "Something asked on rakumux.com of one of a machine's heartbeats: `enable` (approve it, when an agent made or changed it, and turn it on), `pause` or `run` (a run now). It names the heartbeat by its id, never a path, a command or a task. The machine carries it out as its user would and reports it.",
@@ -988,6 +988,10 @@
         },
         "status": { "$ref": "#/$defs/heartbeatActionStatus" },
         "failure": { "$ref": "#/$defs/heartbeatActionFailure" },
+        "signed": {
+          "description": "The command a device paired with the machine signed for it (`signedCommand`, kind `heartbeat_action`: `heartbeat`, `action`): a machine that says `signed_only` carries out a heartbeat action only with one; absent when written without one.",
+          "$ref": "#/$defs/signedCommand"
+        },
         "session": {
           "description": "With `done` for `run`: the run's session, by the id the machine's session list gives it.",
           "$ref": "#/$defs/ulid"
