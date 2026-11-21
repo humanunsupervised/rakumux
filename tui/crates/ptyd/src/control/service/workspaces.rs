@@ -38,7 +38,9 @@ impl Inner {
                 .iter()
                 .any(|workspace| workspace.name.to_lowercase() == name.to_lowercase())
             {
-                return Err(invalid(format!("there is a workspace named {name} already")));
+                return Err(invalid(format!(
+                    "there is a workspace named {name} already"
+                )));
             }
             if state.workspaces.len() >= MAX_WORKSPACES {
                 return Err(limit_exceeded(
@@ -58,7 +60,15 @@ impl Inner {
             Ok(workspace)
         });
         let detail = result.as_ref().ok().map(|w| audit::clip(&w.name));
-        self.audit_outcome(&state, caller, Op::WorkspaceCreate, None, None, detail, &result);
+        self.audit_outcome(
+            &state,
+            caller,
+            Op::WorkspaceCreate,
+            None,
+            None,
+            detail,
+            &result,
+        );
         result.map(|workspace| Response::Workspace { workspace })
     }
 
@@ -89,7 +99,15 @@ impl Inner {
             Ok(name)
         });
         let detail = result.as_ref().ok().map(|name| audit::clip(name));
-        self.audit_outcome(&state, caller, Op::WorkspaceDelete, None, None, detail, &result);
+        self.audit_outcome(
+            &state,
+            caller,
+            Op::WorkspaceDelete,
+            None,
+            None,
+            detail,
+            &result,
+        );
         result.map(|_| Response::Ok)
     }
 

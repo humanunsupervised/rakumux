@@ -841,6 +841,7 @@ mod tests {
             }),
             machine: None,
             heartbeat: None,
+            workspace: None,
         }
     }
 

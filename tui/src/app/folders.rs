@@ -172,6 +172,8 @@ pub struct SyncResult {
     pub listed: Listed,
     pub sessions: Vec<SessionView>,
     pub stream: EventStream,
+    /// The daemon's workspaces; `None` when it keeps none.
+    pub workspaces: Option<Vec<session_core::workspace::Workspace>>,
 }
 
 fn is_unsupported(error: &ApiError) -> bool {
@@ -189,6 +191,12 @@ fn lists_every_folder(api: &dyn SessionApi) -> bool {
 /// `sessions.all`; else the known folders' (an older daemon); else the
 /// launch folder's alone (a daemon from before folders). Blocking.
 pub fn load(api: &dyn SessionApi, launch: &ScopeRoot) -> Result<SyncResult, ApiError> {
+    let mut result = load_sessions(api, launch)?;
+    result.workspaces = super::workspaces::read(api);
+    Ok(result)
+}
+
+fn load_sessions(api: &dyn SessionApi, launch: &ScopeRoot) -> Result<SyncResult, ApiError> {
     let Some(known) = load_known(api, launch)? else {
         return load_launch_only(api, launch);
     };
@@ -204,6 +212,7 @@ pub fn load(api: &dyn SessionApi, launch: &ScopeRoot) -> Result<SyncResult, ApiE
             listed: Listed::All,
             sessions,
             stream,
+            workspaces: None,
         });
     }
     // Every folder with sessions is a known folder, so listing them all
@@ -226,6 +235,7 @@ pub fn load(api: &dyn SessionApi, launch: &ScopeRoot) -> Result<SyncResult, ApiE
         listed: Listed::Folders(folders),
         sessions,
         stream,
+        workspaces: None,
     })
 }
 
@@ -261,6 +271,7 @@ fn load_launch_only(api: &dyn SessionApi, launch: &ScopeRoot) -> Result<SyncResu
         listed: Listed::Folders(vec![launch.clone()]),
         sessions,
         stream,
+        workspaces: None,
     })
 }
 

@@ -410,6 +410,8 @@ pub enum SettingsItem {
     TerminalPanel,
     /// Where `T` opens it: below or beside the session.
     TerminalPlacement,
+    /// The workspace shown, and the workspaces modal.
+    Workspace,
     /// The pinned sessions: the list's Pinned tab.
     Pinned,
     /// rtop: what this machine, Rakumux and every session's processes use
@@ -425,7 +427,7 @@ pub enum SettingsItem {
 
 impl SettingsItem {
     /// In Settings' order: signing in first, then the rest.
-    pub const ALL: [SettingsItem; 15] = [
+    pub const ALL: [SettingsItem; 16] = [
         SettingsItem::Account,
         SettingsItem::Devices,
         SettingsItem::Layout,
@@ -436,6 +438,7 @@ impl SettingsItem {
         SettingsItem::Update,
         SettingsItem::RestartUi,
         SettingsItem::RestartServer,
+        SettingsItem::Workspace,
         SettingsItem::Pinned,
         SettingsItem::Rtop,
         SettingsItem::SessionHistory,
@@ -452,6 +455,7 @@ impl SettingsItem {
             | SettingsItem::Update
             | SettingsItem::RestartUi
             | SettingsItem::RestartServer
+            | SettingsItem::Workspace
             | SettingsItem::Pinned
             | SettingsItem::Rtop
             | SettingsItem::SessionHistory
@@ -702,6 +706,8 @@ pub enum AppMode {
     Sections(SectionPicker),
     /// The session history: deleted sessions to bring back.
     History(HistoryPicker),
+    /// The workspaces modal (`m`, `M`).
+    Workspaces(super::workspaces::WorkspacePicker),
     Renaming(RenameDialog),
     /// Writing back to a feed entry.
     FeedReply(FeedReplyDialog),

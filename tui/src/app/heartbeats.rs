@@ -389,6 +389,7 @@ impl App {
         let folder: ScopeRoot = self.current_folder();
         let env = env_snapshot();
         let (cols, rows) = self.terminal_size();
+        let workspace = self.new_session_workspace();
         self.creating_session = true;
         self.drawer_focused = false;
         self.set_status("Making a heartbeat...");
@@ -415,7 +416,7 @@ impl App {
                     text: setup_prompt(&heartbeat),
                     submit: false,
                 }),
-                workspace: None,
+                workspace,
             };
             AppEvent::Created {
                 result: api.create(request),

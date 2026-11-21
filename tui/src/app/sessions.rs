@@ -81,6 +81,7 @@ impl App {
         match result {
             Ok(synced) => {
                 self.apply_synced_folders(synced.known, synced.support);
+                self.apply_workspaces(synced.workspaces);
                 self.list.replace_all(synced.sessions, synced.listed);
                 if self.session_layout() == SessionLayout::Tabs {
                     self.select_default_tab();
@@ -713,6 +714,13 @@ impl App {
         if shown(self) {
             return;
         }
+        // In another workspace: show that one.
+        if self.list.get(id).is_none() {
+            if let Some(session) = self.list.get_anywhere(id) {
+                let workspace = session.workspace.clone();
+                self.show_workspace(workspace);
+            }
+        }
         let Some(folder) = self.list.get(id).map(|s| s.scope.clone()) else {
             return;
         };
@@ -1087,6 +1095,10 @@ impl App {
             self.history_query_changed();
             return;
         }
+        if matches!(self.mode, AppMode::Workspaces(_)) {
+            self.workspace_paste(text);
+            return;
+        }
         match &mut self.mode {
             AppMode::Renaming(dialog) => dialog.input.insert_str(text),
             // Lines run on as one: the box holds one.
@@ -1143,6 +1155,10 @@ impl App {
             }
             if matches!(self.mode, AppMode::History(_)) {
                 self.history_mouse(event);
+                return;
+            }
+            if matches!(self.mode, AppMode::Workspaces(_)) {
+                self.workspaces_mouse(event);
                 return;
             }
             // The wheel moves Settings' selection and scrolls Help.
@@ -1453,6 +1469,7 @@ impl App {
                         FooterKey::SignIn => self.start_sign_in(),
                         FooterKey::Account => self.open_account_dialog(),
                         FooterKey::Feed => self.toggle_feed(),
+                        FooterKey::Workspace => self.open_workspaces(),
                     }
                     return;
                 }
@@ -1462,7 +1479,9 @@ impl App {
                     | Hit::SectionMenu
                     | Hit::SectionRow(_)
                     | Hit::HistoryMenu
-                    | Hit::HistoryRow(_),
+                    | Hit::HistoryRow(_)
+                    | Hit::WorkspaceMenu
+                    | Hit::WorkspaceRow(_),
                 )
                 | None => {}
             }
@@ -1576,6 +1595,29 @@ impl App {
             },
             MouseEventKind::ScrollUp => self.move_history_cursor(-1),
             MouseEventKind::ScrollDown => self.move_history_cursor(1),
+            _ => {}
+        }
+    }
+
+    fn workspaces_mouse(&mut self, event: MouseEvent) {
+        let hit = self
+            .hits
+            .iter()
+            .find(|(a, _)| {
+                event.column >= a.x
+                    && event.column < a.x + a.width
+                    && event.row >= a.y
+                    && event.row < a.y + a.height
+            })
+            .map(|(_, hit)| *hit);
+        match event.kind {
+            MouseEventKind::Down(MouseButton::Left) => match hit {
+                Some(Hit::WorkspaceRow(row)) => self.click_workspace_row(row),
+                Some(Hit::WorkspaceMenu) => {}
+                _ => self.mode = AppMode::Normal,
+            },
+            MouseEventKind::ScrollUp => self.move_workspace_cursor(-1),
+            MouseEventKind::ScrollDown => self.move_workspace_cursor(1),
             _ => {}
         }
     }
@@ -1932,12 +1974,13 @@ impl App {
         if self.runs_on_sprite(&folder) {
             return self.open_new_sprite_session(folder, api);
         }
-        let request = super::new_session::request(
+        let mut request = super::new_session::request(
             folder,
             self.list.new_session_cwd().map(Path::to_path_buf),
             env_snapshot(),
             self.terminal_size(),
         );
+        request.workspace = self.new_session_workspace();
         self.creating_session = true;
         self.mode = AppMode::Normal;
         self.set_status("Creating session...");

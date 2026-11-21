@@ -126,6 +126,23 @@ pub enum AppEvent {
     Restored {
         result: Result<SessionView, ApiError>,
     },
+    /// The daemon's workspaces, read as the workspaces modal opened.
+    Workspaces {
+        result: Result<Vec<session_core::workspace::Workspace>, ApiError>,
+    },
+    /// A workspace made from the workspaces modal, for `purpose`.
+    WorkspaceCreated {
+        purpose: super::workspaces::WorkspacePurpose,
+        result: Result<session_core::workspace::Workspace, ApiError>,
+    },
+    /// A workspace forgotten.
+    WorkspaceDeleted {
+        result: Result<session_core::workspace::Workspace, ApiError>,
+    },
+    /// A session moved to another workspace (or none).
+    WorkspaceSet {
+        result: Result<SessionView, ApiError>,
+    },
     /// Result of marking a session as used (failures become a status).
     Touched {
         result: Result<(), ApiError>,

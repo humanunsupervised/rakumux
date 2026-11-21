@@ -31,7 +31,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use session_core::api::{EventEnvelope, SessionEvent};
-use session_core::ids::SessionId;
+use session_core::ids::{SessionId, WorkspaceId};
 use session_core::model::{ScopeRoot, SessionStatus, SessionView};
 
 use super::config::{SectionOrder, SessionOrder};
@@ -179,6 +179,11 @@ pub struct SessionList {
     /// The wall clock (seconds) the list is drawn at: its ages and ready's
     /// sub-sections ([`Self::set_clock`]).
     now: i64,
+    /// The workspace shown (`None`: the sessions in none). Only its
+    /// sessions are in `sessions`; the rest wait in `elsewhere`.
+    workspace: Option<WorkspaceId>,
+    /// Listed sessions in another workspace than the one shown.
+    elsewhere: Vec<SessionView>,
 }
 
 impl SessionList {
@@ -208,7 +213,52 @@ impl SessionList {
             loaded: false,
             reselect: false,
             now: 0,
+            workspace: None,
+            elsewhere: Vec::new(),
         }
+    }
+
+    /// The workspace shown (`None`: the sessions in none).
+    pub fn workspace(&self) -> Option<&WorkspaceId> {
+        self.workspace.as_ref()
+    }
+
+    /// Show `workspace`'s sessions (`None`: those in none). The selection
+    /// stays while its session is shown, else goes to the most recently
+    /// used one.
+    pub fn set_workspace(&mut self, workspace: Option<WorkspaceId>) {
+        if workspace == self.workspace {
+            return;
+        }
+        self.workspace = workspace;
+        let mut every = std::mem::take(&mut self.sessions);
+        every.append(&mut self.elsewhere);
+        let (here, elsewhere) = every.into_iter().partition(|s| self.is_here(s));
+        self.sessions = here;
+        self.elsewhere = elsewhere;
+        self.sort();
+        self.sort_groups();
+        if let Selection::Session(id) = &self.selection {
+            if self.index_of(id).is_none() {
+                self.selection = self.default_selection();
+            }
+        }
+        self.ensure_selection_visible();
+    }
+
+    /// Whether `session` is in the workspace shown.
+    fn is_here(&self, session: &SessionView) -> bool {
+        session.workspace == self.workspace
+    }
+
+    /// Every listed session, in any workspace.
+    pub fn every_session(&self) -> impl Iterator<Item = &SessionView> {
+        self.sessions.iter().chain(self.elsewhere.iter())
+    }
+
+    /// A listed session in any workspace.
+    pub fn get_anywhere(&self, id: &SessionId) -> Option<&SessionView> {
+        self.every_session().find(|s| &s.id == id)
     }
 
     /// Set the wall clock (seconds) the list is drawn at: its ages and
@@ -605,7 +655,9 @@ impl SessionList {
     pub fn replace_all(&mut self, sessions: Vec<SessionView>, listed: Listed) {
         let first = !self.loaded || std::mem::take(&mut self.reselect);
         self.loaded = true;
-        self.sessions = sessions;
+        let (here, elsewhere) = sessions.into_iter().partition(|s| self.is_here(s));
+        self.sessions = here;
+        self.elsewhere = elsewhere;
         self.listed = listed;
         self.sort();
         self.sort_groups();
@@ -630,8 +682,14 @@ impl SessionList {
         let id = &envelope.session_id;
         match &envelope.event {
             SessionEvent::Created { session } | SessionEvent::Updated { session } => {
-                self.upsert(session.clone());
-                ListChange::Changed
+                if self.is_here(session) {
+                    self.upsert(session.clone());
+                    return ListChange::Changed;
+                }
+                // Moved to another workspace: gone from the one shown.
+                let change = self.remove(id).unwrap_or(ListChange::Changed);
+                self.elsewhere.push(session.clone());
+                change
             }
             SessionEvent::Removed => match self.remove(id) {
                 Some(change) => change,
@@ -655,6 +713,14 @@ impl SessionList {
 
     /// Insert or replace a session (by id).
     pub fn upsert(&mut self, view: SessionView) {
+        self.elsewhere.retain(|s| s.id != view.id);
+        if !self.is_here(&view) {
+            if self.index_of(&view.id).is_some() {
+                self.remove(&view.id);
+            }
+            self.elsewhere.push(view);
+            return;
+        }
         match self.index_of(&view.id) {
             Some(i) => self.sessions[i] = view,
             None => self.sessions.push(view),
@@ -667,6 +733,10 @@ impl SessionList {
     /// Remove a session. When it was selected, the selection moves to the
     /// session that takes its place (or the one before, or "New session").
     pub fn remove(&mut self, id: &SessionId) -> Option<ListChange> {
+        if let Some(index) = self.elsewhere.iter().position(|s| &s.id == id) {
+            self.elsewhere.remove(index);
+            return Some(ListChange::Ignored);
+        }
         let visible_before: Vec<SessionId> = self.visible().iter().map(|s| s.id.clone()).collect();
         let index = self.index_of(id)?;
         self.sessions.remove(index);
@@ -1359,6 +1429,10 @@ impl SessionList {
     /// lifecycle is a new status), which can leave a header without
     /// sessions.
     fn modify(&mut self, id: &SessionId, f: impl FnOnce(&mut SessionView)) -> ListChange {
+        if let Some(other) = self.elsewhere.iter_mut().find(|s| &s.id == id) {
+            f(other);
+            return ListChange::Ignored;
+        }
         match self.index_of(id) {
             Some(i) => {
                 f(&mut self.sessions[i]);

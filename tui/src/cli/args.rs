@@ -20,6 +20,8 @@ pub const SUBCOMMANDS: &[&str] = &[
     "restore",
     "heartbeat",
     "heartbeats",
+    "workspace",
+    "workspaces",
     "folders",
     "projects",
     "daemon",
@@ -127,6 +129,13 @@ pub enum Command {
     Heartbeat {
         #[command(subcommand)]
         command: HeartbeatCommand,
+    },
+    /// Workspaces: named groups of this machine's sessions. The TUI shows
+    /// one at a time (m), or the sessions in none
+    #[command(alias = "workspaces")]
+    Workspace {
+        #[command(subcommand)]
+        command: WorkspaceCommand,
     },
     /// List the folders sessions belong to, or add or remove one
     ///
@@ -269,6 +278,38 @@ pub enum MachineCommand {
     Rm {
         /// Machine name or id
         target: String,
+    },
+}
+
+#[derive(Subcommand, Debug, PartialEq)]
+pub enum WorkspaceCommand {
+    /// Every workspace, with how many sessions it has
+    Ls {
+        /// Print JSON instead of a table
+        #[arg(long)]
+        json: bool,
+    },
+    /// Make a workspace
+    Add {
+        /// One line of at most 64 characters, unique on this machine
+        name: String,
+    },
+    /// Forget a workspace; its sessions are then in none
+    Rm {
+        /// Its name or id
+        workspace: String,
+    },
+    /// Move a session to a workspace (made when there's none of that
+    /// name), or out of any with --none
+    Move {
+        /// Session name or id
+        target: String,
+        /// The workspace's name or id
+        #[arg(required_unless_present = "none", conflicts_with = "none")]
+        workspace: Option<String>,
+        /// Out of any workspace
+        #[arg(long)]
+        none: bool,
     },
 }
 

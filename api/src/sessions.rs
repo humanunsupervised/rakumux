@@ -164,6 +164,7 @@ pub fn create(api: &dyn SessionApi, body: CreateSessionBody) -> Result<Session, 
         machine: None,
         prefill: None,
         first_input: None,
+        workspace: None,
     };
     Ok(api.create(request)?.into())
 }
@@ -341,6 +342,7 @@ mod tests {
             git: None,
             machine: None,
             heartbeat: None,
+            workspace: None,
         }
     }
 

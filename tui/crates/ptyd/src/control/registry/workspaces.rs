@@ -147,15 +147,24 @@ mod tests {
         registry.insert_workspace(&a, 1_000).unwrap();
         registry.insert_workspace(&b, 2_000).unwrap();
         let session = SessionId::generate();
-        registry.set_session_workspace(&session, Some(&a.id)).unwrap();
-        registry.set_session_workspace(&session, Some(&b.id)).unwrap();
+        registry
+            .set_session_workspace(&session, Some(&a.id))
+            .unwrap();
+        registry
+            .set_session_workspace(&session, Some(&b.id))
+            .unwrap();
         assert_eq!(
             registry.session_workspaces().unwrap().get(&session),
             Some(&b.id)
         );
         registry.set_session_workspace(&session, None).unwrap();
         assert!(registry.session_workspaces().unwrap().is_empty());
-        let names: Vec<String> = registry.workspaces().unwrap().into_iter().map(|w| w.name).collect();
+        let names: Vec<String> = registry
+            .workspaces()
+            .unwrap()
+            .into_iter()
+            .map(|w| w.name)
+            .collect();
         assert_eq!(names, ["A", "B"]);
     }
 }

@@ -23,3 +23,4 @@ pub mod sprite;
 pub mod terminal_panel;
 pub mod utils;
 pub mod welcome;
+pub mod workspaces;

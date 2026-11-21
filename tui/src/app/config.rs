@@ -174,6 +174,10 @@ pub struct SessionsConfig {
         skip_serializing_if = "is_below"
     )]
     pub terminal_panel: PanelPlacement,
+    /// The workspace shown (its id), so the next start shows it again;
+    /// left out for No workspace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
     #[serde(flatten)]
     pub other: serde_json::Map<String, serde_json::Value>,
 }
@@ -200,6 +204,7 @@ impl Default for SessionsConfig {
             session_order: SessionOrder::new(),
             section_order: SectionOrder::new(),
             terminal_panel: PanelPlacement::Below,
+            workspace: None,
             other: serde_json::Map::new(),
         }
     }

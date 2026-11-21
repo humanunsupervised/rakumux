@@ -8,3 +8,4 @@ pub mod list;
 pub mod sections;
 pub mod session;
 pub mod settings;
+mod workspaces;

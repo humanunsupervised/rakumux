@@ -411,6 +411,7 @@ fn every_stream_message_is_documented() {
         git: None,
         machine: None,
         heartbeat: None,
+        workspace: None,
     };
     let reported = ModelReported {
         state: Some(Lifecycle::Done),

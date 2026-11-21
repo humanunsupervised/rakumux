@@ -64,6 +64,16 @@ impl Icons {
         }
     }
 
+    /// The footer's workspace button.
+    pub fn workspace(self) -> &'static str {
+        match self {
+            Icons::Plain => "⊞",
+            Icons::Emoji => "🗂",
+            // nf-fa-th_large
+            Icons::Nerd => "\u{f009}",
+        }
+    }
+
     /// Marks rtop: what this machine and Rakumux use now.
     /// The drawer's Beats tab (heartbeats), and a heartbeat's runs.
     pub fn beats(self) -> &'static str {

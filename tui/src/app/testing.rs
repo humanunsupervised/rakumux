@@ -170,6 +170,8 @@ pub struct FakeState {
     pub resources: Vec<session_core::api::ResourceSample>,
     /// The heartbeats, as a daemon keeps them.
     pub heartbeats: Vec<session_core::heartbeat::Heartbeat>,
+    /// The workspaces, oldest first.
+    pub workspaces: Vec<session_core::workspace::Workspace>,
 }
 
 impl FakeState {
@@ -568,6 +570,7 @@ impl SessionApi for FakeApi {
                 session_core::api::CAPABILITY_RESOURCES,
                 session_core::api::CAPABILITY_SUBMIT_BLOCKED,
                 session_core::api::CAPABILITY_HISTORY,
+                session_core::api::CAPABILITY_WORKSPACES,
             ]);
         }
         if state.restarts_in_place {
@@ -620,6 +623,7 @@ impl SessionApi for FakeApi {
             argv: request.argv.clone(),
             startup_cmds: request.startup_cmds.clone(),
         };
+        session.workspace = request.workspace.clone();
         if !state.folders_unsupported {
             state.remember_folder(&session.scope);
         }
@@ -929,6 +933,56 @@ impl SessionApi for FakeApi {
         self.record(format!("pin {id} {pinned}"));
         self.take_failure("pin")?;
         self.update(id, |s| s.pinned = pinned)
+    }
+
+    fn workspaces(&self) -> Result<Vec<session_core::workspace::Workspace>> {
+        self.take_failure("workspaces")?;
+        Ok(self.state.lock().unwrap().workspaces.clone())
+    }
+
+    fn workspace_create(&self, name: &str) -> Result<session_core::workspace::Workspace> {
+        self.record(format!("workspace_create {name}"));
+        self.take_failure("workspace_create")?;
+        let mut state = self.state.lock().unwrap();
+        if state.workspaces.iter().any(|w| w.name == name) {
+            return Err(ApiError::new(
+                ErrorCode::InvalidArgument,
+                format!("there is a workspace named {name} already"),
+            ));
+        }
+        let workspace = session_core::workspace::Workspace {
+            id: session_core::ids::WorkspaceId::from_string(format!(
+                "W{}",
+                state.workspaces.len() + 1
+            )),
+            name: name.to_owned(),
+            created_at: state.now,
+        };
+        state.workspaces.push(workspace.clone());
+        Ok(workspace)
+    }
+
+    fn workspace_delete(&self, id: &session_core::ids::WorkspaceId) -> Result<()> {
+        self.record(format!("workspace_delete {id}"));
+        let mut state = self.state.lock().unwrap();
+        state.workspaces.retain(|w| &w.id != id);
+        for session in &mut state.sessions {
+            if session.workspace.as_ref() == Some(id) {
+                session.workspace = None;
+            }
+        }
+        Ok(())
+    }
+
+    fn set_workspace(
+        &self,
+        id: &SessionId,
+        workspace: Option<&session_core::ids::WorkspaceId>,
+    ) -> Result<SessionView> {
+        let shown = workspace.map_or("none".to_owned(), |w| w.to_string());
+        self.record(format!("set_workspace {id} {shown}"));
+        self.take_failure("set_workspace")?;
+        self.update(id, |s| s.workspace = workspace.cloned())
     }
 }
 

@@ -26,6 +26,7 @@ mod remote;
 mod session;
 mod sprite;
 mod table;
+mod workspace;
 
 use crate::printable::printable_lines;
 use args::{CliArgs, Command};

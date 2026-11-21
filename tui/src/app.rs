@@ -57,6 +57,7 @@ mod text_input;
 pub mod tips;
 pub mod types;
 mod upgrade;
+pub mod workspaces;
 
 /// Seconds since the Unix epoch, what session times are in.
 fn wall_clock() -> i64 {
@@ -226,6 +227,10 @@ pub enum Hit {
     SectionRow(usize),
     /// The open session history modal (clicks inside it don't close it).
     HistoryMenu,
+    /// The workspaces modal: a click inside it, off its rows.
+    WorkspaceMenu,
+    /// A row of the workspaces modal.
+    WorkspaceRow(usize),
     /// A row of the session history modal.
     HistoryRow(usize),
     /// The mode label in the footer's centre: `SESSION MODE` switches to
@@ -258,6 +263,8 @@ pub enum FooterKey {
     /// `f ≡ Feed` (Rakumux mode): shows and focuses the feed, focuses it,
     /// or hides it while it's focused, as `f` does.
     Feed,
+    /// `m ⊞ <workspace>` (Rakumux mode): the workspaces modal, as `m` does.
+    Workspace,
 }
 
 /// Everything `App::new` needs; tests swap the connector, executor and
@@ -294,6 +301,8 @@ pub struct App {
     pub scope: ScopeRoot,
     /// The folders the daemon knows, and what it can list.
     pub folders: Folders,
+    /// The daemon's workspaces, oldest first (none without `workspaces`).
+    pub workspaces: Vec<session_core::workspace::Workspace>,
     paths: Option<Layout>,
     pub self_session: Option<SessionId>,
     /// Takes you from session mode to Rakumux mode (`Ctrl-\\`).
@@ -481,12 +490,21 @@ impl App {
         list.set_clock(wall_clock());
         list.set_session_order(&options.settings.sessions.session_order);
         list.set_section_order(&options.settings.sessions.section_order);
+        list.set_workspace(
+            options
+                .settings
+                .sessions
+                .workspace
+                .clone()
+                .map(session_core::ids::WorkspaceId::from_string),
+        );
         let folders = Folders::new(options.scope.clone());
         let mut app = Self {
             flags: FeatureFlags::from_env(),
             debug: options.debug,
             scope: options.scope,
             folders,
+            workspaces: Vec::new(),
             paths: options.paths,
             self_session: options.self_session,
             rakumux_key,
@@ -1022,6 +1040,23 @@ impl App {
                     "Sign in to your Rakumux account for AI session titles, the agent feed and rtop on rakumux.com, and to reply to your agents and start sessions here from rakumux.com. Your agents' chats and this machine's session list go to rakumux.com, keys and tokens masked, private sessions never. Same as `rakumux account login`.",
                 )
             }
+            SettingsItem::Workspace => {
+                let available = self.has_workspaces();
+                return SettingRow {
+                    section: item.section(),
+                    label: "Workspace".into(),
+                    value: format!("{} · m", self.workspace_name()),
+                    note: if available {
+                        "Groups of sessions. The list shows one workspace, or the sessions in none; \
+                         new sessions start in the one shown. m switches or adds one, M moves the \
+                         selected session."
+                            .into()
+                    } else {
+                        "Restart the server (S) to use workspaces.".into()
+                    },
+                    disabled: !available,
+                };
+            }
             SettingsItem::Pinned => (
                 "Pinned",
                 "Your pinned sessions · *".into(),
@@ -1203,6 +1238,12 @@ impl App {
             AppEvent::Revived { id, result } => self.on_revived(id, result),
             AppEvent::History { result } => self.on_history(result),
             AppEvent::Restored { result } => self.on_restored(result),
+            AppEvent::Workspaces { result } => self.on_workspaces(result),
+            AppEvent::WorkspaceCreated { purpose, result } => {
+                self.on_workspace_created(purpose, result)
+            }
+            AppEvent::WorkspaceDeleted { result } => self.on_workspace_deleted(result),
+            AppEvent::WorkspaceSet { result } => self.on_workspace_set(result),
             AppEvent::Touched { result } => {
                 if let Err(error) = result {
                     self.set_status(format!("Couldn't mark the session as used: {error}"));

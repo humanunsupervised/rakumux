@@ -157,13 +157,19 @@ fn sessions_live_in_workspaces_move_between_them_and_keep_them_across_a_restart(
 
     // Moved into one, then another, then out, and into one again.
     client.set_workspace(&loose.id, Some(&research.id)).unwrap();
-    assert_eq!(workspace_of(&client, &loose.id).as_deref(), Some("Research"));
+    assert_eq!(
+        workspace_of(&client, &loose.id).as_deref(),
+        Some("Research")
+    );
     client.set_workspace(&loose.id, None).unwrap();
     assert_eq!(workspace_of(&client, &loose.id), None);
     let moved = client.set_workspace(&loose.id, Some(&research.id)).unwrap();
     assert_eq!(moved.workspace.as_ref(), Some(&research.id));
     assert_eq!(
-        client.set_workspace(&loose.id, Some(&gone)).unwrap_err().code,
+        client
+            .set_workspace(&loose.id, Some(&gone))
+            .unwrap_err()
+            .code,
         ErrorCode::NotFound
     );
 
@@ -189,10 +195,7 @@ fn sessions_live_in_workspaces_move_between_them_and_keep_them_across_a_restart(
         ErrorCode::PermissionDenied
     );
     assert_eq!(
-        inside
-            .set_workspace(&loose.id, None)
-            .unwrap_err()
-            .code,
+        inside.set_workspace(&loose.id, None).unwrap_err().code,
         ErrorCode::PermissionDenied
     );
     inside.set_workspace(&lead.id, Some(&research.id)).unwrap();
@@ -206,7 +209,10 @@ fn sessions_live_in_workspaces_move_between_them_and_keep_them_across_a_restart(
     let client = connect(&home, AuthMode::User);
     assert_eq!(client.workspaces().unwrap().len(), 2);
     assert_eq!(workspace_of(&client, &lead.id).as_deref(), Some("Research"));
-    assert_eq!(workspace_of(&client, &loose.id).as_deref(), Some("Research"));
+    assert_eq!(
+        workspace_of(&client, &loose.id).as_deref(),
+        Some("Research")
+    );
     assert_eq!(workspace_of(&client, &child.id).as_deref(), Some("Launch"));
 
     // Forgotten: its sessions are in none, and the others stay.

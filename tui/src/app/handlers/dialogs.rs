@@ -22,6 +22,7 @@ pub async fn handle_dialog_key(app: &mut App, key: KeyEvent) -> AppResult {
         AppMode::Folders(_) => super::folders::handle_folder_picker_key(app, key),
         AppMode::Sections(_) => super::sections::handle_section_picker_key(app, key),
         AppMode::History(_) => super::history::handle_history_key(app, key),
+        AppMode::Workspaces(_) => super::workspaces::handle_workspaces_key(app, key),
         AppMode::Renaming(_) => handle_rename_key(app, key),
         AppMode::FeedReply(_) => handle_feed_reply_key(app, key),
         AppMode::Confirm(_) => handle_confirm_key(app, key),

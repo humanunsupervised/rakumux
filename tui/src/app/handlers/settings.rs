@@ -195,6 +195,8 @@ pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
             app.toggle_beats();
         }
         KeyAction::SessionHistory => app.open_history(),
+        KeyAction::Workspaces => app.open_workspaces(),
+        KeyAction::MoveToWorkspace => app.open_move_to_workspace(),
         KeyAction::Reload => app.refresh(),
         KeyAction::Restart => app.request_restart(),
         KeyAction::RestartServer => app.request_server_restart(),
@@ -229,6 +231,10 @@ fn open_item(app: &mut App, item: SettingsItem) {
         SettingsItem::TerminalPanel => {
             app.mode = AppMode::Normal;
             app.show_terminal_panel();
+        }
+        SettingsItem::Workspace => {
+            app.mode = AppMode::Normal;
+            app.open_workspaces();
         }
         SettingsItem::Pinned => {
             app.mode = AppMode::Normal;

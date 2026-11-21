@@ -5,7 +5,9 @@
 use super::args::{Command, LsArgs, MachineCommand, NewArgs};
 use super::attach::{self, AttachContext};
 use super::table::{self, ago, git_text, Column};
-use super::{folders, heartbeat, output_error, resolve_target, session, CliError, Invocation};
+use super::{
+    folders, heartbeat, output_error, resolve_target, session, workspace, CliError, Invocation,
+};
 use crate::printable::printable;
 use serde_json::json;
 use session_core::api::{ApiError, CallerInfo, CreateSession, ErrorCode, MAX_HISTORY_LIMIT};
@@ -41,6 +43,7 @@ pub(crate) fn run(
         Command::Restore { target } => restore(api, &target, out),
         Command::Folders { command, json } => folders::run(api, invocation, command, json, out),
         Command::Heartbeat { command } => heartbeat::run(api, invocation, command, out),
+        Command::Workspace { command } => workspace::run(api, invocation, command, out),
         Command::Session { command } => session::run(api, invocation, command, out),
         Command::Machine { command } => machine(api, command, out),
         Command::Sprite { .. } => Err(CliError::internal("sprite commands are run apart")),

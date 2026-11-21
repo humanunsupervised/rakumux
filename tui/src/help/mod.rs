@@ -255,6 +255,10 @@ pub enum KeyAction {
     Rtop,
     /// `H`: the session history, deleted sessions to bring back.
     SessionHistory,
+    /// `m`: the workspaces modal: show another workspace, or add one.
+    Workspaces,
+    /// `M`: move the selected session to another workspace.
+    MoveToWorkspace,
     /// `B`: the drawer's Beats tab, the heartbeats (tasks run on a clock).
     Beats,
     Help,
@@ -280,7 +284,7 @@ pub enum KeyAction {
 
 impl KeyAction {
     /// The actions as Settings lists them, in order.
-    pub const ALL: [KeyAction; 54] = [
+    pub const ALL: [KeyAction; 56] = [
         KeyAction::RakumuxMode,
         KeyAction::BackToSession,
         KeyAction::GoIn,
@@ -320,6 +324,8 @@ impl KeyAction {
         KeyAction::TerminalPanel,
         KeyAction::TerminalPanelBeside,
         KeyAction::TerminalPanelBelow,
+        KeyAction::Workspaces,
+        KeyAction::MoveToWorkspace,
         KeyAction::Pinned,
         KeyAction::Rtop,
         KeyAction::Beats,
@@ -379,6 +385,8 @@ impl KeyAction {
             | KeyAction::TerminalPanel
             | KeyAction::TerminalPanelBeside
             | KeyAction::TerminalPanelBelow
+            | KeyAction::Workspaces
+            | KeyAction::MoveToWorkspace
             | KeyAction::Pinned
             | KeyAction::Rtop
             | KeyAction::Beats
@@ -438,6 +446,8 @@ impl KeyAction {
             KeyAction::TerminalPanel => "Terminal panel (show, focus or hide)",
             KeyAction::TerminalPanelBeside => "Terminal panel beside the session",
             KeyAction::TerminalPanelBelow => "Terminal panel below the session",
+            KeyAction::Workspaces => "Workspaces",
+            KeyAction::MoveToWorkspace => "Move to workspace",
             KeyAction::Pinned => "Pinned sessions",
             KeyAction::Rtop => "rtop (show, focus or hide)",
             KeyAction::Beats => "Heartbeats (show, focus or hide)",
@@ -515,6 +525,8 @@ impl KeyAction {
             KeyAction::TerminalPanel => plain(&["T"]),
             KeyAction::TerminalPanelBeside => plain(&["|"]),
             KeyAction::TerminalPanelBelow => plain(&["-"]),
+            KeyAction::Workspaces => plain(&["m"]),
+            KeyAction::MoveToWorkspace => plain(&["M"]),
             KeyAction::Pinned => plain(&["*"]),
             KeyAction::Rtop => plain(&["t"]),
             KeyAction::Beats => plain(&["B"]),
@@ -679,6 +691,15 @@ impl KeyAction {
                  into a run), e approves or enables it (one an agent made or changed waits for \
                  you, marked ?), p pauses, r runs it now, d twice deletes it. n makes an empty \
                  one and starts the agent you last ran here, asked to fill it in with you."
+                .into(),
+            KeyAction::Workspaces => "Groups of sessions on this machine. The list shows one \
+                 workspace, or the sessions in none (No workspace); new sessions start in the \
+                 one shown, which the footer names and the next start shows again. Enter shows \
+                 the one under the cursor; + Add new workspace names one; d twice deletes one, \
+                 its sessions going to No workspace. Same as `rakumux workspace`."
+                .into(),
+            KeyAction::MoveToWorkspace => "Moves the selected session to another workspace, \
+                 a new one, or No workspace. Same as `rakumux workspace move`."
                 .into(),
             KeyAction::SessionHistory => "Sessions you deleted or closed in the last 90 \
                  days, on this machine, newest first. Type to search by name, folder, agent \
