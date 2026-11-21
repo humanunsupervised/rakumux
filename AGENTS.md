@@ -457,23 +457,18 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    line, at most 300 characters), only once the answer `accepts` `output`; as it changes the
    list, it goes with it, at most every 3 s, so rakumux.com shows what each agent is doing. A
    list that would pass the contract's 256 KiB goes without places and outputs. The list says
-   `capabilities: ["reply_attachments", "new_sessions", "new_session_agents", "delete_sessions", "rename_sessions", "remote_update"]`
+   `capabilities: ["reply_attachments", "new_sessions", "new_session_agents", "delete_sessions", "rename_sessions"]`
    (and `heartbeats` while the daemon runs them),
    and `resources` as below, and this Rakumux's version (`rakumux_version`).
-   **Releases and updates from rakumux.com** (`feed/updates.rs`, `UpdateSync`; contract
-   `contracts/feed/`, "Releases and updates"): each replies read may say the newest release
-   (`release`), which every feed page gives TUIs (`FeedPage.release`), so they offer it within a
-   feed read of its publication. On rakumux.com or in the app the user can ask this machine to
-   update: the read brings it (`updates`, `{id, version}`); the service marks the id handled
-   (`sensagent/status/updates.json`, 0600, so it installs at most once), reports `installing`,
-   and has the binary's updater (`service::Updater`, `account.rs`'s `MachineUpdater`) install that
-   version through `U`'s verified path (a binary installation only, else `unsupported`; never one
-   older than this release, else `install_failed`, so nobody who can write to rakumux.com can move
-   a machine back to a release with holes since fixed), restart
-   the server in place with the new `rakumux-ptyd` (sessions keep running) and the local API;
-   it reports `updated` (or `failed`: `install_failed`, `restart_failed`), then hands over to the
-   new release's service (`rakumux account restart-service`, hidden, detached). Open TUIs find
-   the install there and reload (or offer `Restart now`).
+   **Releases on rakumux.com** (`feed/updates.rs`; contract `contracts/feed/`, "Releases and
+   updates"): each replies read may say the newest release (`release`), which every feed page
+   gives TUIs (`FeedPage.release`), so they offer it within a feed read of its publication. **A
+   machine updates only from itself** (`U`, automatic updates, the installer): the list never
+   says `remote_update` (releases up to 0.1.62 did, and installed the release asked on rakumux.com or in
+   the app) and the service never reads a replies read's `updates`, so whoever can write to
+   rakumux.com can't have a machine install anything; one asked anyway is never answered and
+   rakumux.com expires it. The `updates.json` an older release kept in `sensagent/status/` is
+   left unread.
    **rtop on rakumux.com** (`feed/resources.rs`, `ResourceSync`; contract `contracts/feed/`,
    "Resources"): the list says `capabilities: ["resources"]` only while the daemon announces
    `resources` (read at each connect; an `unsupported` answer drops it too), so rakumux.com tells
@@ -559,7 +554,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    **Signed commands** (`rakumux_sensagent::signing`, `feed/pairings.rs`; contract
    `contracts/feed/`, "Signed commands" and "Pairing"): what rakumux.com asks of this machine
    (replies, session messages, answers and picks, new sessions with their first prompt,
-   deletions, renames, updates) is carried out only when a device paired with it signed it, so
+   deletions, renames) is carried out only when a device paired with it signed it, so
    whoever can write to rakumux.com's database or call its API can't make it act. A device is a
    key in a browser (format `p256`: a non-extractable WebCrypto key the signer site's frame
    keeps for rakumux.com and signs with as the user sends, no prompt) or the phone app's (the

@@ -61,8 +61,6 @@ pub(crate) enum FeedResult {
     PairingReported,
     /// A session rename's status was taken.
     SessionRenameReported,
-    /// rakumux.com took an update's status.
-    UpdateReported,
     /// This machine's heartbeats were stored.
     HeartbeatsStored,
     /// A heartbeat action's status was taken.
@@ -102,7 +100,6 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
             | FeedRequest::NewSessionStatus { .. }
             | FeedRequest::SessionDeletionStatus { .. }
             | FeedRequest::SessionRenameStatus { .. }
-            | FeedRequest::UpdateStatus { .. }
             | FeedRequest::Heartbeats { .. }
             | FeedRequest::HeartbeatActionStatus { .. }
             | FeedRequest::PairingOpen { .. }
@@ -126,7 +123,6 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
             FeedRequest::NewSessionStatus { body } => FeedHttp::NewSessionStatus(body),
             FeedRequest::SessionDeletionStatus { body } => FeedHttp::SessionDeletionStatus(body),
             FeedRequest::SessionRenameStatus { body } => FeedHttp::SessionRenameStatus(body),
-            FeedRequest::UpdateStatus { body } => FeedHttp::UpdateStatus(body),
             FeedRequest::Heartbeats { body } => FeedHttp::Heartbeats(body),
             FeedRequest::HeartbeatActionStatus { body } => FeedHttp::HeartbeatActionStatus(body),
             FeedRequest::PairingOpen { body } => FeedHttp::PairingOpen(body),
@@ -179,9 +175,6 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
                     FeedRequest::SessionRenameStatus { .. } => {
                         super::session_renames::reported(&reply)
                             .map(|()| FeedResult::SessionRenameReported)
-                    }
-                    FeedRequest::UpdateStatus { .. } => {
-                        super::updates::reported(&reply).map(|()| FeedResult::UpdateReported)
                     }
                     FeedRequest::Heartbeats { .. } => {
                         super::heartbeats::stored(&reply).map(|()| FeedResult::HeartbeatsStored)

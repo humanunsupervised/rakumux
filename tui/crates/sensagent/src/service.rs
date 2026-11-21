@@ -75,50 +75,6 @@ pub enum ServiceError {
     Start,
 }
 
-/// Why an update asked of this machine on rakumux.com wasn't done (contract
-/// `machineUpdateFailure`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum UpdateFailure {
-    /// This installation can't update itself (npm, Homebrew, a source build).
-    Unsupported,
-    /// The release couldn't be installed (download, signature, checksum, an
-    /// installation that can't be written).
-    InstallFailed,
-    /// Installed, but the server couldn't restart in place.
-    RestartFailed,
-    /// Not asked as a paired device signed it (contract `signatureFailure`);
-    /// never given to the updater.
-    Unsigned,
-    UnknownDevice,
-    BadSignature,
-    Expired,
-}
-
-impl From<crate::signing::Refusal> for UpdateFailure {
-    fn from(refusal: crate::signing::Refusal) -> Self {
-        use crate::signing::Refusal;
-        match refusal {
-            Refusal::Unsigned => Self::Unsigned,
-            Refusal::UnknownDevice => Self::UnknownDevice,
-            Refusal::BadSignature => Self::BadSignature,
-            Refusal::Expired => Self::Expired,
-        }
-    }
-}
-
-/// Installs a release on this machine for an update asked on rakumux.com (the
-/// embedding binary's: the verified path `U` takes), then restarts the server
-/// and the local API in place, so sessions keep running.
-pub trait Updater: Send + Sync {
-    /// Install `version` and restart the server and the local API with it.
-    /// Blocks while it downloads and installs (a minute or two at most).
-    fn install(&self, version: &str) -> Result<(), UpdateFailure>;
-    /// After an install was reported: start the new release's account service
-    /// in this one's place (it asks this one to stop). Doesn't wait.
-    fn hand_over(&self);
-}
-
 /// Public sign-in and destination settings. Contains no credentials.
 #[derive(Clone, Debug)]
 pub struct ServiceConfig {
@@ -127,17 +83,6 @@ pub struct ServiceConfig {
     /// [`CLOUD_CA_ENV`]'s certificates, for an origin other than rakumux.com.
     cloud_roots: Option<Vec<u8>>,
     turn_settings: Option<TurnSettingsSource>,
-    updater: Option<UpdaterPort>,
-}
-
-/// The embedding binary's [`Updater`].
-#[derive(Clone)]
-struct UpdaterPort(Arc<dyn Updater>);
-
-impl std::fmt::Debug for UpdaterPort {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("Updater")
-    }
 }
 
 /// Reads the turn settings (the TUI's `config.json`), again every minute.
@@ -184,15 +129,7 @@ impl ServiceConfig {
             cloud_origin,
             cloud_roots,
             turn_settings: None,
-            updater: None,
         })
-    }
-
-    /// This machine installs the releases asked of it on rakumux.com with
-    /// `updater` (and says `remote_update` so rakumux.com asks it).
-    pub fn with_updater(mut self, updater: Arc<dyn Updater>) -> Self {
-        self.updater = Some(UpdaterPort(updater));
-        self
     }
 
     /// When agents' turns get summaries: `read` gives the settings, at start and
@@ -261,7 +198,6 @@ pub fn serve(
         .with_paired_devices(layout.root().join("paired-devices.json"))
         .with_session_rename_state(layout.status_dir().join("session-renames.json"))
         .with_heartbeat_action_state(layout.status_dir().join("heartbeat-actions.json"))
-        .with_update_state(layout.status_dir().join("updates.json"))
         .with_version(version)
         .with_titles(layout.status_dir().join("titles.json"))
         .with_titled_chats(layout.status_dir().join("titled-chats.json"))
@@ -276,9 +212,6 @@ pub fn serve(
     }
     if let Some(TurnSettingsSource(read)) = config.turn_settings {
         refresher = refresher.with_turn_settings(move || read());
-    }
-    if let Some(UpdaterPort(updater)) = config.updater {
-        refresher = refresher.with_updater(updater);
     }
     let runner = RefreshRunner::spawn_with_website(refresher, api, website)
         .map_err(|_| ServiceError::Setup)?;

@@ -177,10 +177,6 @@ pub struct StatusRefresher<S, A, C = SystemClock> {
     paired_devices: Option<std::path::PathBuf>,
     session_rename_state: Option<std::path::PathBuf>,
     heartbeat_action_state: Option<std::path::PathBuf>,
-    /// Where updates keep which were installed across a restart.
-    update_state: Option<std::path::PathBuf>,
-    /// Installs the releases asked of this machine on rakumux.com.
-    updater: Option<std::sync::Arc<dyn crate::service::Updater>>,
     /// This Rakumux's version, which the session list says.
     version: Option<String>,
     /// This machine's id and name for the feed, until the owner takes it.
@@ -228,8 +224,6 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             paired_devices: None,
             session_rename_state: None,
             heartbeat_action_state: None,
-            update_state: None,
-            updater: None,
             version: None,
             machine: None,
             titles: Titles::default(),
@@ -351,27 +345,6 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
 
     pub(crate) fn new_session_state(&self) -> Option<std::path::PathBuf> {
         self.new_session_state.clone()
-    }
-
-    /// Keep which updates were installed here, and the reports not yet taken,
-    /// in `path`, so a restarted service never installs one twice.
-    pub fn with_update_state(mut self, path: std::path::PathBuf) -> Self {
-        self.update_state = Some(path);
-        self
-    }
-
-    pub(crate) fn update_state(&self) -> Option<std::path::PathBuf> {
-        self.update_state.clone()
-    }
-
-    /// Install the releases asked of this machine on rakumux.com with `updater`.
-    pub fn with_updater(mut self, updater: std::sync::Arc<dyn crate::service::Updater>) -> Self {
-        self.updater = Some(updater);
-        self
-    }
-
-    pub(crate) fn updater(&self) -> Option<std::sync::Arc<dyn crate::service::Updater>> {
-        self.updater.clone()
     }
 
     /// This Rakumux is `version` (the session list says it, when it's a release's).

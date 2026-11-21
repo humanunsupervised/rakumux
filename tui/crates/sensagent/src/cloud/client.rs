@@ -34,7 +34,6 @@ const FEED_SESSION_DELETION_STATUS_PATH: &str = "/api/v1/feed/session-deletions/
 const FEED_SESSION_RENAME_STATUS_PATH: &str = "/api/v1/feed/session-renames/status";
 const FEED_HEARTBEATS_PATH: &str = "/api/v1/feed/heartbeats";
 const FEED_HEARTBEAT_ACTION_STATUS_PATH: &str = "/api/v1/feed/heartbeat-actions/status";
-const FEED_UPDATE_STATUS_PATH: &str = "/api/v1/feed/updates/status";
 const FEED_PAIRINGS_PATH: &str = "/api/v1/feed/pairings";
 const FEED_PAIRING_STATUS_PATH: &str = "/api/v1/feed/pairings/status";
 const FEED_REALTIME_PATH: &str = "/api/v1/feed/realtime";
@@ -75,7 +74,6 @@ pub struct CloudAIConfig {
     feed_heartbeat_action_status: Url,
     feed_pairings: Url,
     feed_pairing_status: Url,
-    feed_update_status: Url,
     feed_attachments: Url,
     feed_realtime: Url,
     machine_credentials: Url,
@@ -184,8 +182,6 @@ pub(crate) enum FeedHttp<'a> {
     Heartbeats(&'a [u8]),
     /// `POST /api/v1/feed/heartbeat-actions/status` with a heartbeat action's status.
     HeartbeatActionStatus(&'a [u8]),
-    /// `POST /api/v1/feed/updates/status` with an update's status.
-    UpdateStatus(&'a [u8]),
     /// `POST /api/v1/feed/pairings`: open a pairing.
     PairingOpen(&'a [u8]),
     /// `POST /api/v1/feed/pairings/status` with a pairing proposal's status.
@@ -267,7 +263,6 @@ impl CloudAIConfig {
         let feed_session_rename_status = path(FEED_SESSION_RENAME_STATUS_PATH);
         let feed_heartbeats = path(FEED_HEARTBEATS_PATH);
         let feed_heartbeat_action_status = path(FEED_HEARTBEAT_ACTION_STATUS_PATH);
-        let feed_update_status = path(FEED_UPDATE_STATUS_PATH);
         let feed_pairings = path(FEED_PAIRINGS_PATH);
         let feed_pairing_status = path(FEED_PAIRING_STATUS_PATH);
         let feed_realtime = path(FEED_REALTIME_PATH);
@@ -293,7 +288,6 @@ impl CloudAIConfig {
             feed_session_rename_status,
             feed_heartbeats,
             feed_heartbeat_action_status,
-            feed_update_status,
             feed_pairings,
             feed_pairing_status,
             feed_attachments,
@@ -534,7 +528,6 @@ impl CloudAIClient {
             | FeedHttp::SessionRenameStatus(body)
             | FeedHttp::Heartbeats(body)
             | FeedHttp::HeartbeatActionStatus(body)
-            | FeedHttp::UpdateStatus(body)
             | FeedHttp::PairingOpen(body)
             | FeedHttp::PairingStatus(body) => {
                 let url = match request {
@@ -549,7 +542,6 @@ impl CloudAIClient {
                     FeedHttp::SessionRenameStatus(_) => &self.config.feed_session_rename_status,
                     FeedHttp::Heartbeats(_) => &self.config.feed_heartbeats,
                     FeedHttp::HeartbeatActionStatus(_) => &self.config.feed_heartbeat_action_status,
-                    FeedHttp::UpdateStatus(_) => &self.config.feed_update_status,
                     FeedHttp::PairingOpen(_) => &self.config.feed_pairings,
                     FeedHttp::PairingStatus(_) => &self.config.feed_pairing_status,
                     _ => &self.config.feed_entries,

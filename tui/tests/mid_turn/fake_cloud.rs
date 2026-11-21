@@ -613,13 +613,15 @@ impl Served {
                         .collect();
                     read["heartbeat_actions"] = json!(pending);
                 }
-                if state.says("remote_update") {
-                    let pending: Vec<&Value> = state
-                        .updates
-                        .iter()
-                        .filter(|update| update["status"] == "pending")
-                        .take(1)
-                        .collect();
+                // Sent whatever the machine says, as a rakumux.com that
+                // shouldn't (an older one, or one someone else changed) would.
+                let pending: Vec<&Value> = state
+                    .updates
+                    .iter()
+                    .filter(|update| update["status"] == "pending")
+                    .take(1)
+                    .collect();
+                if !pending.is_empty() {
                     read["updates"] = json!(pending);
                 }
                 answer(200, read)

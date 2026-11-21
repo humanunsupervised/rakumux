@@ -354,45 +354,46 @@ fn a_session_asked_on_rakumux_com_to_be_renamed_takes_the_name_once() {
     daemon.stop();
 }
 
-/// Updates asked on rakumux.com go only forward: one for a release older than
-/// this machine's fails `install_failed` before anything is fetched, and one
-/// for a newer release gets as far as the installation's own check (this
-/// source build can't update itself: `unsupported`).
+/// A machine updates only from itself: it never says `remote_update`, and an
+/// update rakumux.com asks of it anyway (an older rakumux.com, or one someone
+/// else changed) is never installed or even answered, while what else the
+/// same reads bring (a rename) is carried out.
 #[test]
-fn an_update_from_rakumux_com_never_goes_back() {
+fn an_update_asked_on_rakumux_com_is_never_installed() {
     let world = World::new();
     let mut daemon = world.start_daemon();
     let mut service = world.start_service(1);
-    world.wait("the machine to say it takes updates", || {
-        world.cloud.state().says("remote_update")
+    world.wait("the machine's session list", || {
+        world.cloud.state().sessions.is_some()
     });
-    let report = |id: &str| -> Option<Value> {
+    let update = world.cloud.ask_update(MACHINE, "99.0.0");
+    let rename = world.cloud.ask_rename(MACHINE, &ulid(), "anything");
+    world.wait("the rename read with the update reported", || {
         world
             .cloud
             .state()
-            .update_reports
+            .rename_reports
             .iter()
-            .find(|report| report["id"] == id && report["status"] == "failed")
-            .cloned()
-    };
-    let older = world.cloud.ask_update(MACHINE, "0.0.9");
-    world.wait("the older release refused", || report(&older).is_some());
-    assert_eq!(
-        report(&older).unwrap()["failure"],
-        "install_failed",
-        "{}",
-        world.diagnostics()
-    );
-    let newer = world.cloud.ask_update(MACHINE, "99.0.0");
-    world.wait("the newer release reaching the install", || {
-        report(&newer).is_some()
+            .any(|report| report["id"] == rename)
     });
-    assert_eq!(
-        report(&newer).unwrap()["failure"],
-        "unsupported",
-        "{}",
-        world.diagnostics()
-    );
+    let reads = world.cloud.state().reads.len();
+    world.wait("three more replies reads", || {
+        world.cloud.state().reads.len() >= reads + 3
+    });
+    let (says, reports, pending) = {
+        let state = world.cloud.state();
+        (
+            state.says("remote_update"),
+            state.update_reports.clone(),
+            state
+                .updates
+                .iter()
+                .any(|asked| asked["id"] == update && asked["status"] == "pending"),
+        )
+    };
+    assert!(!says, "{}", world.diagnostics());
+    assert!(reports.is_empty(), "{reports:?}");
+    assert!(pending);
     service.stop();
     daemon.stop();
 }

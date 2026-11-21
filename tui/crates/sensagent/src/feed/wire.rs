@@ -151,8 +151,6 @@ pub(crate) enum FeedRequest {
     SessionDeletionStatus { body: Vec<u8> },
     /// Say whether a session rakumux.com asked to rename was renamed, as `body`.
     SessionRenameStatus { body: Vec<u8> },
-    /// Say how an update asked for on rakumux.com went, as `body`.
-    UpdateStatus { body: Vec<u8> },
     /// Upload this machine's whole list of heartbeats, as `body`.
     Heartbeats { body: Vec<u8> },
     /// Say how a heartbeat action asked for on rakumux.com went, as `body`.
@@ -1191,9 +1189,6 @@ struct WireReplies {
     /// The newest release rakumux.com knows of (`release`).
     #[serde(default)]
     release: Option<serde_json::Value>,
-    /// The update asked of this machine (`updates`).
-    #[serde(default)]
-    updates: Option<serde_json::Value>,
     /// The proposal sent for this machine's open pairing (`pairings`).
     #[serde(default)]
     pairings: Option<serde_json::Value>,
@@ -1229,8 +1224,6 @@ pub(crate) struct RepliesRead {
     pub heartbeat_actions: Vec<super::heartbeat_actions::ActionAsk>,
     /// The newest stable release rakumux.com knows of, when it says.
     pub release: Option<String>,
-    /// The update asked of this machine, when the read brought one.
-    pub updates: Vec<super::updates::MachineUpdateAsk>,
 }
 
 impl RepliesRead {
@@ -1298,7 +1291,6 @@ pub(crate) fn replies(reply: &FeedHttpReply) -> Result<RepliesRead, FeedFailure>
         session_renames: super::session_renames::asks(page.session_renames),
         heartbeat_actions: super::heartbeat_actions::asks(page.heartbeat_actions),
         release: super::updates::release(page.release),
-        updates: super::updates::asks(page.updates),
     })
 }
 
@@ -1721,10 +1713,11 @@ mod tests {
         }
     }
 
-    /// A replies read says the newest release and the update asked of this
-    /// machine; one off the contract is left out on its own, never the read.
+    /// A replies read says the newest release, one off the contract left out
+    /// on its own, never the read; the updates an older rakumux.com asked of
+    /// this machine are never read.
     #[test]
-    fn a_replies_read_brings_the_release_and_the_update() {
+    fn a_replies_read_brings_the_release_and_never_an_update() {
         let read = replies(&reply(
             200,
             r#"{"version":1,"replies":[],"latest_seq":0,"more":false,
@@ -1733,34 +1726,32 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(read.release.as_deref(), Some("0.1.49"));
-        assert_eq!(read.updates.len(), 1);
-        assert_eq!(read.updates[0].version, "0.1.49");
         let off = replies(&reply(
             200,
             r#"{"version":1,"replies":[],"latest_seq":0,"more":false,
-                "release":{"version":"latest"},"updates":[{"id":"x","version":"0.1.49"}]}"#,
+                "release":{"version":"latest"}}"#,
         ))
         .unwrap();
-        assert_eq!((off.release, off.updates.len()), (None, 0));
+        assert_eq!(off.release, None);
         let older = replies(&reply(
             200,
             r#"{"version":1,"replies":[],"latest_seq":0,"more":false}"#,
         ))
         .unwrap();
-        assert_eq!((older.release, older.updates.len()), (None, 0));
+        assert_eq!(older.release, None);
     }
 
-    /// The session list says this Rakumux's version and that it takes updates.
+    /// The session list says this Rakumux's version and what it handles.
     #[test]
     fn a_session_list_says_its_version() {
         let Some(FeedRequest::Sessions { body }) =
-            sessions_upload("studio", &[], 1, &["remote_update"], Some("0.1.49"))
+            sessions_upload("studio", &[], 1, &["new_sessions"], Some("0.1.49"))
         else {
             panic!("no request");
         };
         let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(body["rakumux_version"], "0.1.49");
-        assert_eq!(body["capabilities"], serde_json::json!(["remote_update"]));
+        assert_eq!(body["capabilities"], serde_json::json!(["new_sessions"]));
         let Some(FeedRequest::Sessions { body }) = sessions_upload("studio", &[], 1, &[], None)
         else {
             panic!("no request");
