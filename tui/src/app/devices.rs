@@ -47,6 +47,13 @@ impl App {
         }
     }
 
+    /// `D`: the paired devices dialog, straight into a new pairing (as
+    /// `rakumux devices pair`).
+    pub fn pair_device(&mut self) {
+        self.open_devices_dialog();
+        self.start_device_pairing();
+    }
+
     /// `n`: open a pairing (its code, link and QR code).
     pub fn start_device_pairing(&mut self) {
         if let AppMode::Devices(dialog) = &mut self.mode {

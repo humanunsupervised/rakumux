@@ -116,7 +116,7 @@ fn pair(access: &dyn AccountAccess, qr: bool, out: &mut dyn Write) -> Result<i32
             PairingState::Paired { name } => {
                 writeln!(
                     out,
-                    "Paired {}. From now on this machine carries out what rakumux.com asks only when a paired device signed it.",
+                    "Paired {}. It can now reply and act from rakumux.com: this machine carries out only what a paired device signed.",
                     printable(name)
                 )
                 .map_err(output_error)?;
@@ -189,7 +189,7 @@ fn list(access: &dyn AccountAccess, json: bool, out: &mut dyn Write) -> Result<i
     if devices.is_empty() {
         writeln!(
             out,
-            "No paired devices: this machine carries out what rakumux.com asks unsigned. Pair one: rakumux devices pair"
+            "No paired devices: nothing asked on rakumux.com is carried out here. Pair one: rakumux devices pair"
         )
         .map_err(output_error)?;
         return Ok(0);
@@ -229,7 +229,7 @@ fn remove(access: &dyn AccountAccess, device: &str, out: &mut dyn Write) -> Resu
     if left.is_empty() {
         writeln!(
             out,
-            "No device is paired now: this machine carries out what rakumux.com asks unsigned again."
+            "No device is paired now: nothing asked on rakumux.com is carried out here until one is."
         )
         .map_err(output_error)?;
     }

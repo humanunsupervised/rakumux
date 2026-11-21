@@ -7,7 +7,10 @@
 //! asks for them and whose list says `question_answers`) and their files
 //! while they're pending, and records every status report, uploaded entry,
 //! chat message and request. With `summaries` on it says AI session titles
-//! are on too and answers each title request with `title`.
+//! are on too and answers each title request with `title`. Once a device is
+//! paired ([`FakeCloud::pair`]), it signs what it serves with that device's
+//! key, as a paired browser or phone does: machines carry out nothing
+//! unsigned.
 
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -84,6 +87,117 @@ impl Reply {
     }
 }
 
+/// A device's P-256 key, as the test holds it: signs commands itself, as the
+/// phone app and a paired browser do.
+pub struct Phone {
+    key: ring::signature::EcdsaKeyPair,
+    pub key_id: String,
+}
+
+impl Phone {
+    pub fn new() -> Self {
+        use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_ASN1_SIGNING};
+        let rng = ring::rand::SystemRandom::new();
+        let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng).unwrap();
+        let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, pkcs8.as_ref(), &rng)
+            .unwrap();
+        Self {
+            key,
+            key_id: b64(ulid().as_bytes()),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn proposed(&self, name: &str) -> rakumux_sensagent::signing::pairing::ProposedDevice {
+        rakumux_sensagent::signing::pairing::ProposedDevice {
+            key_id: self.key_id.clone(),
+            format: rakumux_sensagent::signing::KeyFormat::P256,
+            public_key: self.public_key(),
+            name: name.into(),
+        }
+    }
+
+    fn public_key(&self) -> String {
+        use ring::signature::KeyPair;
+        b64(self.key.public_key().as_ref())
+    }
+
+    /// `fields` as a command of `kind` for request `id` to machine
+    /// `machine`, signed now (`signedCommand`).
+    pub fn sign(&self, kind: &str, machine: &str, id: &str, fields: Value) -> Value {
+        let now = now_ms();
+        let mut command = json!({"v": 1, "kind": kind, "machine": machine, "id": id,
+            "at": now, "expires": now + 10 * 60_000});
+        if let (Some(command), Some(fields)) = (command.as_object_mut(), fields.as_object()) {
+            command.extend(fields.clone());
+        }
+        let bytes = serde_json::to_vec(&command).unwrap();
+        let signature = self
+            .key
+            .sign(&ring::rand::SystemRandom::new(), &bytes)
+            .unwrap();
+        json!({"device": self.key_id, "command": b64(&bytes), "signature": b64(signature.as_ref())})
+    }
+}
+
+fn b64(bytes: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+}
+
+/// Each row of a replies read that has no `signed`, signed by `phone` for
+/// `machine` with the fields its kind's command says (contract, Signed
+/// commands); a reply's files by name and SHA-256 of what `files` serves.
+fn sign_read(phone: &Phone, machine: &str, files: &HashMap<String, Vec<u8>>, read: &mut Value) {
+    let pick = |row: &Value, keys: &[&str]| {
+        let mut fields = serde_json::Map::new();
+        for key in keys {
+            if let Some(value) = row.get(*key).filter(|value| !value.is_null()) {
+                fields.insert((*key).into(), value.clone());
+            }
+        }
+        fields
+    };
+    let mut sign = |list: &str, kind: &str, keys: &[&str]| {
+        let Some(Value::Array(rows)) = read.get_mut(list) else {
+            return;
+        };
+        for row in rows.iter_mut().filter(|row| row.get("signed").is_none()) {
+            let mut fields = pick(row, keys);
+            if list == "replies" {
+                fields.insert("session".into(), row["session"]["id"].clone());
+                if let Some(Value::Array(attached)) = row.get("attachments") {
+                    let named: Vec<Value> = attached
+                        .iter()
+                        .map(|file| {
+                            let bytes = file["id"]
+                                .as_str()
+                                .and_then(|id| files.get(id))
+                                .cloned()
+                                .unwrap_or_default();
+                            let hash = ring::digest::digest(&ring::digest::SHA256, &bytes);
+                            let hex: String =
+                                hash.as_ref().iter().map(|b| format!("{b:02x}")).collect();
+                            json!({"name": file["name"], "sha256": hex})
+                        })
+                        .collect();
+                    fields.insert("attachments".into(), Value::Array(named));
+                }
+            }
+            let id = row["id"].as_str().unwrap_or_default().to_owned();
+            row["signed"] = phone.sign(kind, machine, &id, Value::Object(fields));
+        }
+    };
+    sign("replies", "reply", &["entry", "text", "answer", "choice"]);
+    sign("session_deletions", "delete_session", &["session"]);
+    sign("session_renames", "rename_session", &["session", "name"]);
+    sign(
+        "heartbeat_actions",
+        "heartbeat_action",
+        &["heartbeat", "action"],
+    );
+}
+
 /// A status report the machine sent.
 #[derive(Clone, Debug)]
 pub struct Report {
@@ -153,6 +267,8 @@ pub struct State {
     pub updates: Vec<Value>,
     /// Update status reports, as sent.
     pub update_reports: Vec<Value>,
+    /// The device paired with the machine, which signs what's served.
+    pub signer: Option<Arc<Phone>>,
 }
 
 impl State {
@@ -236,6 +352,23 @@ impl FakeCloud {
             state,
             stop,
         }
+    }
+
+    /// Pair a device with the machine whose account service keeps its files
+    /// in `sensagent` (`paired-devices.json`, as `rakumux devices pair`
+    /// leaves it), and sign what's served with it from now on.
+    #[allow(dead_code)]
+    pub fn pair(&self, sensagent: &std::path::Path) {
+        use std::os::unix::fs::PermissionsExt;
+        let phone = Phone::new();
+        let file = sensagent.join("paired-devices.json");
+        let devices = json!({"version": 1, "devices": [{
+            "key_id": phone.key_id, "format": "p256", "public_key": phone.public_key(),
+            "name": "Test browser", "paired_at": now_ms(),
+        }]});
+        std::fs::write(&file, devices.to_string()).unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        self.state().signer = Some(Arc::new(phone));
     }
 
     pub fn state(&self) -> MutexGuard<'_, State> {
@@ -623,6 +756,9 @@ impl Served {
                     .collect();
                 if !pending.is_empty() {
                     read["updates"] = json!(pending);
+                }
+                if let Some(phone) = &state.signer {
+                    sign_read(phone, &self.machine.id, &state.files, &mut read);
                 }
                 answer(200, read)
             }

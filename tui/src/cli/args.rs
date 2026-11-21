@@ -181,9 +181,9 @@ pub enum Command {
     },
     /// Devices that sign what rakumux.com asks of this machine
     ///
-    /// Once a device is paired, this machine carries out replies, new
-    /// sessions, deletions, renames and updates from rakumux.com only when a
-    /// paired device signed them.
+    /// This machine carries out replies, new sessions, deletions, renames and
+    /// heartbeat pauses from rakumux.com only when a paired device signed
+    /// them: until one is paired, none.
     Devices {
         #[command(subcommand)]
         command: DevicesCommand,

@@ -430,11 +430,15 @@ mod tests {
         Some(json!([{
             "id": REQUEST, "machine": "studio", "session": SESSION, "name": "fix login",
             "status": "pending", "created_at": 1, "status_at": 1,
+            "signed": crate::signing::testing::signed_json(
+                "rename_session", REQUEST, json!({ "session": SESSION, "name": "fix login" }),
+            ),
         }]))
     }
 
     fn sync(listed: bool) -> SessionRenameSync {
-        let mut sync = SessionRenameSync::new("studio".into(), None);
+        let mut sync = SessionRenameSync::new("studio".into(), None)
+            .signing(crate::signing::testing::paired());
         sync.set_enabled(true, Duration::ZERO);
         if listed {
             sync.listed

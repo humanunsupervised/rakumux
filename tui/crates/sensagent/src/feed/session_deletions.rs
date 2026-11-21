@@ -399,11 +399,15 @@ mod tests {
         Some(json!([{
             "id": REQUEST, "machine": "studio", "session": SESSION, "status": "pending",
             "created_at": 1, "status_at": 1,
+            "signed": crate::signing::testing::signed_json(
+                "delete_session", REQUEST, json!({ "session": SESSION }),
+            ),
         }]))
     }
 
     fn sync(listed: bool) -> SessionDeletionSync {
-        let mut sync = SessionDeletionSync::new("studio".into(), None);
+        let mut sync = SessionDeletionSync::new("studio".into(), None)
+            .signing(crate::signing::testing::paired());
         sync.set_enabled(true, Duration::ZERO);
         if listed {
             sync.listed

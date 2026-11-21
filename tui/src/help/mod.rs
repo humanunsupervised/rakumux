@@ -261,6 +261,9 @@ pub enum KeyAction {
     Settings,
     /// Sign in to the Rakumux account, or see who's signed in.
     Account,
+    /// `D`: pair a browser or phone to sign what rakumux.com asks of this
+    /// machine (`rakumux devices pair`).
+    PairDevice,
     /// The welcome tour carousel.
     Tour,
     CheckForUpdate,
@@ -277,7 +280,7 @@ pub enum KeyAction {
 
 impl KeyAction {
     /// The actions as Settings lists them, in order.
-    pub const ALL: [KeyAction; 53] = [
+    pub const ALL: [KeyAction; 54] = [
         KeyAction::RakumuxMode,
         KeyAction::BackToSession,
         KeyAction::GoIn,
@@ -324,6 +327,7 @@ impl KeyAction {
         KeyAction::Help,
         KeyAction::Settings,
         KeyAction::Account,
+        KeyAction::PairDevice,
         KeyAction::Tour,
         KeyAction::CheckForUpdate,
         KeyAction::Reload,
@@ -382,6 +386,7 @@ impl KeyAction {
             KeyAction::Help
             | KeyAction::Settings
             | KeyAction::Account
+            | KeyAction::PairDevice
             | KeyAction::Tour
             | KeyAction::CheckForUpdate
             | KeyAction::Reload
@@ -440,6 +445,7 @@ impl KeyAction {
             KeyAction::Help => "Help",
             KeyAction::Settings => "Settings",
             KeyAction::Account => "Sign in, or your account",
+            KeyAction::PairDevice => "Pair a browser or phone",
             KeyAction::Tour => "Welcome tour",
             KeyAction::CheckForUpdate => "Update Rakumux (sessions keep running)",
             KeyAction::Reload => "Reconnect or reload the list",
@@ -516,6 +522,7 @@ impl KeyAction {
             KeyAction::Help => plain(&["?"]),
             KeyAction::Settings => format!("comma (,), {SETTINGS_KEY}"),
             KeyAction::Account => plain(&["a"]),
+            KeyAction::PairDevice => plain(&["D"]),
             KeyAction::Tour => "t (in Help)".into(),
             KeyAction::CheckForUpdate => plain(&["U"]),
             KeyAction::Reload => plain(&["Ctrl-r"]),
@@ -680,6 +687,12 @@ impl KeyAction {
             KeyAction::Account => "Signed out, it asks for a sign-in code to approve in any \
                  browser (the footer's Sign in does too); signed in, it shows the account and \
                  whether AI session titles are on."
+                .into(),
+            KeyAction::PairDevice => "Shows a one-time code, its link and QR code: open it in \
+                 the browser or scan it with the app, then confirm the device's name and \
+                 fingerprint with y. This machine carries out what rakumux.com asks only when \
+                 a paired device signed it: until one is paired, nothing. Same as `rakumux \
+                 devices pair`; Settings → Paired devices lists and forgets them."
                 .into(),
             KeyAction::CheckForUpdate => {
                 "Shift+U checks the installed release channel. Enter confirms installation and \

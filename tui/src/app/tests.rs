@@ -6819,6 +6819,40 @@ async fn star_shows_the_pinned_tab_by_status_whose_rows_order_and_unpin() {
     assert_eq!(h.app.focus, Focus::Session);
 }
 
+/// `D` in Rakumux mode pairs a device at once (`rakumux devices pair`): the
+/// pairing's code shows without going through the list, and the Keys table
+/// lists it.
+#[tokio::test]
+async fn d_pairs_a_device_from_the_list() {
+    use rakumux_sensagent::feed::{PairingAction, PairingView};
+    use rakumux_sensagent::signing::pairing::PairingState as Signer;
+    let (mut h, account) = account_harness(testing::FakeAccount::signed_in());
+    *account.pairing.lock().unwrap() = Some(PairingView {
+        code: "K7QM-4XPA-9F2D".into(),
+        link: "https://rakumux-sign.com/pair#K7QM-4XPA-9F2D".into(),
+        expires_at: 0,
+        state: Signer::Open,
+        opened: true,
+    });
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    h.press(KeyCode::Char('D')).await;
+    h.app.process_pending();
+    assert!(account
+        .pairing_asks
+        .lock()
+        .unwrap()
+        .contains(&PairingAction::Start));
+    let rows = screen_rows(&mut h, 160, 48).join("\n");
+    assert!(rows.contains("K7QM-4XPA-9F2D"), "{rows}");
+    h.press(KeyCode::Esc).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert_eq!(
+        crate::help::KeyAction::PairDevice.keys_for(&h.app.modal_context(false)),
+        "D",
+        "the Keys table names D"
+    );
+}
+
 /// Settings → Paired devices: a pairing's code (with its link) shows, the
 /// device sent with it is confirmed with `y`, and a device is forgotten with
 /// `d` twice.

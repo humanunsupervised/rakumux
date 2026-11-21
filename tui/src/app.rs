@@ -1007,8 +1007,8 @@ impl App {
             }
             SettingsItem::Devices => (
                 "Paired devices",
-                "Pair · …".into(),
-                "The browsers and phones that sign what rakumux.com asks of this machine. Once one is paired, this machine carries out replies, new sessions, deletions, renames and updates from rakumux.com only when a paired device signed them, so nobody who can write to rakumux.com can make it act. Same as `rakumux devices pair`.",
+                "Pair · D".into(),
+                "The browsers and phones that sign what rakumux.com asks of this machine. It carries out replies, new sessions, deletions, renames and heartbeat pauses from rakumux.com only when a paired device signed them (until one is paired, none), so nobody who can write to rakumux.com can make it act. Same as `rakumux devices pair`.",
             ),
             SettingsItem::Account => {
                 let value = match &self.account {

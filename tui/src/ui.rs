@@ -556,11 +556,13 @@ mod tests {
         h.press(KeyCode::End).await;
         for (width, height) in SIZES {
             let screen = render(&mut h.app, width, height);
-            for hint in ["▶ Quit Rakumux", "Help and app", "Enter run"] {
+            for hint in ["▶ Quit Rakumux", "Enter run"] {
                 assert!(screen.contains(hint), "{hint}: {screen}");
             }
         }
+        // Its heading too, where the screen has room for the section.
         let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("Help and app"), "{screen}");
         assert!(
             screen.contains("Terminal panel beside the session"),
             "{screen}"

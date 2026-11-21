@@ -543,7 +543,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    approval, `by_agent` (a session made it), `updated_at`, next run, runs and last run, its command
    and task masked as chat text (the home directory as `~`); the session list marks each run
    (`heartbeat`). The replies read brings the actions asked of them on rakumux.com
-   (`heartbeat_actions`), one at a time: only `pause` is carried out, as the user (`not_listed`,
+   (`heartbeat_actions`), one at a time: only `pause` is carried out, signed by a paired device
+   (`heartbeat_action`, below; else a signature refusal), as the user (`not_listed`,
    `incomplete` or `refused` when the daemon won't); `enable` and `run` fail `refused`, the daemon
    never asked, since whoever can write to rakumux.com could otherwise have a command run here:
    heartbeats are approved, turned on and run only on this machine (the Beats tab, `rakumux
@@ -554,7 +555,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    **Signed commands** (`rakumux_sensagent::signing`, `feed/pairings.rs`; contract
    `contracts/feed/`, "Signed commands" and "Pairing"): what rakumux.com asks of this machine
    (replies, session messages, answers and picks, new sessions with their first prompt,
-   deletions, renames) is carried out only when a device paired with it signed it, so
+   deletions, renames, heartbeat pauses) is carried out only when a device paired with it signed it, so
    whoever can write to rakumux.com's database or call its API can't make it act. A device is a
    key in a browser (format `p256`: a non-extractable WebCrypto key the signer site's frame
    keeps for rakumux.com and signs with as the user sends, no prompt) or the phone app's (the
@@ -565,32 +566,34 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    code hands its frame, so it doesn't stop someone who changes the code rakumux.com serves. Each command is its exact JSON bytes, `{v: 1, kind, machine (this machine's id), id
    (the request's), at, expires (at most an hour on), …}`; one guard on the owner thread
    (`signing::Guard`, shared by `ReplySync`, `NewSessionSync`, `SessionDeletionSync`,
-   `SessionRenameSync` and `UpdateSync`) compares what it would act on with what was signed (a
+   `SessionRenameSync` and `HeartbeatActionSync`) compares what it would act on with what was signed (a
    reply's text as it came, never as cleaned for typing; its files by name and SHA-256, checked
    as each is downloaded, `Fetched::Forged`), and refuses with `unsigned`, `unknown_device`,
-   `bad_signature` or `expired`, each kind's failure. Until a device is paired, unsigned
-   commands are carried out as before; once one is, every command needs a signature, but for
-   replies and session messages this machine's own TUI wrote (`ReplySync::written`, memory
-   only) and the heartbeats' `pause`. A new session's first prompt, which rakumux.com writes as a
+   `bad_signature` or `expired`, each kind's failure. Every command needs a signature, a
+   device paired or not (the session list says `signed_only`; until one is paired, nothing
+   asked on rakumux.com is carried out), but for replies and session messages this machine's
+   own TUI wrote (`ReplySync::written`, memory only). Pause is a `heartbeat_action` command
+   (`heartbeat`, `action`). Releases up to 0.1.63 carried out unsigned commands while no device
+   was paired, and Pause always. A new session's first prompt, which rakumux.com writes as a
    session message once the session is `created`, carries the new session's signature and goes
    only into the session started for that request, once (`Guard::first_prompt`). Devices are
-   paired at this machine (`signing::pairing`, `PairingSync`): `rakumux devices pair` or Settings
-   → Paired devices shows a one-time code (`ABCD-EFGH-JKMN`, 60 bits, five minutes, one try), the
+   paired at this machine (`signing::pairing`, `PairingSync`): `rakumux devices pair`, `D` in the TUI or
+   Settings → Paired devices shows a one-time code (`ABCD-EFGH-JKMN`, 60 bits, five minutes, one try), the
    signer site's link `/pair#CODE` and its QR code (the app scans it); the service opens the
    pairing at rakumux.com under the code's first group only (`POST /api/v1/feed/pairings`,
    another code when `pairing_taken`), reads replies every 2 s while it waits, checks the
    proposal's tag (HMAC-SHA256 keyed with the whole code over the pairing's id and the device),
    shows the device's name and fingerprint (6 bytes of its key's SHA-256, which the device shows
    too) and keeps it only on `y` (`sensagent/paired-devices.json`, 0600, at most 32), then
-   reports (`POST /api/v1/feed/pairings/status`). The session list says `signed_commands`, and to
+   reports (`POST /api/v1/feed/pairings/status`). The session list says `signed_commands` and `signed_only`, and to
    a cloud that `accepts` it this machine's id and its devices (key id, format, name; never a
-   public key). `rakumux devices ls` and `rm` list and forget devices; forgetting the last one
-   makes unsigned commands work again. What became of each signed command, and of each one
+   public key). `rakumux devices ls` and `rm` list and forget devices; with the last one forgotten,
+   nothing asked on rakumux.com is carried out until another is paired. What became of each signed command, and of each one
    refused, is kept in `sensagent/signed-commands.log` (`signing::log`: JSON lines, 0600, 1 MiB
    and one older `.1`; when, kind, request id, the device's key id and name, the session; never
    a reply's text; once per request, though a reply is checked at every read), which `rakumux
    devices log [--json]` shows. A reply written in another machine's TUI isn't signed, so
-   a machine with paired devices refuses it (`unsigned`).
+   it's refused (`unsigned`).
    **Logs for the owner's viewer** (`feed/logs.rs`, `LogSync`; contract `contracts/feed/`, "Logs"):
    while `GET /api/v1/features` says `logs: {level}` (rakumux.com decides per account, owners only
    unless the deployment says otherwise) and this machine's name is confirmed, the service follows
@@ -1662,7 +1665,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 | `rakumux session list\|get\|read\|wait\|report` | JSON commands for agents and scripts |
 | `rakumux session hook --agent A [--event NAME]` / `hook-config --agent A [--install]` | An agent's hook (JSON on stdin, always exit 0 and `{}`, Droid's `{"suppressOutput":true}`; `--event` for input that doesn't name its event) / print its hook configuration, or write it as a file of Rakumux's own the agent loads (`--install`: GitHub Copilot's `~/.copilot/hooks/rakumux.json`, Grok Build's `~/.grok/hooks/rakumux.json`; refused for agents whose hooks are merged into their settings) (`integrations/README.md`) |
 | `rakumux account login \| logout \| status [--json]` | The Rakumux account for AI session titles and the agent feed (also Settings → Account): `login` prints a link, a code and (on a terminal) a QR code and waits for approval in any browser; `logout` also revokes the sign-in at Clerk (it says when it couldn't); `status` shows who is signed in and each live session's AI description (`--json` still carries `ai_session_titles`, `ai_session_summaries` and `feed` for scripts) |
-| `rakumux devices pair \| ls [--json] \| rm DEVICE \| log [--json]` | Devices that sign what rakumux.com asks of this machine (also Settings → Paired devices): `pair` shows a one-time code, the signer site's link and its QR code, then asks to pair the device sent with it, by name and fingerprint; once one is paired, only what a paired device signed is carried out; `rm` forgets one (by name or key id); `log` shows what became of each signed command: the device that signed it, or why it was refused |
+| `rakumux devices pair \| ls [--json] \| rm DEVICE \| log [--json]` | Devices that sign what rakumux.com asks of this machine (also Settings → Paired devices; `D` in the TUI pairs at once): `pair` shows a one-time code, the signer site's link and its QR code, then asks to pair the device sent with it, by name and fingerprint; only what a paired device signed is carried out (until one is, nothing); `rm` forgets one (by name or key id); `log` shows what became of each signed command: the device that signed it, or why it was refused |
 | `rakumux remote on [--port N] \| off \| pair \| status [--json] \| token [--rotate]` | Remote access for the phone app over Tailscale (the TUI offers it once): `on` saves it in `remote.json` (stays on), restarts the API and prints the URLs, the token, an `rakumux://connect` link and (on a terminal) its QR code; `pair` shows them again; `off` turns it off; `token --rotate` makes a new token (re-pair the app) |
 | `rakumux machine add NAME URL --token T \| ls [--json] \| rm NAME` | Other machines whose sessions are listed and used here (their `rakumux-api` URL and remote token) |
 | `rakumux sprite connect [--token T] [--sprite NAME] \| status \| disconnect` | Your own Fly.io Sprite for sessions (signed in, its replies in your feed and yours typed into its agents); `rakumux new --sprite` (or `--machine NAME`) runs a session there; `disconnect` revokes its feed credential; `--replies`/`--no-replies` of 0.1.32 and earlier are accepted and ignored |
@@ -1683,7 +1686,7 @@ folder header, a new session there), `Esc` (after cancelling a pending key or th
 `Ctrl-\` back to the session you came from (with none, as after a start or a UI reload, into the
 running session in view), `Tab` last session, `1`-`9` go into that session,
 `n` new, `N` new sessions in this folder on your Sprite or here (the `☁ Sprite` toggle), `r` rename, `s` a new AI title for the session, `w` where the session has worked (`W`
-every session's), `y` copy a place's path (below), `p` pin, `J`/`K` move the session down/up, `x` close, `d`/`dd` delete (`H` the session history), `z` full
+every session's), `y` copy a place's path (below), `p` pin, `J`/`K` move the session down/up, `x` close, `d`/`dd` delete (`H` the session history), `D` pair a browser or phone (`rakumux devices pair`), `z` full
 screen, `b` hide Master detail's list beside the session and show it again (below), `T` the
 terminal panel where it was last placed, `|` it beside the session, `-` below (below), `P` the Folders modal (Enter on the tabs: the active tab's), `/` filter, `Ctrl-y`/`Ctrl-e`/
 PgUp/PgDn scroll the preview, `\` send `Ctrl-\` to the session, `t` rtop (below), `?` Help, `,`/`o` Settings, `a` sign in (signed in: the account dialog; in the sign-in dialog `c` copies the link to the clipboard over OSC 52), `U` Update, `R`

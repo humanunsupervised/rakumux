@@ -17,13 +17,21 @@ fn ask(id: &str, folder: &str, agent: Option<Agent>) -> NewSessionAsk {
         folder: folder.into(),
         folder_session: None,
         agent,
-        signed: Ok(None),
+        signed: crate::signing::testing::signed(
+            "new_session",
+            id,
+            match agent {
+                Some(agent) => serde_json::json!({ "folder": folder, "agent": agent.name() }),
+                None => serde_json::json!({ "folder": folder }),
+            },
+        ),
     }
 }
 
 /// Enabled, with `views` followed.
 fn on(views: &[SessionView]) -> NewSessionSync {
-    let mut sync = NewSessionSync::new("studio".into(), None);
+    let mut sync =
+        NewSessionSync::new("studio".into(), None).signing(crate::signing::testing::paired());
     sync.set_enabled(true, NOW);
     sync.connected(views);
     sync
@@ -142,7 +150,8 @@ fn a_folder_is_matched_by_its_name_exactly_as_listed() {
     let page = serde_json::json!({
         "version": 1, "replies": [], "latest_seq": 0, "more": false,
         "new_sessions": [{"id": ASK, "machine": "studio", "folder": " notes", "status": "pending",
-                          "created_at": 1761220000000_i64, "status_at": 1761220000000_i64}],
+                          "created_at": 1761220000000_i64, "status_at": 1761220000000_i64,
+                          "signed": crate::signing::testing::signed_json("new_session", ASK, serde_json::json!({ "folder": " notes" }))}],
     });
     let reply = FeedHttpReply {
         status: 200,
@@ -181,6 +190,11 @@ fn two_folders_of_one_name_need_the_session_that_says_which() {
 
     let mut named = ask(OTHER, "api", None);
     named.folder_session = Some(b.id.clone());
+    named.signed = crate::signing::testing::signed(
+        "new_session",
+        OTHER,
+        serde_json::json!({ "folder": "api", "folder_session": b.id.as_str() }),
+    );
     sync.read(true, vec![named]);
     let Some(NewSessionWork::Create { request, .. }) = sync.next_work(NOW) else {
         panic!("expected a create");
@@ -191,6 +205,11 @@ fn two_folders_of_one_name_need_the_session_that_says_which() {
     let mut sync = on(&[view("01K89ZQ4D2F6H8J0K2M4N6P8R0", "/home/me/web")]);
     let mut wrong = ask(ASK, "web", None);
     wrong.folder_session = Some(SessionId::from_string("01K89ZQ4D2F6H8J0K2M4N6P8R5"));
+    wrong.signed = crate::signing::testing::signed(
+        "new_session",
+        ASK,
+        serde_json::json!({ "folder": "web", "folder_session": "01K89ZQ4D2F6H8J0K2M4N6P8R5" }),
+    );
     sync.read(true, vec![wrong]);
     assert!(matches!(
         sync.next_work(NOW),
@@ -224,7 +243,8 @@ fn a_request_is_started_at_most_once_even_across_a_restart() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("new-sessions.json");
     let views = [view("01K89ZQ4D2F6H8J0K2M4N6P8R0", "/home/me/web")];
-    let mut sync = NewSessionSync::new("studio".into(), Some(path.clone()));
+    let mut sync = NewSessionSync::new("studio".into(), Some(path.clone()))
+        .signing(crate::signing::testing::paired());
     sync.set_enabled(true, NOW);
     sync.connected(&views);
     sync.read(true, vec![ask(ASK, "web", None)]);
@@ -236,7 +256,8 @@ fn a_request_is_started_at_most_once_even_across_a_restart() {
     // pending on rakumux.com, and read again it's never started again (nor
     // reported: it expires there).
     drop(sync);
-    let mut sync = NewSessionSync::new("studio".into(), Some(path.clone()));
+    let mut sync = NewSessionSync::new("studio".into(), Some(path.clone()))
+        .signing(crate::signing::testing::paired());
     sync.set_enabled(true, NOW);
     sync.connected(&views);
     sync.read(true, vec![ask(ASK, "web", None)]);
@@ -250,7 +271,8 @@ fn a_request_is_started_at_most_once_even_across_a_restart() {
     ));
     sync.created(OTHER, Ok(created("calm-heron")));
     drop(sync);
-    let mut sync = NewSessionSync::new("studio".into(), Some(path.clone()));
+    let mut sync = NewSessionSync::new("studio".into(), Some(path.clone()))
+        .signing(crate::signing::testing::paired());
     sync.set_enabled(true, NOW);
     sync.connected(&views);
     sync.read(true, vec![ask(OTHER, "web", None)]);
@@ -338,7 +360,10 @@ fn the_replies_read_brings_requests_within_the_contract_row_by_row() {
                 agent: Some(Agent::ClaudeCode),
                 signed: Ok(None),
             },
-            ask(OTHER, "web", None),
+            NewSessionAsk {
+                signed: Ok(None),
+                ..ask(OTHER, "web", None)
+            },
         ]
     );
     // An older cloud's read has none.

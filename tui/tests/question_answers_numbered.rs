@@ -267,6 +267,8 @@ fn answers(agent: &Agent) {
             secret,
         },
     );
+    // A device paired here signs the answers (machines carry out nothing unsigned).
+    cloud.pair(&sensagent);
     let wait = |what: &str, check: &mut dyn FnMut() -> bool| {
         let deadline = Instant::now() + BOUND;
         while !check() {

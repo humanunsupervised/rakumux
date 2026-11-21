@@ -16,9 +16,10 @@
 //! when it expires (at most an hour later), and what it asks; the machine
 //! compares what it would act on with what was signed.
 //!
-//! Until a device is paired here, commands without a signature are carried
-//! out as before; once one is, every command needs one (Pause aside, which
-//! the heartbeats' actions keep unsigned).
+//! Every command needs a signature (`signed_only`), Pause too: until a device
+//! is paired here, nothing asked on rakumux.com is carried out. Only replies
+//! written in this machine's own TUI go unsigned, known by their ids.
+//! Releases up to 0.1.63 carried out unsigned commands while none was paired.
 
 pub mod log;
 pub mod pairing;
@@ -41,6 +42,9 @@ pub const SIGNER_ORIGIN_ENV: &str = "RAKUMUX_SIGNER_ORIGIN";
 /// What this machine says with its session list: it takes signed commands
 /// (`capabilities`).
 pub const SIGNED_COMMANDS: &str = "signed_commands";
+/// The session list's capability: beside `signed_commands`, every command
+/// needs a signature, a device paired or not (Pause too).
+pub const SIGNED_ONLY: &str = "signed_only";
 /// The most devices one machine keeps.
 pub const MAX_DEVICES: usize = 32;
 /// The longest a command stays good after it was signed.
@@ -151,11 +155,6 @@ impl PairedDevices {
 
     pub fn list(&self) -> &[PairedDevice] {
         &self.devices
-    }
-
-    /// Whether commands need a signature here: once a device is paired.
-    pub fn required(&self) -> bool {
-        !self.devices.is_empty()
     }
 
     pub fn find(&self, key_id: &str) -> Option<&PairedDevice> {
@@ -401,8 +400,8 @@ impl Guard {
 
     /// Whether reply `id` may be typed in at `now_ms`: signed as a `reply`
     /// saying what it says (or, as a new session's first prompt, signed with
-    /// that session's request), or unsigned while no device is paired or
-    /// when this machine wrote it itself (`own`). Its files' SHA-256s (hex)
+    /// that session's request), or unsigned only when this machine wrote it
+    /// itself (`own`). Its files' SHA-256s (hex)
     /// as signed, to check each against what's downloaded; none unsigned.
     pub fn reply(
         &mut self,
@@ -434,7 +433,7 @@ impl Guard {
     ) -> Result<Vec<String>, Refusal> {
         let signed = match &signature.signature {
             Err(()) => return Err(Refusal::BadSignature),
-            Ok(None) if own || !self.devices.required() => return Ok(Vec::new()),
+            Ok(None) if own => return Ok(Vec::new()),
             Ok(None) => return Err(Refusal::Unsigned),
             Ok(Some(signed)) => signed,
         };
@@ -559,8 +558,8 @@ impl Guard {
     }
 
     /// Whether `expected`, asked of the machine `machine_id`, may be carried
-    /// out at `now_ms`: signed by a device paired here, or unsigned while none
-    /// is. A command carried out marks its device used.
+    /// out at `now_ms`: signed by a device paired here, never unsigned
+    /// (`signed_only`: until a device is paired, nothing is). A command carried out marks its device used.
     pub fn check(
         &mut self,
         signed: Option<&Signed>,
@@ -569,11 +568,7 @@ impl Guard {
         now_ms: i64,
     ) -> Result<(), Refusal> {
         let Some(signed) = signed else {
-            return if self.devices.required() {
-                Err(Refusal::Unsigned)
-            } else {
-                Ok(())
-            };
+            return Err(Refusal::Unsigned);
         };
         let device = self
             .devices

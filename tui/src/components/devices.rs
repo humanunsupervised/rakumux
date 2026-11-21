@@ -46,8 +46,8 @@ pub fn draw_devices(f: &mut Frame, dialog: &DevicesDialog, area: Rect) {
                 Line::from("No paired devices."),
                 Line::from(""),
                 Line::from(Span::styled(
-                    "Pair a browser or the Rakumux app: from then on this machine carries out \
-                     what rakumux.com asks only when a paired device signed it.",
+                    "Pair a browser or the Rakumux app to reply and act from rakumux.com: this \
+                     machine carries out only what a paired device signed.",
                     muted,
                 )),
             ],

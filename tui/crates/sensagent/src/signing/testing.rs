@@ -135,3 +135,29 @@ pub(crate) fn guard(machine: &str, devices: &[&Device]) -> SharedGuard {
             .for_machine(machine),
     ))
 }
+
+/// The machine id the feed's sync tests sign for.
+pub(crate) const TEST_MACHINE_ID: &str = "01K8C2B3C4D5E6F7G8H9J0K1M9";
+
+/// The device paired in the feed's sync tests (the same one throughout).
+pub(crate) fn test_device() -> &'static Device {
+    static DEVICE: std::sync::OnceLock<Device> = std::sync::OnceLock::new();
+    DEVICE.get_or_init(|| Device::new(KeyFormat::P256))
+}
+
+/// A guard for [`TEST_MACHINE_ID`] with [`test_device`] paired: every
+/// command needs a signature, so the syncs' tests sign theirs.
+pub(crate) fn paired() -> SharedGuard {
+    guard(TEST_MACHINE_ID, &[test_device()])
+}
+
+/// `fields` as a command of `kind` for request `id`, signed now by
+/// [`test_device`] for [`TEST_MACHINE_ID`], as rakumux.com passes it on.
+pub(crate) fn signed_json(kind: &str, id: &str, fields: serde_json::Value) -> serde_json::Value {
+    test_device().signed_now(kind, TEST_MACHINE_ID, id, fields)
+}
+
+/// [`signed_json`] as a sync reads it.
+pub(crate) fn signed(kind: &str, id: &str, fields: serde_json::Value) -> super::Signature {
+    Signed::of(Some(signed_json(kind, id, fields)))
+}

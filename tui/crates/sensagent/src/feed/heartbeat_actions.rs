@@ -1,9 +1,10 @@
 //! Heartbeat actions from rakumux.com (`contracts/feed/` `heartbeatAction`):
 //! while the account's feed is on, the replies read brings the actions
 //! pending for this machine (the cloud sends them only because its session
-//! list says `heartbeats`), and the status service carries out `pause`
-//! through the daemon as the user, then reports it `done`, or `failed` with
-//! why. `enable` (approving or turning one on) and `run` are refused without
+//! list says `heartbeats`), and the status service carries out `pause`, only
+//! as a device paired here signed it (`signed`, kind `heartbeat_action`;
+//! [`crate::signing`]), through the daemon as the user, then reports it
+//! `done`, or `failed` with why. `enable` (approving or turning one on) and `run` are refused without
 //! asking the daemon: whoever can write to rakumux.com could otherwise have a
 //! command run on this machine, so a heartbeat is approved, turned on and run
 //! only here (the TUI's Beats tab, `rakumux heartbeat`).
@@ -24,6 +25,7 @@ use session_core::ids::HeartbeatId;
 use super::new_sessions::kept::Kept;
 use super::wire::{self, FeedFailure, FeedRequest};
 use crate::cloud::FeedHttpReply;
+use crate::signing::{Expected, Refusal, SharedGuard, Signature, Signed};
 
 /// The most actions one read carries (contract).
 const MAX_ASKED: usize = 20;
@@ -51,6 +53,8 @@ pub(crate) struct ActionAsk {
     pub machine: String,
     pub heartbeat: String,
     pub action: Action,
+    /// What a paired device signed for it.
+    pub signed: Signature,
 }
 
 #[derive(Deserialize)]
@@ -62,6 +66,8 @@ struct WireAsk {
     #[serde(default)]
     updated_at: Option<i64>,
     status: String,
+    #[serde(default)]
+    signed: Option<serde_json::Value>,
 }
 
 impl WireAsk {
@@ -83,6 +89,7 @@ impl WireAsk {
             machine: self.machine,
             heartbeat: self.heartbeat,
             action,
+            signed: Signed::of(self.signed),
         })
     }
 }
@@ -110,6 +117,22 @@ pub(crate) enum ActionFailure {
     /// The daemon refused, or it's done only on this machine (`enable`,
     /// `run`).
     Refused,
+    /// Its signature (contract `signatureFailure`).
+    Unsigned,
+    UnknownDevice,
+    BadSignature,
+    Expired,
+}
+
+impl From<Refusal> for ActionFailure {
+    fn from(refusal: Refusal) -> Self {
+        match refusal {
+            Refusal::Unsigned => Self::Unsigned,
+            Refusal::UnknownDevice => Self::UnknownDevice,
+            Refusal::BadSignature => Self::BadSignature,
+            Refusal::Expired => Self::Expired,
+        }
+    }
 }
 
 /// What became of an action, as reported (`heartbeat-action-status`).
@@ -216,6 +239,8 @@ pub(crate) struct HeartbeatActionSync {
     reporting: bool,
     retry_at: Duration,
     retry: Duration,
+    /// Checks what's asked against the devices paired here.
+    guard: SharedGuard,
 }
 
 impl HeartbeatActionSync {
@@ -231,7 +256,14 @@ impl HeartbeatActionSync {
             reporting: false,
             retry_at: Duration::ZERO,
             retry: RETRY_MIN,
+            guard: crate::signing::unpaired(),
         }
+    }
+
+    /// Check actions with the service's `guard`.
+    pub fn signing(mut self, guard: SharedGuard) -> Self {
+        self.guard = guard;
+        self
     }
 
     /// Follow the account: signed in with its feed on and this machine's
@@ -268,12 +300,39 @@ impl HeartbeatActionSync {
             return None;
         }
         if self.acting.is_none() {
-            if let Some(ask) = self
+            let waiting: Vec<ActionAsk> = self
                 .asked
                 .iter()
-                .find(|ask| !self.kept.handled(&ask.id))
+                .filter(|ask| !self.kept.handled(&ask.id))
                 .cloned()
-            {
+                .collect();
+            for ask in waiting {
+                // Enable and run are refused whoever signed them; pause only
+                // as a paired device signed it.
+                if ask.action == Action::Pause {
+                    let expected = Expected {
+                        kind: "heartbeat_action",
+                        id: &ask.id,
+                        fields: vec![
+                            ("heartbeat", ask.heartbeat.as_str().into()),
+                            ("action", "pause".into()),
+                        ],
+                    };
+                    let allowed = self.guard.borrow_mut().allows(
+                        &ask.signed,
+                        &expected,
+                        crate::signing::now_ms(),
+                    );
+                    if let Err(refusal) = allowed {
+                        self.kept.decided(
+                            &ask.id,
+                            Outcome::Failed {
+                                failure: refusal.into(),
+                            },
+                        );
+                        continue;
+                    }
+                }
                 // Never asked of the daemon again, even if this service
                 // stops before it answers.
                 self.kept.creating(&ask.id);
@@ -417,5 +476,55 @@ mod tests {
         sync.set_enabled(true, Duration::ZERO);
         sync.read(true, asks(Some(json!([row("pause", None)]))));
         assert_eq!(sync.next_work(NOW), None);
+    }
+
+    /// Pause is carried out only as a device paired here signed it: unsigned,
+    /// signed for another heartbeat or by a device not paired, it's refused
+    /// and the daemon never asked.
+    #[test]
+    fn pause_is_carried_out_only_as_a_paired_device_signed_it() {
+        use crate::signing::testing::{paired, signed_json, Device, TEST_MACHINE_ID};
+        use crate::signing::KeyFormat;
+        let run = |signed: Option<serde_json::Value>| {
+            let mut sync = HeartbeatActionSync::new("studio".into(), None).signing(paired());
+            sync.set_enabled(true, Duration::ZERO);
+            let mut row = row("pause", None);
+            if let Some(signed) = signed {
+                row["signed"] = signed;
+            }
+            sync.read(true, asks(Some(json!([row]))));
+            sync.next_work(NOW)
+        };
+        let fields = |heartbeat: &str| json!({ "heartbeat": heartbeat, "action": "pause" });
+        assert_eq!(
+            run(Some(signed_json(
+                "heartbeat_action",
+                ACTION,
+                fields(HEARTBEAT)
+            ))),
+            Some(ActionWork::Act {
+                id: ACTION.into(),
+                heartbeat: HEARTBEAT.into(),
+                action: Action::Pause,
+            })
+        );
+        assert_eq!(report_of(run(None))["failure"], "unsigned");
+        let other = "01K8A2B3C4D5E6F7G8H9J0K1M9";
+        assert_eq!(
+            report_of(run(Some(signed_json(
+                "heartbeat_action",
+                ACTION,
+                fields(other)
+            ))))["failure"],
+            "bad_signature"
+        );
+        let stranger = Device::new(KeyFormat::P256);
+        let theirs = stranger.signed_now(
+            "heartbeat_action",
+            TEST_MACHINE_ID,
+            ACTION,
+            fields(HEARTBEAT),
+        );
+        assert_eq!(report_of(run(Some(theirs)))["failure"], "unknown_device");
     }
 }

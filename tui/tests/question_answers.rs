@@ -72,6 +72,8 @@ fn an_answer_written_on_rakumux_com_answers_claude_codes_question() {
             secret,
         },
     );
+    // A device paired here signs the answers (machines carry out nothing unsigned).
+    cloud.pair(&sensagent);
     let wait = |what: &str, check: &mut dyn FnMut() -> bool| {
         let deadline = Instant::now() + BOUND;
         while !check() {

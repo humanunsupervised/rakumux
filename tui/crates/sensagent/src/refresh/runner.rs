@@ -764,7 +764,8 @@ fn own<S, A, C>(
         .signing(guard.clone());
     let mut heartbeats = HeartbeatSync::new(machine.clone(), std::env::var("HOME").ok());
     let mut heartbeat_actions =
-        HeartbeatActionSync::new(machine.clone(), refresher.heartbeat_action_state());
+        HeartbeatActionSync::new(machine.clone(), refresher.heartbeat_action_state())
+            .signing(guard.clone());
     // The daemon runs heartbeats (capability `heartbeats`).
     let mut daemon_heartbeats = false;
     let uploads = refresher.uploads().map(Uploads::new);
@@ -774,6 +775,7 @@ fn own<S, A, C>(
         .handling(crate::feed::DELETE_SESSIONS)
         .handling(crate::feed::RENAME_SESSIONS)
         .handling(crate::signing::SIGNED_COMMANDS)
+        .handling(crate::signing::SIGNED_ONLY)
         .with_version(refresher.version());
     sessions.set_signing(pairings.listed());
     let mut next_pairing_read = Duration::ZERO;

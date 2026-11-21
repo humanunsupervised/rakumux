@@ -32,7 +32,7 @@ mod certs;
 #[path = "mid_turn/fake_cloud.rs"]
 mod fake_cloud;
 
-use fake_cloud::{ulid, FakeCloud, Machine};
+use fake_cloud::{ulid, FakeCloud, Machine, Phone};
 use serde_json::{json, Value};
 use session_core::api::CreateSession;
 use session_core::client::{AuthMode, Client, ClientConfig, SessionApi};
@@ -584,15 +584,17 @@ fn a_session_asked_on_rakumux_com_to_be_deleted_goes_to_its_history_once() {
     daemon.stop();
 }
 
-/// A device paired at this machine (`rakumux devices pair`: the code, its
-/// tag over the device's key, the user's yes) signs what rakumux.com asks;
-/// from then on only what it signed is carried out: an unsigned reply, one
+/// Nothing unsigned is carried out, a device paired or not: with none yet,
+/// the session list says `signed_only` and an unsigned reply is refused,
+/// nothing typed. A device paired at this machine (`rakumux devices pair`:
+/// the code, its tag over the device's key, the user's yes) signs what
+/// rakumux.com asks, and only what it signed is carried out: an unsigned reply, one
 /// whose text isn't what was signed and an unsigned deletion are refused,
 /// nothing typed or deleted, while the signed reply goes in and the signed
 /// deletion is carried out.
 #[test]
 fn once_a_device_is_paired_only_what_it_signed_is_carried_out() {
-    let world = World::new();
+    let world = World::unpaired();
     world.cloud.state().accepts = vec!["signed_commands"];
     let mut daemon = world.start_daemon();
     let client = world.client();
@@ -603,17 +605,40 @@ fn once_a_device_is_paired_only_what_it_signed_is_carried_out() {
     )
     .unwrap();
     let machine_id = machine["id"].as_str().unwrap().to_owned();
-    world.wait("the session list to say it takes signed commands", || {
-        let state = world.cloud.state();
-        state.says("signed_commands")
-            && state.sessions.as_ref().is_some_and(|list| {
-                list["machine_id"] == machine_id.as_str()
-                    && list["paired_devices"] == json!([])
-                    && list["sessions"].as_array().is_some_and(|sessions| {
-                        sessions.iter().any(|s| s["id"] == session.id.as_str())
-                    })
-            })
+    world.wait(
+        "the session list to say it takes signed commands only",
+        || {
+            let state = world.cloud.state();
+            state.says("signed_commands")
+                && state.says("signed_only")
+                && state.sessions.as_ref().is_some_and(|list| {
+                    list["machine_id"] == machine_id.as_str()
+                        && list["paired_devices"] == json!([])
+                        && list["sessions"].as_array().is_some_and(|sessions| {
+                            sessions.iter().any(|s| s["id"] == session.id.as_str())
+                        })
+                })
+        },
+    );
+
+    // No device paired yet: an unsigned reply is refused all the same.
+    world.allow(1);
+    let early = world.cloud.write_reply(
+        (session.id.as_str(), session.name.as_str()),
+        CONVERSATION,
+        "before pairing",
+        &[],
+    );
+    world.wait("the reply written before pairing refused", || {
+        !world.cloud.state().reports_for(&early).is_empty()
     });
+    assert_eq!(
+        world.cloud.state().reports_for(&early)[0]
+            .failure
+            .as_deref(),
+        Some("unsigned")
+    );
+    assert!(world.received().is_empty(), "{}", world.diagnostics());
 
     // Pair at the machine: the CLI shows the code; the device sends its key
     // with the code's tag; the user says yes to its name and fingerprint.
@@ -830,54 +855,6 @@ fn once_a_device_is_paired_only_what_it_signed_is_carried_out() {
     daemon.stop();
 }
 
-/// The phone app's key, as the test holds it: signs commands itself.
-struct Phone {
-    key: ring::signature::EcdsaKeyPair,
-    key_id: String,
-}
-
-impl Phone {
-    fn new() -> Self {
-        use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_ASN1_SIGNING};
-        let rng = ring::rand::SystemRandom::new();
-        let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng).unwrap();
-        let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, pkcs8.as_ref(), &rng)
-            .unwrap();
-        Self {
-            key,
-            key_id: b64(ulid().as_bytes()),
-        }
-    }
-
-    fn proposed(&self, name: &str) -> rakumux_sensagent::signing::pairing::ProposedDevice {
-        use ring::signature::KeyPair;
-        rakumux_sensagent::signing::pairing::ProposedDevice {
-            key_id: self.key_id.clone(),
-            format: rakumux_sensagent::signing::KeyFormat::P256,
-            public_key: b64(self.key.public_key().as_ref()),
-            name: name.into(),
-        }
-    }
-
-    /// `fields` as a command of `kind` for request `id` to machine
-    /// `machine`, signed now (`signedCommand`).
-    fn sign(&self, kind: &str, machine: &str, id: &str, fields: Value) -> Value {
-        let now = fake_cloud::now_ms();
-        let mut command = json!({"v": 1, "kind": kind, "machine": machine, "id": id,
-            "at": now, "expires": now + 10 * 60_000});
-        command
-            .as_object_mut()
-            .unwrap()
-            .extend(fields.as_object().unwrap().clone());
-        let bytes = serde_json::to_vec(&command).unwrap();
-        let signature = self
-            .key
-            .sign(&ring::rand::SystemRandom::new(), &bytes)
-            .unwrap();
-        json!({"device": self.key_id, "command": b64(&bytes), "signature": b64(signature.as_ref())})
-    }
-}
-
 fn b64(bytes: &[u8]) -> String {
     use base64::Engine;
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
@@ -966,7 +943,16 @@ struct World {
 }
 
 impl World {
+    /// A machine with a device paired, which signs what the local
+    /// rakumux.com serves: machines carry out nothing unsigned.
     fn new() -> Self {
+        let world = Self::unpaired();
+        world.cloud.pair(&world.layout.home.join("sensagent"));
+        world
+    }
+
+    /// A machine with no device paired yet: nothing asked of it is carried out.
+    fn unpaired() -> Self {
         let dir = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(dir.path()).unwrap();
         let layout = Layout::with_home(root.join("rakumux"));

@@ -51,9 +51,12 @@ fn a_command_signed_by_a_paired_passkey_or_phone_is_carried_out() {
 }
 
 #[test]
-fn unsigned_commands_are_carried_out_only_until_a_device_is_paired() {
+fn unsigned_commands_are_never_carried_out_paired_or_not() {
     let mut guard = guard_with(&[]);
-    assert_eq!(guard.check(None, &expected(), MACHINE, NOW), Ok(()));
+    assert_eq!(
+        guard.check(None, &expected(), MACHINE, NOW),
+        Err(Refusal::Unsigned)
+    );
     let device = Device::new(KeyFormat::Webauthn);
     guard.devices.add(device.paired());
     assert_eq!(
@@ -214,7 +217,7 @@ fn paired_devices_are_kept_in_a_private_file() {
     let path = dir.path().join("paired-devices.json");
     let device = Device::new(KeyFormat::Webauthn);
     let mut devices = PairedDevices::load(Some(path.clone()));
-    assert!(!devices.required());
+    assert!(devices.list().is_empty());
     devices.add(device.paired());
     let mode = std::fs::metadata(&path).unwrap().permissions().mode();
     assert_eq!(mode & 0o777, 0o600);
@@ -222,7 +225,7 @@ fn paired_devices_are_kept_in_a_private_file() {
     assert_eq!(again.list(), &[device.paired()]);
     let mut again = again;
     assert!(again.remove(&device.key_id));
-    assert!(!PairedDevices::load(Some(path)).required());
+    assert!(PairedDevices::load(Some(path)).list().is_empty());
 }
 
 #[test]
@@ -446,9 +449,14 @@ fn a_replys_files_are_signed_by_name_and_hash() {
         Ok(Vec::new()),
         "written in this machine's TUI"
     );
+    // With no device paired too: only this machine's own TUI goes unsigned.
     let mut unpaired = guard_with(&[]).for_machine(MACHINE);
     assert_eq!(
         unpaired.reply(REQUEST, &reply_signature(None, &["a.png"]), false, NOW),
+        Err(Refusal::Unsigned)
+    );
+    assert_eq!(
+        unpaired.reply(REQUEST, &reply_signature(None, &[]), true, NOW),
         Ok(Vec::new())
     );
 }
