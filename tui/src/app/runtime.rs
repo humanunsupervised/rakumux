@@ -135,6 +135,10 @@ pub enum AppEvent {
         purpose: super::workspaces::WorkspacePurpose,
         result: Result<session_core::workspace::Workspace, ApiError>,
     },
+    /// A workspace renamed from the workspaces modal.
+    WorkspaceRenamed {
+        result: Result<session_core::workspace::Workspace, ApiError>,
+    },
     /// A workspace forgotten.
     WorkspaceDeleted {
         result: Result<session_core::workspace::Workspace, ApiError>,

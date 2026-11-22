@@ -9,8 +9,10 @@
 //! then `+ Add new workspace`; Enter (or a click) shows the one under the
 //! cursor, or names a new one and shows it. `M` (Settings → Move to
 //! workspace) opens it for the selected session: Enter moves the session
-//! there (into a new one from `+ New workspace`). `d` twice forgets the
-//! workspace under the cursor; its sessions are then in none.
+//! there (into a new one from `+ New workspace`). `e` renames the workspace
+//! under the cursor (its name turns into a field), and `d` twice deletes it:
+//! its sessions are then in none. The key line's `e rename` and `d delete`
+//! take a click too.
 
 use session_core::api::{ApiError, CAPABILITY_WORKSPACES};
 use session_core::client::SessionApi;
@@ -53,6 +55,8 @@ pub struct WorkspacePicker {
     pub naming: Option<TextInput>,
     /// `d` was pressed once on this workspace: a second `d` forgets it.
     pub deleting: Option<WorkspaceId>,
+    /// `naming` renames this workspace rather than making one.
+    pub renaming: Option<WorkspaceId>,
     /// What went wrong last (a name taken, the daemon's error).
     pub error: Option<String>,
 }
@@ -163,6 +167,7 @@ impl App {
             cursor,
             naming: None,
             deleting: None,
+            renaming: None,
             error: None,
         });
         // Another window may have made or forgotten one meanwhile.
@@ -217,6 +222,7 @@ impl App {
         let AppMode::Workspaces(picker) = &mut self.mode else {
             return;
         };
+        picker.renaming = None;
         if picker.naming.take().is_none() {
             self.mode = AppMode::Normal;
         } else {
@@ -235,8 +241,13 @@ impl App {
                 picker.error = Some("A name is one line of 1 to 64 characters.".into());
                 return;
             };
-            let purpose = picker.purpose.clone();
-            self.create_workspace(name, purpose);
+            match picker.renaming.clone() {
+                Some(id) => self.rename_workspace(id, name),
+                None => {
+                    let purpose = picker.purpose.clone();
+                    self.create_workspace(name, purpose);
+                }
+            }
             return;
         }
         let purpose = picker.purpose.clone();
@@ -271,8 +282,59 @@ impl App {
         if row < rows {
             picker.cursor = row;
             picker.naming = None;
+            picker.renaming = None;
             self.workspace_enter();
         }
+    }
+
+    /// `e` on a workspace: its name turns into a field to rename it.
+    pub(super) fn workspace_rename_key(&mut self) {
+        let Some(WorkspaceRow::Workspace(index)) = self.picker_row() else {
+            return;
+        };
+        let Some(workspace) = self.workspaces.get(index).cloned() else {
+            return;
+        };
+        if let AppMode::Workspaces(picker) = &mut self.mode {
+            picker.naming = Some(TextInput::new(workspace.name));
+            picker.renaming = Some(workspace.id);
+            picker.deleting = None;
+            picker.error = None;
+        }
+    }
+
+    fn rename_workspace(&mut self, id: WorkspaceId, name: String) {
+        let Some(api) = self.api() else {
+            return;
+        };
+        self.exec.job(move || AppEvent::WorkspaceRenamed {
+            result: api.workspace_rename(&id, &name),
+        });
+    }
+
+    /// A workspace was renamed from the modal: the modal shows it so.
+    pub(super) fn on_workspace_renamed(&mut self, result: Result<Workspace, ApiError>) {
+        let workspace = match result {
+            Ok(workspace) => workspace,
+            Err(error) => {
+                match &mut self.mode {
+                    AppMode::Workspaces(picker) => picker.error = Some(error.message),
+                    _ => self.set_status(format!("Couldn't rename the workspace: {error}")),
+                }
+                return;
+            }
+        };
+        if let Some(known) = self.workspaces.iter_mut().find(|w| w.id == workspace.id) {
+            known.name = workspace.name.clone();
+        }
+        if let AppMode::Workspaces(picker) = &mut self.mode {
+            if picker.renaming.as_ref() == Some(&workspace.id) {
+                picker.naming = None;
+                picker.renaming = None;
+                picker.error = None;
+            }
+        }
+        self.set_status(format!("Renamed to {}", workspace.name));
     }
 
     /// `d` on a workspace: once marks it, again forgets it.
@@ -377,8 +439,11 @@ impl App {
             }
         };
         self.workspaces.retain(|w| w.id != workspace.id);
-        if self.list.workspace() == Some(&workspace.id) {
+        let shown = self.list.workspace() == Some(&workspace.id);
+        self.list.forget_workspace(&workspace.id);
+        if shown {
             self.show_workspace(None);
+            self.reconcile_detail();
         }
         if let AppMode::Workspaces(picker) = &mut self.mode {
             picker.cursor = picker.cursor.min(self.workspaces.len() + 1);
@@ -669,6 +734,71 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn e_renames_a_workspace_in_place_and_the_footer_follows() {
+        let mut h = with_workspaces(Some("W1"));
+        h.press(KeyCode::Char('m')).await;
+        let screen = draw(&mut h, 160, 40);
+        assert!(screen.contains("e rename"), "{screen}");
+        assert!(screen.contains("d delete"), "{screen}");
+        h.press(KeyCode::Char('e')).await;
+        assert!(draw(&mut h, 160, 40).contains("❯ Launch"));
+        for _ in 0.."Launch".len() {
+            h.press(KeyCode::Backspace).await;
+        }
+        h.type_text("Ship").await;
+        h.press(KeyCode::Enter).await;
+        assert!(h
+            .fake
+            .calls()
+            .iter()
+            .any(|c| c == "workspace_rename W1 Ship"));
+        assert!(picker(&h).naming.is_none(), "the modal stays open, renamed");
+        assert_eq!(h.app.workspace_name(), "Ship");
+        h.press(KeyCode::Esc).await;
+        assert!(draw(&mut h, 160, 40).contains("m ⊞ Ship"));
+        // Esc while renaming leaves the name as it was.
+        h.press(KeyCode::Char('m')).await;
+        h.press(KeyCode::Char('e')).await;
+        h.type_text(" day").await;
+        h.press(KeyCode::Esc).await;
+        assert_eq!(h.app.workspace_name(), "Ship");
+        // No workspace can't be renamed.
+        h.press(KeyCode::Up).await;
+        h.press(KeyCode::Char('e')).await;
+        assert!(picker(&h).naming.is_none());
+        assert!(!draw(&mut h, 160, 40).contains("e rename"));
+    }
+
+    #[tokio::test]
+    async fn the_key_line_s_rename_and_delete_take_a_click() {
+        let mut h = with_workspaces(Some("W1"));
+        h.press(KeyCode::Char('m')).await;
+        draw(&mut h, 160, 40);
+        let click = |h: &mut Harness, hit: Hit| {
+            let area = h
+                .app
+                .hits
+                .iter()
+                .find(|(_, candidate)| *candidate == hit)
+                .map(|(area, _)| *area)
+                .expect("a target");
+            h.app.handle_mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: area.x,
+                row: area.y,
+                modifiers: KeyModifiers::NONE,
+            });
+            h.app.process_pending();
+        };
+        click(&mut h, Hit::WorkspaceDelete);
+        assert!(draw(&mut h, 160, 40).contains("d again deletes"));
+        click(&mut h, Hit::WorkspaceDelete);
+        assert!(h.fake.calls().iter().any(|c| c == "workspace_delete W1"));
+        assert_eq!(h.app.list.workspace(), None);
+        assert_eq!(shown(&h), ["A", "B", "C"]);
     }
 
     #[tokio::test]

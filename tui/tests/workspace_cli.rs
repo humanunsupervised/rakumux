@@ -97,7 +97,7 @@ impl World {
                 )
             })
             .collect();
-        (named, json["no_workspace"]["sessions"].as_u64().unwrap())
+        (named, json["unassigned"]["sessions"].as_u64().unwrap())
     }
 }
 
@@ -136,7 +136,7 @@ fn sessions_move_between_workspaces_from_the_cli() {
         (vec![("Launch".into(), 1), ("Research".into(), 1)], 0)
     );
     let table = world.ok(&["workspace", "ls"]);
-    assert!(table.contains("No workspace"), "{table}");
+    assert!(table.contains("Unassigned"), "{table}");
     assert!(table.contains("Research"), "{table}");
     let ls: Value = serde_json::from_str(&world.ok(&["ls", "--json"])).unwrap();
     let launch = world.workspaces()["workspaces"][0]["id"]
@@ -154,13 +154,24 @@ fn sessions_move_between_workspaces_from_the_cli() {
 
     assert!(world
         .ok(&["workspace", "move", "web", "--none"])
-        .contains("Moved web to No workspace"));
+        .contains("Moved web to Unassigned"));
     assert!(world
-        .ok(&["workspace", "rm", "Research"])
-        .contains("Deleted workspace Research"));
+        .ok(&["workspace", "rename", "research", "Deep research"])
+        .contains("Renamed workspace Research to Deep research"));
+    assert!(!world
+        .rakumux(&["workspace", "rename", "Launch", "deep research"])
+        .status
+        .success());
+    assert_eq!(
+        world.counts(),
+        (vec![("Launch".into(), 0), ("Deep research".into(), 1)], 1)
+    );
+    assert!(world
+        .ok(&["workspace", "rm", "Deep research"])
+        .contains("Deleted workspace Deep research"));
     assert_eq!(world.counts(), (vec![("Launch".into(), 0)], 2));
     assert!(!world
-        .rakumux(&["workspace", "rm", "Research"])
+        .rakumux(&["workspace", "rm", "Deep research"])
         .status
         .success());
 }

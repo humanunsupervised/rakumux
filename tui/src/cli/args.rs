@@ -299,6 +299,13 @@ pub enum WorkspaceCommand {
         /// Its name or id
         workspace: String,
     },
+    /// Give a workspace another name
+    Rename {
+        /// Its name or id
+        workspace: String,
+        /// The new name
+        name: String,
+    },
     /// Move a session to a workspace (made when there's none of that
     /// name), or out of any with --none
     Move {

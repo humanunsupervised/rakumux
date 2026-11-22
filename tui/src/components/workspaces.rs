@@ -109,33 +109,46 @@ pub fn draw_workspaces(
         if at_cursor {
             name_style = name_style.add_modifier(Modifier::BOLD);
         }
+        // The name field, on the row it adds or renames.
+        let row_id = match row {
+            WorkspaceRow::Workspace(i) => app.workspaces.get(*i).map(|w| &w.id),
+            _ => None,
+        };
+        let editing = match (&picker.naming, row) {
+            (Some(_), WorkspaceRow::Add) => at_cursor && picker.renaming.is_none(),
+            (Some(_), WorkspaceRow::Workspace(_)) => {
+                row_id.is_some() && picker.renaming.as_ref() == row_id
+            }
+            _ => false,
+        };
+        if let (true, Some(naming)) = (editing, &picker.naming) {
+            let room = inner_width.saturating_sub(4);
+            let chars: Vec<char> = naming.value().chars().collect();
+            let cursor = naming.cursor_column();
+            let start = (cursor + 1).saturating_sub(room);
+            let shown: String = chars[start.min(chars.len())..].iter().take(room).collect();
+            f.set_cursor(rect.x + 4 + (cursor - start) as u16, rect.y);
+            let text = if chars.is_empty() {
+                Span::styled("Name", muted)
+            } else {
+                Span::styled(shown, Style::default().fg(p.text_bright))
+            };
+            let line = Line::from(vec![bar, Span::styled("❯ ", key), text]);
+            f.render_widget(Paragraph::new(line), rect);
+            hits.push((rect, Hit::WorkspaceRow(index)));
+            continue;
+        }
         let line = match row {
-            WorkspaceRow::Add => match (&picker.naming, at_cursor) {
-                (Some(naming), true) => {
-                    let room = inner_width.saturating_sub(4);
-                    let chars: Vec<char> = naming.value().chars().collect();
-                    let cursor = naming.cursor_column();
-                    let start = (cursor + 1).saturating_sub(room);
-                    let shown: String = chars[start.min(chars.len())..].iter().take(room).collect();
-                    f.set_cursor(rect.x + 4 + (cursor - start) as u16, rect.y);
-                    let text = if chars.is_empty() {
-                        Span::styled("Name", muted)
-                    } else {
-                        Span::styled(shown, Style::default().fg(p.text_bright))
-                    };
-                    Line::from(vec![bar, Span::styled("❯ ", key), text])
-                }
-                _ => {
-                    let label = match picker.purpose {
-                        WorkspacePurpose::Switch => "+ Add new workspace",
-                        WorkspacePurpose::Move { .. } => "+ New workspace",
-                    };
-                    Line::from(vec![
-                        bar,
-                        Span::styled(label, Style::default().fg(p.accent_primary)),
-                    ])
-                }
-            },
+            WorkspaceRow::Add => {
+                let label = match picker.purpose {
+                    WorkspacePurpose::Switch => "+ Add new workspace",
+                    WorkspacePurpose::Move { .. } => "+ New workspace",
+                };
+                Line::from(vec![
+                    bar,
+                    Span::styled(label, Style::default().fg(p.accent_primary)),
+                ])
+            }
             WorkspaceRow::None | WorkspaceRow::Workspace(_) => {
                 let workspace = match row {
                     WorkspaceRow::Workspace(i) => app.workspaces.get(*i),
@@ -182,23 +195,60 @@ pub fn draw_workspaces(
     }
 
     let keys_row = row_at(inner.height.saturating_sub(1));
-    let enter = match (&picker.naming, &picker.purpose) {
-        (Some(_), _) => " add",
-        (None, WorkspacePurpose::Switch) => " show",
-        (None, WorkspacePurpose::Move { .. }) => " move",
+    let enter = match (&picker.naming, &picker.renaming, &picker.purpose) {
+        (Some(_), Some(_), _) => " rename",
+        (Some(_), None, _) => " add",
+        (None, _, WorkspacePurpose::Switch) => " show",
+        (None, _, WorkspacePurpose::Move { .. }) => " move",
     };
     let esc = if picker.naming.is_some() {
         " cancel"
     } else {
         " close"
     };
-    let spans = vec![
-        Span::styled("⏎", key),
-        Span::styled(enter, muted),
-        Span::raw("  "),
-        Span::styled("Esc", key),
-        Span::styled(esc, muted),
+    // On a workspace: rename and delete it, each a tap target too.
+    let on_workspace = picker.naming.is_none()
+        && matches!(
+            app.workspace_rows().get(picker.cursor),
+            Some(WorkspaceRow::Workspace(_))
+        );
+    let mut spans: Vec<(Span, Option<Hit>)> = vec![
+        (Span::styled("⏎", key), None),
+        (Span::styled(enter, muted), None),
+        (Span::raw("  "), None),
     ];
-    f.render_widget(Paragraph::new(Line::from(spans)), keys_row);
+    if on_workspace {
+        spans.extend([
+            (Span::styled("e", key), Some(Hit::WorkspaceRename)),
+            (Span::styled(" rename", muted), Some(Hit::WorkspaceRename)),
+            (Span::raw("  "), None),
+            (Span::styled("d", key), Some(Hit::WorkspaceDelete)),
+            (Span::styled(" delete", muted), Some(Hit::WorkspaceDelete)),
+            (Span::raw("  "), None),
+        ]);
+    }
+    spans.extend([
+        (Span::styled("Esc", key), None),
+        (Span::styled(esc, muted), None),
+    ]);
+    let mut x = keys_row.x;
+    for (span, hit) in &spans {
+        let width = str_width(&span.content) as u16;
+        if let Some(hit) = hit {
+            if x + width <= keys_row.right() {
+                hits.push((
+                    Rect {
+                        x,
+                        width,
+                        ..keys_row
+                    },
+                    *hit,
+                ));
+            }
+        }
+        x += width;
+    }
+    let line = Line::from(spans.into_iter().map(|(span, _)| span).collect::<Vec<_>>());
+    f.render_widget(Paragraph::new(line), keys_row);
     hits.push((popup, Hit::WorkspaceMenu));
 }

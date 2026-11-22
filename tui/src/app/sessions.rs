@@ -1481,7 +1481,9 @@ impl App {
                     | Hit::HistoryMenu
                     | Hit::HistoryRow(_)
                     | Hit::WorkspaceMenu
-                    | Hit::WorkspaceRow(_),
+                    | Hit::WorkspaceRow(_)
+                    | Hit::WorkspaceRename
+                    | Hit::WorkspaceDelete,
                 )
                 | None => {}
             }
@@ -1613,6 +1615,8 @@ impl App {
         match event.kind {
             MouseEventKind::Down(MouseButton::Left) => match hit {
                 Some(Hit::WorkspaceRow(row)) => self.click_workspace_row(row),
+                Some(Hit::WorkspaceRename) => self.workspace_rename_key(),
+                Some(Hit::WorkspaceDelete) => self.workspace_delete_key(),
                 Some(Hit::WorkspaceMenu) => {}
                 _ => self.mode = AppMode::Normal,
             },

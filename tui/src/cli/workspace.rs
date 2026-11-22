@@ -1,6 +1,6 @@
 //! `rakumux workspace`: the daemon's workspaces, named groups of this
 //! machine's sessions. `ls` lists them with their sessions' count, `add`
-//! makes one, `rm` forgets one (its sessions are then in none), `move` puts a
+//! makes one, `rename` renames one, `rm` forgets one (its sessions are then in none), `move` puts a
 //! session in one (made when there's none of that name) or, with `--none`,
 //! in none. Inside a session `ls` works and `move` moves that session
 //! itself; making and forgetting workspaces are the user's.
@@ -37,6 +37,18 @@ pub(crate) fn run(
                 .map_err(output_error)?;
             Ok(0)
         }
+        WorkspaceCommand::Rename { workspace, name } => {
+            let found = find(api, &workspace)?.ok_or_else(|| not_found(&workspace))?;
+            let renamed = api.workspace_rename(&found.id, &name)?;
+            writeln!(
+                out,
+                "Renamed workspace {} to {}",
+                printable(&found.name),
+                printable(&renamed.name)
+            )
+            .map_err(output_error)?;
+            Ok(0)
+        }
         WorkspaceCommand::Move {
             target,
             workspace,
@@ -52,7 +64,7 @@ pub(crate) fn run(
                 }),
             };
             let moved = api.set_workspace(&session.id, workspace.as_ref().map(|w| &w.id))?;
-            let to = workspace.map_or_else(|| "No workspace".to_owned(), |w| w.name);
+            let to = workspace.map_or_else(|| "Unassigned".to_owned(), |w| w.name);
             writeln!(
                 out,
                 "Moved {} to {}",
@@ -113,12 +125,12 @@ fn ls(api: &dyn SessionApi, json: bool, out: &mut dyn Write) -> Result<i32, CliE
         writeln!(
             out,
             "{}",
-            json!({ "workspaces": rows, "no_workspace": { "sessions": count(None) } })
+            json!({ "workspaces": rows, "unassigned": { "sessions": count(None) } })
         )
         .map_err(output_error)?;
         return Ok(0);
     }
-    let mut names = vec!["No workspace".to_owned()];
+    let mut names = vec!["Unassigned".to_owned()];
     let mut counts = vec![count(None).to_string()];
     let mut ids = vec!["-".to_owned()];
     for workspace in &workspaces {

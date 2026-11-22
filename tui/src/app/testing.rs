@@ -974,6 +974,32 @@ impl SessionApi for FakeApi {
         Ok(())
     }
 
+    fn workspace_rename(
+        &self,
+        id: &session_core::ids::WorkspaceId,
+        name: &str,
+    ) -> Result<session_core::workspace::Workspace> {
+        self.record(format!("workspace_rename {id} {name}"));
+        let mut state = self.state.lock().unwrap();
+        if state
+            .workspaces
+            .iter()
+            .any(|w| &w.id != id && w.name == name)
+        {
+            return Err(ApiError::new(
+                ErrorCode::InvalidArgument,
+                format!("there is a workspace named {name} already"),
+            ));
+        }
+        let workspace = state
+            .workspaces
+            .iter_mut()
+            .find(|w| &w.id == id)
+            .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "no workspace"))?;
+        workspace.name = name.to_owned();
+        Ok(workspace.clone())
+    }
+
     fn set_workspace(
         &self,
         id: &SessionId,

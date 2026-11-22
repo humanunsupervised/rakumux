@@ -695,8 +695,8 @@ impl KeyAction {
             KeyAction::Workspaces => "Groups of sessions on this machine. The list shows one \
                  workspace, or the sessions in none (No workspace); new sessions start in the \
                  one shown, which the footer names and the next start shows again. Enter shows \
-                 the one under the cursor; + Add new workspace names one; d twice deletes one, \
-                 its sessions going to No workspace. Same as `rakumux workspace`."
+                 the one under the cursor; + Add new workspace names one; e renames one; d twice \
+                 deletes one, its sessions going to No workspace. Same as `rakumux workspace`."
                 .into(),
             KeyAction::MoveToWorkspace => "Moves the selected session to another workspace, \
                  a new one, or No workspace. Same as `rakumux workspace move`."

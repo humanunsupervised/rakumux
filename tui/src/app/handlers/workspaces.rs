@@ -1,6 +1,6 @@
 //! Keys while the workspaces modal is open: `↑↓` move, Enter shows (or
 //! moves the session to) the workspace under the cursor or names a new one,
-//! `d` twice deletes a workspace, Esc stops naming, then closes. While a
+//! `e` renames a workspace, `d` twice deletes one, Esc stops naming, then closes. While a
 //! name is typed, keys type.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -24,6 +24,7 @@ pub fn handle_workspaces_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('k') => app.move_workspace_cursor(-1),
         KeyCode::Char('j') => app.move_workspace_cursor(1),
         KeyCode::Char('d') => app.workspace_delete_key(),
+        KeyCode::Char('e') => app.workspace_rename_key(),
         _ => {}
     }
 }

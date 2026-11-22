@@ -246,6 +246,24 @@ impl SessionList {
         self.ensure_selection_visible();
     }
 
+    /// Workspace `id` was deleted: its sessions are in none now, as the
+    /// daemon's events about them will say.
+    pub fn forget_workspace(&mut self, id: &WorkspaceId) {
+        for session in self.sessions.iter_mut().chain(self.elsewhere.iter_mut()) {
+            if session.workspace.as_ref() == Some(id) {
+                session.workspace = None;
+            }
+        }
+        let shown = if self.workspace.as_ref() == Some(id) {
+            None
+        } else {
+            self.workspace.clone()
+        };
+        // Partitioned again, from a workspace no session has.
+        self.workspace = Some(id.clone());
+        self.set_workspace(shown);
+    }
+
     /// Whether `session` is in the workspace shown.
     fn is_here(&self, session: &SessionView) -> bool {
         session.workspace == self.workspace

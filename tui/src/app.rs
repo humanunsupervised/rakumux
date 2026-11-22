@@ -231,6 +231,10 @@ pub enum Hit {
     WorkspaceMenu,
     /// A row of the workspaces modal.
     WorkspaceRow(usize),
+    /// The workspaces modal's `e rename`: the workspace under the cursor.
+    WorkspaceRename,
+    /// The workspaces modal's `d delete`: the workspace under the cursor.
+    WorkspaceDelete,
     /// A row of the session history modal.
     HistoryRow(usize),
     /// The mode label in the footer's centre: `SESSION MODE` switches to
@@ -1048,8 +1052,8 @@ impl App {
                     value: format!("{} · m", self.workspace_name()),
                     note: if available {
                         "Groups of sessions. The list shows one workspace, or the sessions in none; \
-                         new sessions start in the one shown. m switches or adds one, M moves the \
-                         selected session."
+                         new sessions start in the one shown. m switches, adds, renames (e) or \
+                         deletes (d) one; M moves the selected session."
                             .into()
                     } else {
                         "Restart the server (S) to use workspaces.".into()
@@ -1243,6 +1247,7 @@ impl App {
                 self.on_workspace_created(purpose, result)
             }
             AppEvent::WorkspaceDeleted { result } => self.on_workspace_deleted(result),
+            AppEvent::WorkspaceRenamed { result } => self.on_workspace_renamed(result),
             AppEvent::WorkspaceSet { result } => self.on_workspace_set(result),
             AppEvent::Touched { result } => {
                 if let Err(error) = result {
