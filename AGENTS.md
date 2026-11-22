@@ -609,6 +609,19 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    before the daemon is asked and kept with the reports not yet taken in
    `sensagent/status/session-moves.json` (0600, an hour). A workspace made on rakumux.com with no
    session in it stays the account's own; a machine is never asked to make an empty one.
+   **Workspaces renamed and deleted from rakumux.com** (`feed/workspace_changes.rs`,
+   `WorkspaceChangeSync`; contract `contracts/feed/`, "Workspaces"): while the daemon announces
+   `workspaces` and `workspaces.rename` (read at each (re)subscribe), the session list says
+   `workspaces.edit` too. The replies read brings the workspaces asked on rakumux.com or in the app
+   to rename or delete (`workspace_changes`), one at a time, while the feed is on and the name is
+   confirmed. Each is carried out only when a paired device signed it (`workspace_change`:
+   `workspace`, `action`, `name`, null for a delete), as the user, on the workspace of that name
+   (exactly, else ignoring case): a rename (`workspace_rename`) or a delete (`workspace_delete`:
+   its sessions are then in none). It is reported `done`, or `failed` with `not_found`,
+   `name_taken`, `refused` or the signature's refusal (`POST
+   /api/v1/feed/workspace-changes/status`); the workspaces are read again at once, so the next
+   session list carries it. Each id is marked handled before the daemon is asked and kept with the
+   reports not yet taken in `sensagent/status/workspace-changes.json` (0600, an hour).
    **Logs for the owner's viewer** (`feed/logs.rs`, `LogSync`; contract `contracts/feed/`, "Logs"):
    while `GET /api/v1/features` says `logs: {level}` (rakumux.com decides per account, owners only
    unless the deployment says otherwise) and this machine's name is confirmed, the service follows
@@ -1220,6 +1233,7 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   `{id (ws_…), name, created_at}`, its name one trimmed line of 1–64 characters, unique on the
   machine ignoring case, at most 100. A session is in one or in none (`SessionView::workspace`).
   Requests: `workspace_list` (anyone), and, user only, `workspace_create {name}`,
+  `workspace_rename {id, name}` (capability `workspaces.rename`; its sessions stay in it),
   `workspace_delete {id}` (its sessions are then in none, each published `updated`);
   `session_workspace {id, workspace?}` puts a session in one or in none (a session caller only
   itself). `CreateSession::workspace` starts a session in one; a session caller's sessions start
@@ -1323,7 +1337,8 @@ accidents; they don't stop a hostile process running as the same user.
                                  session-renames.json: the same for sessions deleted and
                                  renamed from rakumux.com; heartbeat-actions.json and
                                  session-moves.json: the same for heartbeat actions and
-                                 sessions moved to another workspace), machine.json (this
+                                 sessions moved to another workspace; workspace-changes.json:
+                                 for workspaces renamed or deleted), machine.json (this
                                  machine's feed name and id), paired-devices.json (the devices
                                  that sign what rakumux.com asks of it, 0600),
                                  signed-commands.log (what became of each signed
@@ -1378,8 +1393,8 @@ accidents; they don't stop a hostile process running as the same user.
   [session ids]}: the same under the App and Status tabs, and one for the Pinned tab, each its own; left out when
   empty),
   terminal_panel ("below" | "beside": where `T` opens the terminal panel, as `|` or `-` last
-  placed it; left out while "below"), workspace (the id of the workspace the list shows; left out
-  for No workspace)}`. The folder filter isn't saved; the
+  placed it; left out while "below"), workspace (the view the list shows: a workspace's id,
+  `unassigned`, or left out for All)}`. The folder filter isn't saved; the
   `selected_projects` of 0.6 previews, and the `remote_replies` and `remote_sessions` switches of
   0.1.32 and earlier, are ignored and dropped on the next save.
 - **Environment** injected into every session: `RAKUMUX_SESSION_ID`, `RAKUMUX_SESSION_TOKEN`,
@@ -1608,8 +1623,9 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
   Feed tab.
 - **Pin**: a user mark that lists a session in the list's Pinned tab (and shows `★` before its
   name in the list).
-- **Workspace**: a named group of this machine's sessions (`workspace_*`); the list shows one at a
-  time, or the sessions in none (No workspace). `m` switches or adds one, `M` moves a session.
+- **Workspace**: a named group of this machine's sessions (`workspace_*`); the list shows every
+  session (All), one workspace's, or those in none (Unassigned), picked with the footer's tabs.
+  `m` switches, adds, renames or deletes one; `M` moves a session.
 - **Session order**: where the user put each session in the list (drag, `J`/`K`); a TUI setting,
   not part of the registry.
 - **Git context**: a session's branch, linked worktree and repository name, read from `.git` files
@@ -1690,7 +1706,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 | `rakumux pin <name\|id>` / `rakumux unpin <name\|id>` | Pin (into the list's Pinned tab) / unpin |
 | `rakumux kill <name\|id> [--tree]` / `rakumux rm <name\|id>` | Terminate / delete (into the session history, 90 days) |
 | `rakumux heartbeat ls [--json] [--folder DIR \| --all] \| show <name\|id> \| add [NAME] (--every 30m \| --daily HH:MM \| --days mon,fri --at HH:MM) [--agent A] [--command C] [--prompt P \| -- PROMPT] [--paused] \| update <name\|id> … \| enable \| pause \| run \| rm <name\|id>` | Heartbeats: tasks run on a clock (`add` enables one that has a prompt and a schedule; `enable` approves an agent's; `run` starts a run now). Inside a session `add` and `update` work and wait for approval, so an agent needs no MCP (`$RAKUMUX_BIN heartbeat update hb_… --prompt … --every …`) |
-| `rakumux workspace ls [--json] \| add NAME \| rm <name\|id> \| move <session> (<workspace> \| --none)` | Workspaces: list them with their sessions' count, make one, forget one (its sessions are then in none), move a session into one (made when there's none of that name) or out of any. Inside a session `ls` works and `move` moves that session itself |
+| `rakumux workspace ls [--json] \| add NAME \| rename <name\|id> NAME \| rm <name\|id> \| move <session> (<workspace> \| --none)` | Workspaces: list them with their sessions' count (and the Unassigned ones), make one, rename one, forget one (its sessions are then Unassigned), move a session into one (made when there's none of that name) or out of any. Inside a session `ls` works and `move` moves that session itself |
 | `rakumux history [QUERY] [--json]` / `rakumux restore <id\|name>` | Deleted sessions, most recently deleted first / bring one back into its folder, dead (`attach` or Enter revives it); a name only when one deleted session has it |
 | `rakumux folders [--json]` / `rakumux folders add\|rm <dir>` | List folders / add one / forget one without sessions (`projects` is a hidden alias; `--json` prints `{"folders": [...], "projects": [...]}`, the same list twice) |
 | `rakumux --new-server` | Replace the running daemon with this Rakumux's (in place: sessions keep running), or start one; then the TUI |
@@ -1719,7 +1735,7 @@ folder header, a new session there), `Esc` (after cancelling a pending key or th
 `Ctrl-\` back to the session you came from (with none, as after a start or a UI reload, into the
 running session in view), `Tab` last session, `1`-`9` go into that session,
 `n` new, `N` new sessions in this folder on your Sprite or here (the `☁ Sprite` toggle), `r` rename, `s` a new AI title for the session, `w` where the session has worked (`W`
-every session's), `y` copy a place's path (below), `p` pin, `m` workspaces (below), `M` move the session to another workspace, `J`/`K` move the session down/up, `x` close, `d`/`dd` delete (`H` the session history), `D` pair a browser or phone (`rakumux devices pair`), `z` full
+every session's), `y` copy a place's path (below), `p` pin, `m` workspaces (below: switch, add, rename, delete), `M` move the session to another workspace, `J`/`K` move the session down/up, `x` close, `d`/`dd` delete (`H` the session history), `D` pair a browser or phone (`rakumux devices pair`), `z` full
 screen, `b` hide Master detail's list beside the session and show it again (below), `T` the
 terminal panel where it was last placed, `|` it beside the session, `-` below (below), `P` the Folders modal (Enter on the tabs: the active tab's), `/` filter, `Ctrl-y`/`Ctrl-e`/
 PgUp/PgDn scroll the preview, `\` send `Ctrl-\` to the session, `t` rtop (below), `?` Help, `,`/`o` Settings, `a` sign in (signed in: the account dialog; in the sign-in dialog `c` copies the link to the clipboard over OSC 52), `U` Update, `R`
@@ -1808,10 +1824,7 @@ MODE`), centred while it clears both sides, else between them. On the right butt
 (a darker shade of the orange bar; dark chips on the blue one): in Rakumux mode `f ≡ Feed`
 (with `●N`, `●99+` beyond 99, for the feed entries that finished during this run and arrived
 since the feed was last on screen: memory only, `FeedStore::unseen`, counted while the account's
-feed is on; it does what `f` does), `? Help` and `, Settings`, then `m ⊞ <workspace>` (the
-workspace shown, `No workspace` for none; a tap opens the workspaces modal; with a daemon that has
-`workspaces`, and only while the session, the message and the other buttons keep their place
-whole, as the version), then the
+feed is on; it does what `f` does), `? Help` and `, Settings`, then the
 Rakumux account: `a Sign in` while signed out (a tap asks for a sign-in code
 at once), `a ✓ Signed in` while signed in (a tap opens the account dialog); `Ctrl-\` alone in
 session mode (the label names the mode); and last, quieter, this Rakumux's version (`v0.1.37`, a
@@ -2014,19 +2027,27 @@ hides adds that folder to the filter. Other folders, commands and startup comman
 **Layouts.** Settings → Layout or `v` in Rakumux mode switches between Master detail and
 Tabs.
 
-**Workspaces.** `m`, the footer's `m ⊞ <workspace>` or Settings → Workspace
-(`app/workspaces.rs`, `components/workspaces.rs`) opens the workspaces modal: No workspace, each
-workspace with its sessions' count, the one shown marked `✓`, then `+ Add new workspace`, which
-turns into a field for the new name (Enter makes it and shows it). Enter or a click shows the
-workspace under the cursor; `d` twice deletes one (its sessions go to No workspace). The list
-(`SessionList::set_workspace`) holds only the shown workspace's sessions, every tab and the
-session tab bar with them; the others wait aside (`every_session`), so a session another client
-moves elsewhere leaves the list as it would on deletion. The one shown is saved
-(`sessions.workspace`), and a saved one that's gone shows No workspace. New sessions (`n`, Beats'
-`n`) start in it. `M` (Settings → Move to workspace) opens the same modal for the selected session
-(`Move <name> to`, `+ New workspace`): Enter moves it (`session_workspace`). Going into a session
-in another workspace (the feed, a restore) shows that workspace. A daemon without `workspaces`
-gets "restart it (S)".
+**Workspaces.** With a daemon that has `workspaces`, the footer's left holds the workspace tabs
+in place of the session's name (`components/footer.rs::fit_tabs`): `⊞` (the workspaces modal),
+then `All N` (every session), each workspace's `Name N` and `Unassigned N` (the sessions in none),
+N each one's sessions; the one shown bold and underlined; a click switches (`Hit::WorkspaceTab`).
+Short of room the one shown stays with as many others, in order, as fit beside `+N`, which opens
+the modal; they give way where the session's name did. `m` or Settings → Workspace
+(`app/workspaces.rs`, `components/workspaces.rs`) opens the workspaces modal: All, each
+workspace, Unassigned, each with its count, the one shown marked `✓`, then `+ Add new
+workspace`, which turns into a field for the new name (Enter makes it and shows it). Enter or a
+click shows the row under the cursor; `e` renames the workspace under it in place, `d` twice
+deletes it (its sessions are then Unassigned); the key line's `e rename` and `d delete` take a
+click. The list (`SessionList::set_workspace_view`, `WorkspaceView`) holds only the view's
+sessions, every tab and the session tab bar with them; the others wait aside
+(`every_session`), so a session another client moves elsewhere leaves the list as it would on
+deletion. The view is saved (`sessions.workspace`: absent for All, where a first start begins,
+`unassigned`, or a workspace's id), and a saved workspace that's gone shows All. New sessions
+(`n`, Beats' `n`) start in the workspace shown (in none under All and Unassigned). `M` (Settings →
+Move to workspace) opens the same modal for the selected session, without All (`Move <name>
+to`, `+ New workspace`): Enter moves it (`session_workspace`). Going into a session another view
+hides (the feed, a restore) shows All. A daemon without `workspaces` gets "restart it (S)", and
+its footer still names the session.
 
 **rtop.** `t` in Rakumux mode or Settings → rtop (`app/rtop.rs`, `components/rtop.rs`) shows, in
 the drawer's rtop tab (above), what this machine and Rakumux use over time, drawn as btop does,

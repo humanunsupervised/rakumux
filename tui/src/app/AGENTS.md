@@ -63,13 +63,18 @@ new-session flow, and code boundaries.
   (`AppEvent::Restored`), then selects and revives the session like Enter on a dead one. Keys in
   `handlers/history.rs`, drawing in `components/history.rs`.
 - `workspaces.rs`: workspaces (`App::workspaces`, read with each sync; capability `workspaces`):
-  the one the list shows (`SessionList::set_workspace`: only its sessions are listed, the rest wait
-  in `elsewhere`; saved as `sessions.workspace`), the workspaces modal (`AppMode::Workspaces`,
-  `WorkspacePicker`: `m`, the footer's `FooterKey::Workspace`, Settings → Workspace; `M` for the
-  selected session, `WorkspacePurpose::Move`), adding (`+ Add new workspace`, a name field),
-  deleting (`d` twice) and moving a session (`AppEvent::WorkspaceSet`). New sessions start in the
-  one shown (`new_session_workspace`). Keys in `handlers/workspaces.rs`, drawing in
-  `components/workspaces.rs`.
+  the view the list shows (`WorkspaceView`: All, Unassigned or one workspace;
+  `SessionList::set_workspace_view`: only its sessions are listed, the rest wait in `elsewhere`;
+  saved as `sessions.workspace`), the footer's tabs (`workspace_views`, `view_count`,
+  `click_workspace_tab`; drawn by `components/footer.rs::fit_tabs` in the session's place), the
+  workspaces modal (`AppMode::Workspaces`, `WorkspacePicker`: `m`, the footer's `⊞`
+  (`FooterKey::Workspace`), Settings → Workspace; `M` for the selected session,
+  `WorkspacePurpose::Move`, without All), adding (`+ Add new workspace`, a name field), renaming
+  (`e`: the row turns into the field, `renaming`), deleting (`d` twice; `forget_workspace` frees
+  its sessions at once) and moving a session (`AppEvent::WorkspaceSet`). New sessions start in
+  the workspace shown (`new_session_workspace`). Keys in `handlers/workspaces.rs`, drawing in
+  `components/workspaces.rs`. The test fake announces `workspaces` only with
+  `FakeState::keeps_workspaces`.
 - `path_complete.rs`: the folders that complete a typed path (`suggest`: folders and links to
   them, dot-folders only once the name starts with `.`, case-insensitive only when nothing else
   matches, capped reads; `expand` for `~` and relative paths). The Folders modal lists them as
