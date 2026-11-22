@@ -408,6 +408,9 @@ pub(crate) struct SessionSync {
     sent: Option<Vec<SessionState>>,
     /// The list being sent now.
     sending: Option<Vec<SessionState>>,
+    /// Something else the upload says (its workspaces, capabilities, devices)
+    /// changed while one was out: that one doesn't count as sent.
+    resend: bool,
     next_send: Duration,
     heartbeat_at: Duration,
     retry_at: Duration,
@@ -443,6 +446,7 @@ impl SessionSync {
             sessions: BTreeMap::new(),
             sent: None,
             sending: None,
+            resend: false,
             next_send: Duration::ZERO,
             heartbeat_at: Duration::ZERO,
             retry_at: Duration::ZERO,
@@ -478,7 +482,7 @@ impl SessionSync {
         self.heartbeats = false;
         self.workspaces_accepted = false;
         self.confirmed = false;
-        self.sent = None;
+        self.resend();
         self.retry = RETRY_MIN;
         self.retry_at = now;
         self.next_send = now;
@@ -549,7 +553,7 @@ impl SessionSync {
         };
         if names(&workspaces) != names(&self.workspaces) {
             self.workspaces = workspaces;
-            self.sent = None;
+            self.resend();
         }
     }
 
@@ -588,7 +592,7 @@ impl SessionSync {
     pub fn set_signing(&mut self, signing: wire::ListedSigning) {
         if self.signing.as_ref() != Some(&signing) {
             self.signing = Some(signing);
-            self.sent = None;
+            self.resend();
         }
     }
 
@@ -608,7 +612,7 @@ impl SessionSync {
             self.capabilities.retain(|name| *name != capability);
         }
         // The same sessions, said again with what this machine handles now.
-        self.sent = None;
+        self.resend();
     }
 
     /// The name this machine goes by in the feed now.
@@ -634,7 +638,7 @@ impl SessionSync {
     pub fn rename(&mut self, machine: String, now: Duration) {
         self.machine = machine;
         self.confirmed = false;
-        self.sent = None;
+        self.resend();
         self.retry = RETRY_MIN;
         self.retry_at = now;
         self.next_send = now;
@@ -746,7 +750,15 @@ impl SessionSync {
             )?;
         }
         self.sending = Some(list);
+        self.resend = false;
         Some(request)
+    }
+
+    /// Send the list again, whether it changed or not: what else goes with
+    /// it changed (an upload out now went with the old).
+    fn resend(&mut self) {
+        self.sent = None;
+        self.resend = true;
     }
 
     /// An upload finished; `current` says whether it was made for the
@@ -784,7 +796,7 @@ impl SessionSync {
                 let workspaces = stored.workspaces && !self.workspaces_accepted;
                 self.workspaces_accepted = stored.workspaces;
                 // Said again with its id and devices once the cloud takes them.
-                self.sent = if workspaces || (newly && self.signing.is_some()) {
+                self.sent = if workspaces || self.resend || (newly && self.signing.is_some()) {
                     None
                 } else {
                     sent

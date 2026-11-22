@@ -711,3 +711,35 @@ fn the_list_says_workspaces_edit_only_while_the_daemon_renames_workspaces() {
     let unsaid = body(sessions.next_request(NOW + SETTLE * 2, WALL));
     assert!(!capabilities(&unsaid).contains(&"workspaces.edit".to_owned()));
 }
+
+#[test]
+fn workspaces_that_change_while_an_upload_is_out_go_with_the_next_one() {
+    let launch = Workspace {
+        id: WorkspaceId::generate(),
+        name: "Launch".into(),
+        created_at: 1,
+    };
+    let research = Workspace {
+        id: WorkspaceId::generate(),
+        name: "Research".into(),
+        created_at: 2,
+    };
+    let mut sessions = on(&[view("01K89ZQ4D2F6H8J0K2M4N6P8R0")]);
+    sessions.set_workspaces(true);
+    sessions.set_workspace_list(vec![launch.clone(), research.clone()]);
+    let mut takes = stored(false);
+    takes.workspaces = true;
+    body(sessions.next_request(NOW, WALL));
+    sessions.done(true, Ok(takes.clone()), NOW);
+    let first = body(sessions.next_request(NOW + SETTLE, WALL));
+    assert_eq!(
+        first["workspaces"],
+        serde_json::json!(["Launch", "Research"])
+    );
+    // Launch is deleted while that upload is out: its answer doesn't make
+    // the old names count as sent.
+    sessions.set_workspace_list(vec![research]);
+    sessions.done(true, Ok(takes), NOW + SETTLE);
+    let next = body(sessions.next_request(NOW + SETTLE * 2, WALL));
+    assert_eq!(next["workspaces"], serde_json::json!(["Research"]));
+}

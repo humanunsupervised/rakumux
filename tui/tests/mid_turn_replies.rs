@@ -606,10 +606,18 @@ fn workspaces_are_renamed_and_deleted_from_rakumux_com_only_when_signed() {
     assert_eq!(reported(&deleted).unwrap()["status"], "done");
     assert_eq!(names(), ["Research"]);
     assert_eq!(client.get(&lead.id).unwrap().workspace, None);
-    world.wait("the session list to carry the delete", || {
-        workspaces() == json!(["Research"])
-            && lead_listed().is_some_and(|s| s.get("workspace").is_none())
-    });
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !(workspaces() == json!(["Research"])
+        && lead_listed().is_some_and(|s| s.get("workspace").is_none()))
+    {
+        assert!(
+            Instant::now() < deadline,
+            "the session list never carried the delete: workspaces {} lead {:?}",
+            workspaces(),
+            lead_listed()
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
     service.stop();
     let _ = client.shutdown();
     daemon.stop();
