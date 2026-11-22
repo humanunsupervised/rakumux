@@ -683,7 +683,7 @@ mod tests {
         assert_eq!(shown(&h), ["A", "B", "C"]);
         let line = footer(&mut h, 160);
         assert!(
-            line.starts_with(" ⊞  All 3  Launch 1  Unassigned 2 "),
+            line.starts_with("  ⊞   All 3   Launch 1   Unassigned 2  "),
             "{line:?}"
         );
         assert!(!line.contains("session:"), "{line:?}");
@@ -691,7 +691,7 @@ mod tests {
         h.press(KeyCode::Enter).await;
         assert_eq!(h.app.focus, Focus::Session);
         let line = footer(&mut h, 160);
-        assert!(line.starts_with(" ⊞  All 3  Launch 1"), "{line:?}");
+        assert!(line.starts_with("  ⊞   All 3   Launch 1 "), "{line:?}");
         assert!(line.contains("SESSION MODE"), "{line:?}");
         h.rakumux().await;
         click(&mut h, Hit::WorkspaceTab(1));
@@ -737,7 +737,7 @@ mod tests {
         h.app.refresh();
         h.app.process_pending();
         let line = footer(&mut h, 160);
-        assert!(line.contains("Infrastructure 0  Unassigned 2"), "{line:?}");
+        assert!(line.contains("Infrastructure 0   Unassigned 2"), "{line:?}");
         let narrow = footer(&mut h, 110);
         assert!(
             narrow.contains("Unassigned 2"),
@@ -969,6 +969,6 @@ mod tests {
         h.app.process_pending();
         assert_eq!(shown(&h), ["C"]);
         assert_eq!(h.app.view_count(&WorkspaceView::In(launch().id)), 2);
-        assert!(footer(&mut h, 160).contains("Launch 2  Unassigned 1"));
+        assert!(footer(&mut h, 160).contains("Launch 2   Unassigned 1"));
     }
 }

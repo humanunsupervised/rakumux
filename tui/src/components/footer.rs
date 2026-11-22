@@ -57,8 +57,6 @@ const MIN_MESSAGE: usize = 30;
 
 /// Columns a workspace's name gets on its tab.
 const WORKSPACE_NAME_COLS: usize = 16;
-/// Between two workspace tabs.
-const TAB_GAP: &str = "  ";
 /// Columns between two buttons.
 const GAP: usize = 1;
 
@@ -140,25 +138,27 @@ fn workspace_tabs(app: &App) -> Vec<WorkspaceTab> {
         .collect()
 }
 
-/// The tabs in at most `room` columns: `⊞` (the workspaces modal), then
-/// every tab, else the one shown and as many of the others, in order, as
-/// fit beside a `+N` for the rest (which opens the modal too). The targets
-/// are each part's column from the left's start, its width and what a
-/// click does.
+/// The tabs in at most `room` columns, each a button: `⊞` (the workspaces
+/// modal), then every tab, else the one shown and as many of the others, in
+/// order, as fit beside a `+N` for the rest (which opens the modal too). The
+/// targets are each part's column from the left's start, its width and what
+/// a click does.
 fn fit_tabs(
     tabs: &[WorkspaceTab],
     icon: &'static str,
     room: usize,
     focus: Focus,
 ) -> (Vec<Span<'static>>, Vec<(usize, usize, Hit)>) {
-    let width = |tab: &WorkspaceTab| str_width(TAB_GAP) + str_width(&tab.text());
-    let all: usize = str_width(icon) + tabs.iter().map(width).sum::<usize>();
+    // ` text `, and a column before every button but the icon's.
+    let chip = |text: &str| str_width(text) + 2;
+    let width = |tab: &WorkspaceTab| GAP + chip(&tab.text());
+    let all: usize = chip(icon) + tabs.iter().map(width).sum::<usize>();
     let mut kept: Vec<usize> = (0..tabs.len()).collect();
     if all > room {
         let selected = tabs.iter().position(|tab| tab.selected).unwrap_or(0);
-        let mut used = str_width(icon) + width(&tabs[selected]);
+        let mut used = chip(icon) + width(&tabs[selected]);
         kept = vec![selected];
-        let more = |hidden: usize| str_width(TAB_GAP) + format!("+{hidden}").len();
+        let more = |hidden: usize| GAP + chip(&format!("+{hidden}"));
         for index in 0..tabs.len() {
             if index == selected {
                 continue;
@@ -176,43 +176,53 @@ fn fit_tabs(
             return (Vec::new(), Vec::new());
         }
     }
-    let p = theme::palette();
-    let (plain, bright, quiet) = match focus {
-        Focus::List => (Style::default(), Style::default(), Style::default()),
-        Focus::Session | Focus::Terminal => (
-            Style::default().fg(p.neutral_gray),
-            Style::default().fg(p.text_bright),
-            Style::default().fg(p.text_muted),
-        ),
-    };
-    let mut spans = vec![Span::styled(icon, plain)];
-    let mut targets = vec![(0, str_width(icon), Hit::FooterKey(FooterKey::Workspace))];
-    let mut x = str_width(icon);
+    let (button, button_count, shown) = tab_styles(focus);
+    let mut spans = vec![Span::styled(format!(" {icon} "), button)];
+    let mut targets = vec![(0, chip(icon), Hit::FooterKey(FooterKey::Workspace))];
+    let mut x = chip(icon);
     for index in &kept {
         let tab = &tabs[*index];
-        spans.push(Span::raw(TAB_GAP));
-        x += str_width(TAB_GAP);
-        let name_style = if tab.selected {
-            bright.add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+        spans.push(Span::raw(" ".repeat(GAP)));
+        x += GAP;
+        let (name_style, count_style) = if tab.selected {
+            (shown, shown)
         } else {
-            plain
+            (button, button_count)
         };
-        let count_style = if tab.selected { name_style } else { quiet };
-        spans.push(Span::styled(tab.name.clone(), name_style));
-        spans.push(Span::styled(format!(" {}", tab.count), count_style));
-        let tab_width = str_width(&tab.text());
+        spans.push(Span::styled(format!(" {}", tab.name), name_style));
+        spans.push(Span::styled(format!(" {} ", tab.count), count_style));
+        let tab_width = chip(&tab.text());
         targets.push((x, tab_width, Hit::WorkspaceTab(*index)));
         x += tab_width;
     }
     let hidden = tabs.len() - kept.len();
     if hidden > 0 {
-        spans.push(Span::raw(TAB_GAP));
-        x += str_width(TAB_GAP);
+        spans.push(Span::raw(" ".repeat(GAP)));
+        x += GAP;
         let more = format!("+{hidden}");
-        targets.push((x, more.len(), Hit::FooterKey(FooterKey::Workspace)));
-        spans.push(Span::styled(more, plain));
+        targets.push((x, chip(&more), Hit::FooterKey(FooterKey::Workspace)));
+        spans.push(Span::styled(format!(" {more} "), button));
     }
     (spans, targets)
+}
+
+/// A workspace tab's styles: a button's (its name, then its count,
+/// quieter), and the shown tab's, a button lit up: dark on the orange bar,
+/// in the accent on the blue one.
+fn tab_styles(focus: Focus) -> (Style, Style, Style) {
+    let p = theme::palette();
+    let (_, button) = button_styles(focus);
+    let lit = |fg, bg| Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD);
+    match focus {
+        Focus::List if p.faded(p.accent_orange, BUTTON_SHADE).is_some() => {
+            (button, button, lit(p.accent_orange, p.background))
+        }
+        _ => (
+            button,
+            button.fg(p.text_muted),
+            lit(p.background, p.accent_primary),
+        ),
+    }
 }
 
 /// `≡ Feed`, with `●N` for the entries that arrived since the feed was last
@@ -677,7 +687,8 @@ fn footer_on(app: &App, width: usize, day: i32) -> (Line<'static>, Vec<FooterTar
     if app.focus == Focus::List {
         // Dark ink on the orange bar; alerts stand out in bold.
         let palette = theme::palette();
-        for span in spans.iter_mut() {
+        // Buttons (the workspace tabs) keep their own colours.
+        for span in spans.iter_mut().filter(|span| span.style.bg.is_none()) {
             let alert = span.style.fg == Some(palette.accent_pink);
             span.style = span.style.fg(palette.background).bg(palette.accent_orange);
             if alert {
@@ -1505,5 +1516,41 @@ mod tests {
         let shown = text(&footer_line(&h.app, 80));
         assert!(!shown.contains("session:"), "{shown:?}");
         assert!(centred(&shown, " TERMINAL MODE "), "{shown:?}");
+    }
+
+    #[test]
+    fn workspace_tabs_are_buttons_and_the_shown_one_is_lit() {
+        let tabs = [
+            ("All", 3, false),
+            ("Launch", 1, true),
+            ("Unassigned", 2, false),
+        ]
+        .map(|(name, count, selected)| WorkspaceTab {
+            name: name.to_owned(),
+            count,
+            selected,
+        });
+        for focus in [Focus::List, Focus::Session] {
+            let (spans, targets) = fit_tabs(&tabs, "⊞", usize::MAX, focus);
+            let line = Line::from(spans.clone());
+            assert_eq!(text(&line), " ⊞   All 3   Launch 1   Unassigned 2 ");
+            // Every part but the gaps is on a button's background.
+            let bg = |part: &str| {
+                spans
+                    .iter()
+                    .find(|span| span.content.contains(part))
+                    .and_then(|span| span.style.bg)
+                    .unwrap_or_else(|| panic!("{part} has no background"))
+            };
+            assert_eq!(bg("⊞"), bg("All"));
+            assert_eq!(bg("All"), bg("Unassigned"));
+            assert_ne!(bg("Launch"), bg("All"), "the shown tab stands out");
+            assert!(spans
+                .iter()
+                .filter(|span| span.content.trim().is_empty())
+                .all(|span| span.style.bg.is_none()));
+            // A tap anywhere on a button, its padding too, hits it.
+            assert_eq!(targets[2], (12, 10, Hit::WorkspaceTab(1)));
+        }
     }
 }

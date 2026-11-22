@@ -2030,7 +2030,9 @@ Tabs.
 **Workspaces.** With a daemon that has `workspaces`, the footer's left holds the workspace tabs
 in place of the session's name (`components/footer.rs::fit_tabs`): `⊞` (the workspaces modal),
 then `All N` (every session), each workspace's `Name N` and `Unassigned N` (the sessions in none),
-N each one's sessions; the one shown bold and underlined; a click switches (`Hit::WorkspaceTab`).
+N each one's sessions, each a button (`tab_styles`: the footer buttons' chip, a column apart; the
+one shown lit, dark on the orange bar, in the accent on the blue one); a click switches
+(`Hit::WorkspaceTab`).
 Short of room the one shown stays with as many others, in order, as fit beside `+N`, which opens
 the modal; they give way where the session's name did. `m` or Settings → Workspace
 (`app/workspaces.rs`, `components/workspaces.rs`) opens the workspaces modal: All, each
