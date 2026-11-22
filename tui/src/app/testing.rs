@@ -172,6 +172,10 @@ pub struct FakeState {
     pub heartbeats: Vec<session_core::heartbeat::Heartbeat>,
     /// The workspaces, oldest first.
     pub workspaces: Vec<session_core::workspace::Workspace>,
+    /// It keeps workspaces (`workspaces`): off by default, so the footer
+    /// names the session as it does with a daemon from before them; the
+    /// workspaces' own tests turn it on.
+    pub keeps_workspaces: bool,
 }
 
 impl FakeState {
@@ -570,11 +574,16 @@ impl SessionApi for FakeApi {
                 session_core::api::CAPABILITY_RESOURCES,
                 session_core::api::CAPABILITY_SUBMIT_BLOCKED,
                 session_core::api::CAPABILITY_HISTORY,
-                session_core::api::CAPABILITY_WORKSPACES,
             ]);
         }
         if state.restarts_in_place {
             capabilities.push(session_core::api::CAPABILITY_DAEMON_RESTART);
+        }
+        if state.keeps_workspaces {
+            capabilities.extend([
+                session_core::api::CAPABILITY_WORKSPACES,
+                session_core::api::CAPABILITY_WORKSPACES_RENAME,
+            ]);
         }
         capabilities.retain(|capability| !state.lacks.contains(capability));
         Some(capabilities.into_iter().map(String::from).collect())

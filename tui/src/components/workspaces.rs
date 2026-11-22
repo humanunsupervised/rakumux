@@ -1,7 +1,8 @@
-//! The workspaces modal (`m`, the footer's workspace button, Settings →
-//! Workspace; `M` to move a session): No workspace, every workspace with
-//! its sessions' count, the one shown (or the session's) marked `✓`, then
-//! `+ Add new workspace`, which turns into the new name's field.
+//! The workspaces modal (`m`, the footer's `⊞`, Settings → Workspace; `M` to
+//! move a session): All (not when moving), every workspace, Unassigned, each
+//! with its sessions' count, the one shown (or the session's) marked `✓`,
+//! then `+ Add new workspace`, which turns into the new name's field; a
+//! workspace being renamed turns into one in its place.
 
 use ratatui::{
     layout::Rect,
@@ -13,7 +14,7 @@ use ratatui::{
 
 use super::format::truncate;
 use crate::app::workspaces::{WorkspacePicker, WorkspacePurpose, WorkspaceRow};
-use crate::app::{App, Hit};
+use crate::app::{App, Hit, WorkspaceView};
 use crate::layout::str_width;
 use crate::theme;
 
@@ -46,15 +47,20 @@ pub fn draw_workspaces(
         height,
     };
     let (title, marked) = match &picker.purpose {
-        WorkspacePurpose::Switch => (" Workspaces ".to_owned(), app.list.workspace().cloned()),
+        WorkspacePurpose::Switch => (" Workspaces ".to_owned(), app.list.workspace_view().clone()),
         WorkspacePurpose::Move { session, name } => (
             format!(
                 " Move {} to ",
                 truncate(name, width.saturating_sub(12) as usize)
             ),
-            app.list
+            match app
+                .list
                 .get_anywhere(session)
-                .and_then(|s| s.workspace.clone()),
+                .and_then(|s| s.workspace.clone())
+            {
+                Some(id) => WorkspaceView::In(id),
+                None => WorkspaceView::Unassigned,
+            },
         ),
     };
     f.render_widget(Clear, popup);
@@ -149,20 +155,22 @@ pub fn draw_workspaces(
                     Span::styled(label, Style::default().fg(p.accent_primary)),
                 ])
             }
-            WorkspaceRow::None | WorkspaceRow::Workspace(_) => {
-                let workspace = match row {
-                    WorkspaceRow::Workspace(i) => app.workspaces.get(*i),
-                    _ => None,
+            WorkspaceRow::All | WorkspaceRow::Unassigned | WorkspaceRow::Workspace(_) => {
+                let (view, name) = match row {
+                    WorkspaceRow::Workspace(i) => match app.workspaces.get(*i) {
+                        Some(w) => (WorkspaceView::In(w.id.clone()), w.name.as_str()),
+                        None => continue,
+                    },
+                    WorkspaceRow::All => (WorkspaceView::All, "All"),
+                    _ => (WorkspaceView::Unassigned, "Unassigned"),
                 };
-                let id = workspace.map(|w| &w.id);
-                let name = workspace.map_or("No workspace", |w| w.name.as_str());
-                let deleting = id.is_some() && picker.deleting.as_ref() == id;
+                let deleting = row_id.is_some() && picker.deleting.as_ref() == row_id;
                 let right = if deleting {
                     "d again deletes".to_owned()
                 } else {
-                    app.workspace_count(id).to_string()
+                    app.view_count(&view).to_string()
                 };
-                let mark = if marked.as_ref() == id { "✓ " } else { "  " };
+                let mark = if marked == view { "✓ " } else { "  " };
                 let room = inner_width.saturating_sub(4 + str_width(&right) + 2);
                 let name = truncate(name, room);
                 let pad = room.saturating_sub(str_width(&name));

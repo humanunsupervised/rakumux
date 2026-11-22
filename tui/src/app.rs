@@ -79,7 +79,7 @@ pub use feature_flags::FeatureFlags;
 pub use folders::Folders;
 pub use keys::{CycleKeys, KeyBinding};
 pub use runtime::{AppEvent, ExecMode};
-pub use session_list::{ListRow, Selection, SessionList, ShownAs};
+pub use session_list::{ListRow, Selection, SessionList, ShownAs, WorkspaceView};
 pub use text_input::TextInput;
 
 use runtime::{CancelFlag, Exec};
@@ -231,6 +231,8 @@ pub enum Hit {
     WorkspaceMenu,
     /// A row of the workspaces modal.
     WorkspaceRow(usize),
+    /// The footer's workspace tab `n` (`App::workspace_views`' order).
+    WorkspaceTab(usize),
     /// The workspaces modal's `e rename`: the workspace under the cursor.
     WorkspaceRename,
     /// The workspaces modal's `d delete`: the workspace under the cursor.
@@ -267,7 +269,8 @@ pub enum FooterKey {
     /// `f ≡ Feed` (Rakumux mode): shows and focuses the feed, focuses it,
     /// or hides it while it's focused, as `f` does.
     Feed,
-    /// `m ⊞ <workspace>` (Rakumux mode): the workspaces modal, as `m` does.
+    /// The footer's `⊞` (and `+N` for tabs that don't fit): the workspaces
+    /// modal, as `m` does.
     Workspace,
 }
 
@@ -494,14 +497,9 @@ impl App {
         list.set_clock(wall_clock());
         list.set_session_order(&options.settings.sessions.session_order);
         list.set_section_order(&options.settings.sessions.section_order);
-        list.set_workspace(
-            options
-                .settings
-                .sessions
-                .workspace
-                .clone()
-                .map(session_core::ids::WorkspaceId::from_string),
-        );
+        list.set_workspace_view(session_list::WorkspaceView::from_saved(
+            options.settings.sessions.workspace.as_deref(),
+        ));
         let folders = Folders::new(options.scope.clone());
         let mut app = Self {
             flags: FeatureFlags::from_env(),

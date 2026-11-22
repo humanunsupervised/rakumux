@@ -1,18 +1,20 @@
 //! Workspaces: named groups of this machine's sessions, which the daemon
-//! keeps (capability `workspaces`). The list shows one workspace at a time,
-//! or the sessions in none ("No workspace", where every start begins until
-//! another is picked); the one shown is saved (`sessions.workspace`), so the
-//! next start shows it again. New sessions start in it.
+//! keeps (capability `workspaces`). The list shows every session (All, where
+//! a first start begins), the sessions in none (Unassigned), or one
+//! workspace's; the view shown is saved (`sessions.workspace`), so the next
+//! start shows it again. New sessions start in the workspace shown (in none
+//! under All and Unassigned).
 //!
-//! The workspaces modal (`m`, the footer's workspace button, Settings →
-//! Workspace) lists No workspace, every workspace with its sessions' count,
-//! then `+ Add new workspace`; Enter (or a click) shows the one under the
-//! cursor, or names a new one and shows it. `M` (Settings → Move to
-//! workspace) opens it for the selected session: Enter moves the session
-//! there (into a new one from `+ New workspace`). `e` renames the workspace
-//! under the cursor (its name turns into a field), and `d` twice deletes it:
-//! its sessions are then in none. The key line's `e rename` and `d delete`
-//! take a click too.
+//! The footer's tabs (All, each workspace, Unassigned, each with its
+//! sessions' count) switch the view; its `⊞`, `m` and Settings → Workspace
+//! open the workspaces modal: All, every workspace, Unassigned, then
+//! `+ Add new workspace`. Enter (or a click) shows the row under the cursor,
+//! or names a new workspace and shows it. `M` (Settings → Move to
+//! workspace) opens it for the selected session, without All: Enter moves
+//! the session there (into a new one from `+ New workspace`). `e` renames
+//! the workspace under the cursor (its name turns into a field), and `d`
+//! twice deletes it: its sessions are then Unassigned. The key line's
+//! `e rename` and `d delete` take a click too.
 
 use session_core::api::{ApiError, CAPABILITY_WORKSPACES};
 use session_core::client::SessionApi;
@@ -23,7 +25,7 @@ use session_core::workspace::{checked_name, Workspace};
 use super::runtime::AppEvent;
 use super::text_input::TextInput;
 use super::types::{AppMode, Focus};
-use super::App;
+use super::{App, WorkspaceView};
 
 /// What the workspaces modal is open for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,8 +39,10 @@ pub enum WorkspacePurpose {
 /// A row of the workspaces modal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkspaceRow {
+    /// Every session (to show only).
+    All,
     /// The sessions in no workspace.
-    None,
+    Unassigned,
     /// `App::workspaces[i]`.
     Workspace(usize),
     /// Name a new workspace.
@@ -69,57 +73,103 @@ impl App {
             .is_some_and(|capabilities| capabilities.iter().any(|c| c == CAPABILITY_WORKSPACES))
     }
 
-    /// The name of the workspace shown, or `No workspace`.
+    /// What the view shown is called: `All`, `Unassigned` or the
+    /// workspace's name.
     pub fn workspace_name(&self) -> String {
-        self.list
-            .workspace()
-            .and_then(|id| self.workspaces.iter().find(|w| &w.id == id))
-            .map_or_else(|| "No workspace".to_owned(), |w| w.name.clone())
+        self.view_name(self.list.workspace_view())
     }
 
-    /// The name of workspace `id`, or `No workspace`.
-    fn name_of(&self, id: Option<&WorkspaceId>) -> String {
-        id.and_then(|id| self.workspaces.iter().find(|w| &w.id == id))
-            .map_or_else(|| "No workspace".to_owned(), |w| w.name.clone())
-    }
-
-    /// A sync read the daemon's workspaces (`None`: it keeps none). A saved
-    /// workspace that's gone shows the sessions in none.
-    pub(super) fn apply_workspaces(&mut self, workspaces: Option<Vec<Workspace>>) {
-        self.workspaces = workspaces.unwrap_or_default();
-        let gone = self
-            .list
-            .workspace()
-            .is_some_and(|id| !self.workspaces.iter().any(|w| &w.id == id));
-        if gone {
-            self.show_workspace(None);
+    /// What `view` is called.
+    pub fn view_name(&self, view: &WorkspaceView) -> String {
+        match view {
+            WorkspaceView::All => "All".to_owned(),
+            WorkspaceView::Unassigned => "Unassigned".to_owned(),
+            WorkspaceView::In(id) => self.name_of(Some(id)),
         }
     }
 
-    /// The rows of the modal: No workspace, every workspace, then add one.
-    pub fn workspace_rows(&self) -> Vec<WorkspaceRow> {
-        std::iter::once(WorkspaceRow::None)
-            .chain((0..self.workspaces.len()).map(WorkspaceRow::Workspace))
-            .chain(std::iter::once(WorkspaceRow::Add))
+    /// The name of workspace `id`, or `Unassigned`.
+    fn name_of(&self, id: Option<&WorkspaceId>) -> String {
+        id.and_then(|id| self.workspaces.iter().find(|w| &w.id == id))
+            .map_or_else(|| "Unassigned".to_owned(), |w| w.name.clone())
+    }
+
+    /// A sync read the daemon's workspaces (`None`: it keeps none). A saved
+    /// workspace that's gone shows All.
+    pub(super) fn apply_workspaces(&mut self, workspaces: Option<Vec<Workspace>>) {
+        self.workspaces = workspaces.unwrap_or_default();
+        let gone = match self.list.workspace_view() {
+            WorkspaceView::In(id) => !self.workspaces.iter().any(|w| &w.id == id),
+            _ => false,
+        };
+        if gone {
+            self.show_view(WorkspaceView::All);
+        }
+    }
+
+    /// The views in the footer's order: All, every workspace, Unassigned.
+    pub fn workspace_views(&self) -> Vec<WorkspaceView> {
+        std::iter::once(WorkspaceView::All)
+            .chain(
+                self.workspaces
+                    .iter()
+                    .map(|w| WorkspaceView::In(w.id.clone())),
+            )
+            .chain(std::iter::once(WorkspaceView::Unassigned))
             .collect()
     }
 
-    /// The listed sessions in workspace `id` (`None`: in none).
-    pub fn workspace_count(&self, id: Option<&WorkspaceId>) -> usize {
-        self.list
-            .every_session()
-            .filter(|s| s.workspace.as_ref() == id)
-            .count()
+    /// The rows of the modal: All (to show only), every workspace,
+    /// Unassigned, then add one.
+    pub fn workspace_rows(&self) -> Vec<WorkspaceRow> {
+        let moving = matches!(
+            &self.mode,
+            AppMode::Workspaces(WorkspacePicker {
+                purpose: WorkspacePurpose::Move { .. },
+                ..
+            })
+        );
+        (!moving)
+            .then_some(WorkspaceRow::All)
+            .into_iter()
+            .chain((0..self.workspaces.len()).map(WorkspaceRow::Workspace))
+            .chain([WorkspaceRow::Unassigned, WorkspaceRow::Add])
+            .collect()
     }
 
-    /// `m`, the footer's button, Settings → Workspace: show another
-    /// workspace.
+    /// The view a row shows (none for `+ Add`).
+    fn row_view(&self, row: &WorkspaceRow) -> Option<WorkspaceView> {
+        match row {
+            WorkspaceRow::All => Some(WorkspaceView::All),
+            WorkspaceRow::Unassigned => Some(WorkspaceView::Unassigned),
+            WorkspaceRow::Workspace(i) => self
+                .workspaces
+                .get(*i)
+                .map(|w| WorkspaceView::In(w.id.clone())),
+            WorkspaceRow::Add => None,
+        }
+    }
+
+    /// The listed sessions `view` shows.
+    pub fn view_count(&self, view: &WorkspaceView) -> usize {
+        self.list.every_session().filter(|s| view.shows(s)).count()
+    }
+
+    /// `m`, the footer's `⊞`, Settings → Workspace: show another view, or
+    /// add, rename or delete a workspace.
     pub fn open_workspaces(&mut self) {
         if self.refuse_workspaces() {
             return;
         }
-        let current = self.list.workspace().cloned();
-        self.open_workspace_picker(WorkspacePurpose::Switch, current.as_ref());
+        let current = self.list.workspace_view().clone();
+        self.open_workspace_picker(WorkspacePurpose::Switch, &current);
+    }
+
+    /// A click on the footer's tab `index` (`workspace_views`' order).
+    pub fn click_workspace_tab(&mut self, index: usize) {
+        if let Some(view) = self.workspace_views().into_iter().nth(index) {
+            self.show_view(view);
+        }
     }
 
     /// `M`, Settings → Move to workspace: move the selected session.
@@ -132,14 +182,18 @@ impl App {
             return;
         };
         if session.machine.is_some() {
-            self.set_status("A session on another machine stays in No workspace here.");
+            self.set_status("A session on another machine stays Unassigned here.");
             return;
         }
         let purpose = WorkspacePurpose::Move {
             session: session.id.clone(),
             name: session.name.clone(),
         };
-        self.open_workspace_picker(purpose, session.workspace.as_ref());
+        let at = match session.workspace {
+            Some(id) => WorkspaceView::In(id),
+            None => WorkspaceView::Unassigned,
+        };
+        self.open_workspace_picker(purpose, &at);
     }
 
     /// Without a daemon or one that keeps workspaces: say so.
@@ -155,21 +209,22 @@ impl App {
         false
     }
 
-    fn open_workspace_picker(&mut self, purpose: WorkspacePurpose, at: Option<&WorkspaceId>) {
+    fn open_workspace_picker(&mut self, purpose: WorkspacePurpose, at: &WorkspaceView) {
         if self.focus == Focus::Session {
             self.enter_rakumux_mode();
         }
-        let cursor = at
-            .and_then(|id| self.workspaces.iter().position(|w| &w.id == id))
-            .map_or(0, |index| index + 1);
         self.mode = AppMode::Workspaces(WorkspacePicker {
             purpose,
-            cursor,
+            cursor: 0,
             naming: None,
             deleting: None,
             renaming: None,
             error: None,
         });
+        let cursor = self.row_of(at);
+        if let AppMode::Workspaces(picker) = &mut self.mode {
+            picker.cursor = cursor;
+        }
         // Another window may have made or forgotten one meanwhile.
         if let Some(api) = self.api() {
             self.exec.job(move || AppEvent::Workspaces {
@@ -178,23 +233,25 @@ impl App {
         }
     }
 
+    /// The modal's row showing `view` (its first without one).
+    fn row_of(&self, view: &WorkspaceView) -> usize {
+        self.workspace_rows()
+            .iter()
+            .position(|row| self.row_view(row).as_ref() == Some(view))
+            .unwrap_or(0)
+    }
+
     /// The daemon's workspaces, read as the modal opened.
     pub(super) fn on_workspaces(&mut self, result: Result<Vec<Workspace>, ApiError>) {
         let Ok(workspaces) = result else {
             return;
         };
-        let under = self.picker_row().and_then(|row| match row {
-            WorkspaceRow::Workspace(index) => self.workspaces.get(index).map(|w| w.id.clone()),
-            _ => None,
-        });
+        let under = self.picker_row().and_then(|row| self.row_view(&row));
         self.apply_workspaces(Some(workspaces));
-        let rows = self.workspace_rows();
-        let at = under.and_then(|id| self.workspaces.iter().position(|w| w.id == id));
+        let rows = self.workspace_rows().len();
+        let at = under.map(|view| self.row_of(&view));
         if let AppMode::Workspaces(picker) = &mut self.mode {
-            picker.cursor = match at {
-                Some(index) => index + 1,
-                None => picker.cursor.min(rows.len() - 1),
-            };
+            picker.cursor = at.unwrap_or(picker.cursor).min(rows - 1);
         }
     }
 
@@ -254,22 +311,21 @@ impl App {
         let Some(row) = self.picker_row() else {
             return;
         };
-        let target = match row {
-            WorkspaceRow::Add => {
-                if let AppMode::Workspaces(picker) = &mut self.mode {
-                    picker.naming = Some(TextInput::default());
-                    picker.deleting = None;
-                    picker.error = None;
-                }
-                return;
+        let Some(view) = self.row_view(&row) else {
+            if let AppMode::Workspaces(picker) = &mut self.mode {
+                picker.naming = Some(TextInput::default());
+                picker.deleting = None;
+                picker.error = None;
             }
-            WorkspaceRow::None => None,
-            WorkspaceRow::Workspace(index) => self.workspaces.get(index).map(|w| w.id.clone()),
+            return;
         };
         self.mode = AppMode::Normal;
-        match purpose {
-            WorkspacePurpose::Switch => self.show_workspace(target),
-            WorkspacePurpose::Move { session, .. } => self.move_session_to(session, target),
+        match (purpose, view) {
+            (WorkspacePurpose::Switch, view) => self.show_view(view),
+            (WorkspacePurpose::Move { session, .. }, WorkspaceView::In(id)) => {
+                self.move_session_to(session, Some(id))
+            }
+            (WorkspacePurpose::Move { session, .. }, _) => self.move_session_to(session, None),
         }
     }
 
@@ -425,7 +481,7 @@ impl App {
             self.workspaces.push(workspace);
         }
         match purpose {
-            WorkspacePurpose::Switch => self.show_workspace(Some(id)),
+            WorkspacePurpose::Switch => self.show_view(WorkspaceView::In(id)),
             WorkspacePurpose::Move { session, .. } => self.move_session_to(session, Some(id)),
         }
     }
@@ -439,24 +495,34 @@ impl App {
             }
         };
         self.workspaces.retain(|w| w.id != workspace.id);
-        let shown = self.list.workspace() == Some(&workspace.id);
+        let shown = self.list.workspace_view() == &WorkspaceView::In(workspace.id.clone());
         self.list.forget_workspace(&workspace.id);
         if shown {
-            self.show_workspace(None);
+            self.save_view();
             self.reconcile_detail();
         }
+        let rows = self.workspace_rows().len();
         if let AppMode::Workspaces(picker) = &mut self.mode {
-            picker.cursor = picker.cursor.min(self.workspaces.len() + 1);
+            picker.cursor = picker.cursor.min(rows - 1);
         }
         self.set_status(format!("Deleted workspace {}", workspace.name));
     }
 
-    /// Show workspace `id`'s sessions (`None`: those in none), and keep it
-    /// for the next start.
-    pub fn show_workspace(&mut self, id: Option<WorkspaceId>) {
-        let changed = self.list.workspace() != id.as_ref();
-        self.list.set_workspace(id.clone());
-        let saved = id.as_ref().map(|id| id.as_str().to_owned());
+    /// Show `view`'s sessions, and keep it for the next start.
+    pub fn show_view(&mut self, view: WorkspaceView) {
+        let changed = self.list.workspace_view() != &view;
+        self.list.set_workspace_view(view.clone());
+        self.save_view();
+        if changed {
+            self.reconcile_detail();
+            let name = self.view_name(&view);
+            self.set_status(name);
+        }
+    }
+
+    /// Keep the view shown for the next start (`sessions.workspace`).
+    fn save_view(&mut self) {
+        let saved = self.list.workspace_view().saved();
         if self.settings.sessions.workspace != saved {
             self.settings.sessions.workspace = saved;
             if let Err(error) = self.save_settings() {
@@ -464,11 +530,6 @@ impl App {
                     self.set_status(format!("Couldn't save settings: {error}"));
                 }
             }
-        }
-        if changed {
-            self.reconcile_detail();
-            let name = self.name_of(id.as_ref());
-            self.set_status(name);
         }
     }
 
@@ -499,11 +560,13 @@ impl App {
         self.set_status(format!("Moved {name} to {to}"));
     }
 
-    /// The workspace new sessions start in: the one shown.
+    /// The workspace new sessions start in: the one shown (none under All
+    /// and Unassigned).
     pub fn new_session_workspace(&self) -> Option<WorkspaceId> {
-        self.has_workspaces()
-            .then(|| self.list.workspace().cloned())
-            .flatten()
+        match self.list.workspace_view() {
+            WorkspaceView::In(id) if self.has_workspaces() => Some(id.clone()),
+            _ => None,
+        }
     }
 }
 
@@ -535,13 +598,17 @@ mod tests {
         }
     }
 
-    /// `A` in Launch, `B` and `C` in no workspace; started on No workspace,
-    /// or on `saved` as a previous start left it.
+    /// `A` in Launch, `B` and `C` in none; started on All, or on `saved` as
+    /// a previous start left it.
     fn with_workspaces(saved: Option<&str>) -> Harness {
         let mut a = view("A", "landing", 300);
         a.workspace = Some(launch().id);
         let fake = FakeApi::new(vec![a, view("B", "api", 200), view("C", "docs", 100)]);
-        fake.state.lock().unwrap().workspaces = vec![launch()];
+        {
+            let mut state = fake.state.lock().unwrap();
+            state.workspaces = vec![launch()];
+            state.keeps_workspaces = true;
+        }
         let dir = tempfile::tempdir().unwrap();
         let mut options = options(&fake, crate::app::testing::scope(), &dir);
         options.settings.sessions.workspace = saved.map(str::to_owned);
@@ -589,46 +656,106 @@ mod tests {
             .join("\n")
     }
 
-    #[tokio::test]
-    async fn no_workspace_shows_the_sessions_in_none_and_m_switches_to_another() {
-        let mut h = with_workspaces(None);
-        assert_eq!(shown(&h), ["B", "C"]);
-        assert!(draw(&mut h, 160, 40).contains("m ⊞ No workspace"));
-        h.press(KeyCode::Char('m')).await;
-        assert_eq!(picker(&h).cursor, 0);
-        let screen = draw(&mut h, 160, 40);
-        assert!(screen.contains("Workspaces"), "{screen}");
-        assert!(screen.contains("+ Add new workspace"), "{screen}");
-        h.press(KeyCode::Down).await;
-        h.press(KeyCode::Enter).await;
-        assert!(matches!(h.app.mode, AppMode::Normal));
-        assert_eq!(shown(&h), ["A"]);
-        assert_eq!(h.selected().as_deref(), Some("A"));
-        assert_eq!(saved(&h).as_deref(), Some("W1"));
-        assert!(draw(&mut h, 160, 40).contains("m ⊞ Launch"));
-        // Back to none: the saved workspace goes from the file.
-        h.press(KeyCode::Char('m')).await;
-        assert_eq!(picker(&h).cursor, 1, "the cursor starts on the one shown");
-        h.press(KeyCode::Up).await;
-        h.press(KeyCode::Enter).await;
-        assert_eq!(shown(&h), ["B", "C"]);
-        assert_eq!(saved(&h), None);
+    fn footer(h: &mut Harness, cols: u16) -> String {
+        draw(h, cols, 40).lines().last().unwrap().to_owned()
+    }
+
+    fn click(h: &mut Harness, hit: Hit) {
+        let area = h
+            .app
+            .hits
+            .iter()
+            .find(|(_, candidate)| *candidate == hit)
+            .map(|(area, _)| *area)
+            .unwrap_or_else(|| panic!("no {hit:?}"));
+        h.app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: area.x,
+            row: area.y,
+            modifiers: KeyModifiers::NONE,
+        });
+        h.app.process_pending();
     }
 
     #[tokio::test]
-    async fn the_next_start_shows_the_saved_workspace_and_a_gone_one_shows_none() {
-        let h = with_workspaces(Some("W1"));
+    async fn all_shows_every_session_and_the_footer_s_tabs_switch() {
+        let mut h = with_workspaces(None);
+        assert_eq!(shown(&h), ["A", "B", "C"]);
+        let line = footer(&mut h, 160);
+        assert!(
+            line.starts_with(" ⊞  All 3  Launch 1  Unassigned 2 "),
+            "{line:?}"
+        );
+        assert!(!line.contains("session:"), "{line:?}");
+        // In session mode too, on the blue bar.
+        h.press(KeyCode::Enter).await;
+        assert_eq!(h.app.focus, Focus::Session);
+        let line = footer(&mut h, 160);
+        assert!(line.starts_with(" ⊞  All 3  Launch 1"), "{line:?}");
+        assert!(line.contains("SESSION MODE"), "{line:?}");
+        h.rakumux().await;
+        click(&mut h, Hit::WorkspaceTab(1));
         assert_eq!(shown(&h), ["A"]);
-        let gone = with_workspaces(Some("W9"));
-        assert_eq!(shown(&gone), ["B", "C"]);
+        assert_eq!(saved(&h).as_deref(), Some("W1"));
+        footer(&mut h, 160);
+        click(&mut h, Hit::WorkspaceTab(2));
+        assert_eq!(shown(&h), ["B", "C"]);
+        assert_eq!(saved(&h).as_deref(), Some("unassigned"));
+        footer(&mut h, 160);
+        click(&mut h, Hit::WorkspaceTab(0));
+        assert_eq!(shown(&h), ["A", "B", "C"]);
+        assert_eq!(saved(&h), None);
+        // The ⊞ opens the modal: All, each workspace, Unassigned, then add.
+        footer(&mut h, 160);
+        click(&mut h, Hit::FooterKey(FooterKey::Workspace));
+        let screen = draw(&mut h, 160, 40);
+        let at = |text: &str| {
+            screen
+                .find(text)
+                .unwrap_or_else(|| panic!("{text}: {screen}"))
+        };
+        assert!(at("✓ All") < at("Launch") && at("Launch") < at("Unassigned"));
+        assert!(at("Unassigned") < at("+ Add new workspace"));
+        h.press(KeyCode::Down).await;
+        h.press(KeyCode::Enter).await;
+        assert_eq!(shown(&h), ["A"]);
+    }
+
+    #[tokio::test]
+    async fn the_next_start_shows_the_saved_view_and_a_gone_workspace_shows_all() {
+        assert_eq!(shown(&with_workspaces(Some("W1"))), ["A"]);
+        assert_eq!(shown(&with_workspaces(Some("unassigned"))), ["B", "C"]);
+        assert_eq!(shown(&with_workspaces(Some("W9"))), ["A", "B", "C"]);
+    }
+
+    #[tokio::test]
+    async fn tabs_that_don_t_fit_fold_into_a_count_that_opens_the_modal() {
+        let mut h = with_workspaces(Some("unassigned"));
+        for name in ["Research", "Marketing", "Infrastructure"] {
+            h.fake.workspace_create(name).unwrap();
+        }
+        h.app.refresh();
+        h.app.process_pending();
+        let line = footer(&mut h, 160);
+        assert!(line.contains("Infrastructure 0  Unassigned 2"), "{line:?}");
+        let narrow = footer(&mut h, 110);
+        assert!(
+            narrow.contains("Unassigned 2"),
+            "the one shown stays: {narrow:?}"
+        );
+        assert!(narrow.contains('+'), "{narrow:?}");
+        assert!(!narrow.contains("Infrastructure"), "{narrow:?}");
+        click(&mut h, Hit::FooterKey(FooterKey::Workspace));
+        assert!(matches!(h.app.mode, AppMode::Workspaces(_)));
     }
 
     #[tokio::test]
     async fn adding_a_workspace_shows_it_and_new_sessions_start_there() {
         let mut h = with_workspaces(None);
         h.press(KeyCode::Char('m')).await;
-        h.press(KeyCode::Down).await;
-        h.press(KeyCode::Down).await;
+        for _ in 0..3 {
+            h.press(KeyCode::Down).await;
+        }
         h.press(KeyCode::Enter).await;
         assert!(picker(&h).naming.is_some());
         h.type_text("Research").await;
@@ -655,12 +782,15 @@ mod tests {
             Some(&research.id)
         );
         assert_eq!(shown(&h).len(), 1);
-        // A name taken says so and stays open.
+        // Under All and Unassigned new sessions are in none.
         h.rakumux().await;
+        h.app.show_view(WorkspaceView::All);
+        assert_eq!(h.app.new_session_workspace(), None);
+        // A name taken says so and stays open.
         h.press(KeyCode::Char('m')).await;
-        h.press(KeyCode::Down).await;
-        h.press(KeyCode::Down).await;
-        h.press(KeyCode::Down).await;
+        for _ in 0..4 {
+            h.press(KeyCode::Down).await;
+        }
         h.press(KeyCode::Enter).await;
         h.type_text("Launch").await;
         h.press(KeyCode::Enter).await;
@@ -677,7 +807,7 @@ mod tests {
 
     #[tokio::test]
     async fn shift_m_moves_the_selected_session_and_it_leaves_the_view() {
-        let mut h = with_workspaces(None);
+        let mut h = with_workspaces(Some("unassigned"));
         h.app
             .list
             .select(Selection::Session(SessionId::from_string("B")));
@@ -685,19 +815,22 @@ mod tests {
         let screen = draw(&mut h, 160, 40);
         assert!(screen.contains("Move api to"), "{screen}");
         assert!(screen.contains("+ New workspace"), "{screen}");
-        h.press(KeyCode::Down).await;
+        assert!(
+            !h.app.workspace_rows().contains(&WorkspaceRow::All),
+            "no All when moving"
+        );
+        assert_eq!(picker(&h).cursor, 1, "on Unassigned, where it is");
+        h.press(KeyCode::Up).await;
         h.press(KeyCode::Enter).await;
         assert!(h.fake.calls().iter().any(|c| c == "set_workspace B W1"));
         assert_eq!(shown(&h), ["C"]);
-        assert_eq!(h.selected().as_deref(), Some("C"));
         assert!(h
             .app
             .status()
             .unwrap_or_default()
             .contains("Moved api to Launch"));
-        // Into a new one, from the list of another workspace.
-        h.app.show_workspace(Some(launch().id));
-        assert_eq!(shown(&h), ["A", "B"]);
+        // Into a new one; under All it stays in view.
+        h.app.show_view(WorkspaceView::All);
         h.app
             .list
             .select(Selection::Session(SessionId::from_string("A")));
@@ -710,22 +843,32 @@ mod tests {
         let calls = h.fake.calls();
         assert!(calls.iter().any(|c| c == "workspace_create Later"));
         assert!(calls.iter().any(|c| c == "set_workspace A W2"));
-        assert_eq!(shown(&h), ["B"]);
+        assert_eq!(shown(&h), ["A", "B", "C"]);
     }
 
     #[tokio::test]
-    async fn d_twice_deletes_a_workspace_and_its_sessions_show_in_none() {
+    async fn d_twice_deletes_a_workspace_and_its_sessions_are_unassigned() {
         let mut h = with_workspaces(Some("W1"));
         h.press(KeyCode::Char('m')).await;
+        assert_eq!(picker(&h).cursor, 1);
         h.press(KeyCode::Char('d')).await;
         assert!(draw(&mut h, 160, 40).contains("d again deletes"));
         h.press(KeyCode::Char('d')).await;
         assert!(h.fake.calls().iter().any(|c| c == "workspace_delete W1"));
         assert!(h.app.workspaces.is_empty());
-        assert_eq!(h.app.list.workspace(), None);
-        // No workspace can't be deleted.
-        h.press(KeyCode::Char('d')).await;
-        h.press(KeyCode::Char('d')).await;
+        assert_eq!(h.app.list.workspace_view(), &WorkspaceView::Unassigned);
+        assert_eq!(shown(&h), ["A", "B", "C"]);
+        assert_eq!(saved(&h).as_deref(), Some("unassigned"));
+        // All and Unassigned can't be deleted or renamed.
+        for row in [0, 1] {
+            if let AppMode::Workspaces(picker) = &mut h.app.mode {
+                picker.cursor = row;
+            }
+            h.press(KeyCode::Char('d')).await;
+            h.press(KeyCode::Char('d')).await;
+            h.press(KeyCode::Char('e')).await;
+            assert!(picker(&h).naming.is_none());
+        }
         assert_eq!(
             h.fake
                 .calls()
@@ -737,7 +880,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn e_renames_a_workspace_in_place_and_the_footer_follows() {
+    async fn e_renames_a_workspace_in_place_and_its_tab_follows() {
         let mut h = with_workspaces(Some("W1"));
         h.press(KeyCode::Char('m')).await;
         let screen = draw(&mut h, 160, 40);
@@ -758,17 +901,15 @@ mod tests {
         assert!(picker(&h).naming.is_none(), "the modal stays open, renamed");
         assert_eq!(h.app.workspace_name(), "Ship");
         h.press(KeyCode::Esc).await;
-        assert!(draw(&mut h, 160, 40).contains("m ⊞ Ship"));
+        assert!(footer(&mut h, 160).contains("Ship 1"));
         // Esc while renaming leaves the name as it was.
         h.press(KeyCode::Char('m')).await;
         h.press(KeyCode::Char('e')).await;
         h.type_text(" day").await;
         h.press(KeyCode::Esc).await;
         assert_eq!(h.app.workspace_name(), "Ship");
-        // No workspace can't be renamed.
+        // Not on All.
         h.press(KeyCode::Up).await;
-        h.press(KeyCode::Char('e')).await;
-        assert!(picker(&h).naming.is_none());
         assert!(!draw(&mut h, 160, 40).contains("e rename"));
     }
 
@@ -777,62 +918,29 @@ mod tests {
         let mut h = with_workspaces(Some("W1"));
         h.press(KeyCode::Char('m')).await;
         draw(&mut h, 160, 40);
-        let click = |h: &mut Harness, hit: Hit| {
-            let area = h
-                .app
-                .hits
-                .iter()
-                .find(|(_, candidate)| *candidate == hit)
-                .map(|(area, _)| *area)
-                .expect("a target");
-            h.app.handle_mouse(MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: area.x,
-                row: area.y,
-                modifiers: KeyModifiers::NONE,
-            });
-            h.app.process_pending();
-        };
         click(&mut h, Hit::WorkspaceDelete);
-        assert!(draw(&mut h, 160, 40).contains("d again deletes"));
+        draw(&mut h, 160, 40);
         click(&mut h, Hit::WorkspaceDelete);
         assert!(h.fake.calls().iter().any(|c| c == "workspace_delete W1"));
-        assert_eq!(h.app.list.workspace(), None);
         assert_eq!(shown(&h), ["A", "B", "C"]);
     }
 
     #[tokio::test]
-    async fn the_footer_button_and_a_click_on_a_row_switch_and_fit_a_phone() {
+    async fn the_modal_fits_a_phone_and_a_click_on_a_row_switches() {
         let mut h = with_workspaces(None);
-        let buttons = crate::components::footer::buttons(&h.app);
-        assert_eq!(buttons[3].target, FooterKey::Workspace);
         h.app.open_workspaces();
         h.app.process_pending();
         let screen = draw(&mut h, 45, 30);
-        assert!(screen.contains("No workspace"), "{screen}");
-        let area = h
-            .app
-            .hits
-            .iter()
-            .find(|(_, hit)| *hit == Hit::WorkspaceRow(1))
-            .map(|(area, _)| *area)
-            .expect("a row to click");
-        h.app.handle_mouse(MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: area.x + 1,
-            row: area.y,
-            modifiers: KeyModifiers::NONE,
-        });
-        h.app.process_pending();
+        assert!(screen.contains("Unassigned"), "{screen}");
+        click(&mut h, Hit::WorkspaceRow(1));
         assert_eq!(shown(&h), ["A"]);
     }
 
     #[tokio::test]
-    async fn without_the_capability_there_is_no_button_and_m_points_to_a_restart() {
+    async fn without_the_capability_the_footer_names_the_session_and_m_points_to_a_restart() {
         let mut h = with_workspaces(None);
         h.fake.state.lock().unwrap().lacks = vec![CAPABILITY_WORKSPACES];
-        let buttons = crate::components::footer::buttons(&h.app);
-        assert!(buttons.iter().all(|b| b.target != FooterKey::Workspace));
+        assert!(footer(&mut h, 160).starts_with(" session: ●"));
         let row = h.app.modal_context(false).general[SettingsItem::Workspace.index()].clone();
         assert!(row.disabled);
         h.press(KeyCode::Char('m')).await;
@@ -846,7 +954,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_session_moved_elsewhere_by_another_client_leaves_the_view() {
-        let mut h = with_workspaces(None);
+        let mut h = with_workspaces(Some("unassigned"));
         let mut moved = h
             .app
             .list
@@ -860,8 +968,7 @@ mod tests {
         );
         h.app.process_pending();
         assert_eq!(shown(&h), ["C"]);
-        assert_eq!(h.app.workspace_count(Some(&launch().id)), 2);
-        h.press(KeyCode::Char('m')).await;
-        assert!(draw(&mut h, 160, 40).contains("Launch"));
+        assert_eq!(h.app.view_count(&WorkspaceView::In(launch().id)), 2);
+        assert!(footer(&mut h, 160).contains("Launch 2  Unassigned 1"));
     }
 }

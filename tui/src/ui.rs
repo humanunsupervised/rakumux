@@ -376,10 +376,10 @@ mod tests {
         let p = theme::palette();
         for layout in [SessionLayout::Sidebar, SessionLayout::Tabs] {
             let mut h = with_layout(vec![view("A", "api", 10)], layout);
-            for (width, height) in [(180, 48), (120, 30), (90, 24), (60, 20), (40, 20)] {
+            for (width, height) in [(160, 48), (120, 30), (90, 24), (60, 20), (40, 20)] {
                 // Rakumux mode: bold dark ink on the orange bar, in the
                 // centre while it's clear of the buttons and the version
-                // (from 180 columns), else just before the buttons.
+                // (from 160 columns), else just before the buttons.
                 if h.app.focus == Focus::Session {
                     h.rakumux().await;
                 }
@@ -395,7 +395,7 @@ mod tests {
                     .map(|(area, _)| area.x)
                     .min()
                     .expect("buttons");
-                if width >= 180 {
+                if width >= 160 {
                     assert_eq!(x, (width - 14) / 2, "{width}");
                 } else {
                     assert_eq!(x + 14 + 1, buttons, "{width}");
@@ -444,14 +444,8 @@ mod tests {
     #[tokio::test]
     async fn the_footer_is_one_row_of_messages() {
         let mut h = harness(vec![view("A", "api", 10)]);
-        // The account's and the workspace's buttons have their own tests.
+        // The account's button has its own test.
         h.app.account = crate::app::types::AccountStatus::Unknown;
-        h.fake
-            .state
-            .lock()
-            .unwrap()
-            .lacks
-            .push(session_core::api::CAPABILITY_WORKSPACES);
         for (width, height) in SIZES {
             let screen = render(&mut h.app, width, height);
             let rows: Vec<&str> = screen.lines().collect();

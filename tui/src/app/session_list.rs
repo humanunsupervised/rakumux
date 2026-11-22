@@ -126,6 +126,50 @@ pub enum ListChange {
     SelectedRemoved(SessionId),
 }
 
+/// Which sessions the list shows by workspace.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum WorkspaceView {
+    /// Every session, whatever its workspace.
+    #[default]
+    All,
+    /// The sessions in no workspace.
+    Unassigned,
+    /// One workspace's sessions.
+    In(WorkspaceId),
+}
+
+impl WorkspaceView {
+    /// Whether it shows `session`.
+    pub fn shows(&self, session: &SessionView) -> bool {
+        match self {
+            WorkspaceView::All => true,
+            WorkspaceView::Unassigned => session.workspace.is_none(),
+            WorkspaceView::In(id) => session.workspace.as_ref() == Some(id),
+        }
+    }
+
+    /// As `sessions.workspace` keeps it: absent for All.
+    pub fn saved(&self) -> Option<String> {
+        match self {
+            WorkspaceView::All => None,
+            WorkspaceView::Unassigned => Some(UNASSIGNED.to_owned()),
+            WorkspaceView::In(id) => Some(id.as_str().to_owned()),
+        }
+    }
+
+    /// From `sessions.workspace`.
+    pub fn from_saved(saved: Option<&str>) -> Self {
+        match saved {
+            None => WorkspaceView::All,
+            Some(UNASSIGNED) => WorkspaceView::Unassigned,
+            Some(id) => WorkspaceView::In(WorkspaceId::from_string(id)),
+        }
+    }
+}
+
+/// `sessions.workspace` for the sessions in no workspace.
+const UNASSIGNED: &str = "unassigned";
+
 #[derive(Debug)]
 pub struct SessionList {
     /// The folder Rakumux started in: its group comes first.
@@ -179,9 +223,10 @@ pub struct SessionList {
     /// The wall clock (seconds) the list is drawn at: its ages and ready's
     /// sub-sections ([`Self::set_clock`]).
     now: i64,
-    /// The workspace shown (`None`: the sessions in none). Only its
-    /// sessions are in `sessions`; the rest wait in `elsewhere`.
-    workspace: Option<WorkspaceId>,
+    /// The workspace shown: every session, those in none, or one
+    /// workspace's. Only its sessions are in `sessions`; the rest wait in
+    /// `elsewhere`.
+    view: WorkspaceView,
     /// Listed sessions in another workspace than the one shown.
     elsewhere: Vec<SessionView>,
 }
@@ -213,24 +258,23 @@ impl SessionList {
             loaded: false,
             reselect: false,
             now: 0,
-            workspace: None,
+            view: WorkspaceView::All,
             elsewhere: Vec::new(),
         }
     }
 
-    /// The workspace shown (`None`: the sessions in none).
-    pub fn workspace(&self) -> Option<&WorkspaceId> {
-        self.workspace.as_ref()
+    /// The workspace shown.
+    pub fn workspace_view(&self) -> &WorkspaceView {
+        &self.view
     }
 
-    /// Show `workspace`'s sessions (`None`: those in none). The selection
-    /// stays while its session is shown, else goes to the most recently
-    /// used one.
-    pub fn set_workspace(&mut self, workspace: Option<WorkspaceId>) {
-        if workspace == self.workspace {
+    /// Show `view`'s sessions. The selection stays while its session is
+    /// shown, else goes to the most recently used one.
+    pub fn set_workspace_view(&mut self, view: WorkspaceView) {
+        if view == self.view {
             return;
         }
-        self.workspace = workspace;
+        self.view = view;
         let mut every = std::mem::take(&mut self.sessions);
         every.append(&mut self.elsewhere);
         let (here, elsewhere) = every.into_iter().partition(|s| self.is_here(s));
@@ -254,19 +298,18 @@ impl SessionList {
                 session.workspace = None;
             }
         }
-        let shown = if self.workspace.as_ref() == Some(id) {
-            None
-        } else {
-            self.workspace.clone()
+        let shown = match &self.view {
+            WorkspaceView::In(shown) if shown == id => WorkspaceView::Unassigned,
+            view => view.clone(),
         };
         // Partitioned again, from a workspace no session has.
-        self.workspace = Some(id.clone());
-        self.set_workspace(shown);
+        self.view = WorkspaceView::In(id.clone());
+        self.set_workspace_view(shown);
     }
 
     /// Whether `session` is in the workspace shown.
     fn is_here(&self, session: &SessionView) -> bool {
-        session.workspace == self.workspace
+        self.view.shows(session)
     }
 
     /// Every listed session, in any workspace.

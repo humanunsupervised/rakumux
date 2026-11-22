@@ -55,8 +55,10 @@ use crate::theme;
 /// Columns a message keeps before buttons make way for it.
 const MIN_MESSAGE: usize = 30;
 
-/// Columns a workspace's name gets on its button.
+/// Columns a workspace's name gets on its tab.
 const WORKSPACE_NAME_COLS: usize = 16;
+/// Between two workspace tabs.
+const TAB_GAP: &str = "  ";
 /// Columns between two buttons.
 const GAP: usize = 1;
 
@@ -111,15 +113,106 @@ fn feed_button(app: &App) -> Button {
     Button::new(FEED_KEY, feed_label(app), FooterKey::Feed)
 }
 
-/// The workspace shown: `m ⊞ Launch`, `m ⊞ No workspace`; a tap opens the
-/// workspaces modal.
-fn workspace_button(app: &App) -> Button {
-    let name = truncate(&app.workspace_name(), WORKSPACE_NAME_COLS);
-    Button::new(
-        "m",
-        format!("{} {name}", app.icons().workspace()),
-        FooterKey::Workspace,
-    )
+/// A workspace tab: what it's called, its sessions' count, whether it's
+/// the one shown.
+struct WorkspaceTab {
+    name: String,
+    count: usize,
+    selected: bool,
+}
+
+impl WorkspaceTab {
+    fn text(&self) -> String {
+        format!("{} {}", self.name, self.count)
+    }
+}
+
+/// The footer's workspace tabs: All, each workspace, Unassigned.
+fn workspace_tabs(app: &App) -> Vec<WorkspaceTab> {
+    let shown = app.list.workspace_view();
+    app.workspace_views()
+        .iter()
+        .map(|view| WorkspaceTab {
+            name: truncate(&app.view_name(view), WORKSPACE_NAME_COLS),
+            count: app.view_count(view),
+            selected: view == shown,
+        })
+        .collect()
+}
+
+/// The tabs in at most `room` columns: `⊞` (the workspaces modal), then
+/// every tab, else the one shown and as many of the others, in order, as
+/// fit beside a `+N` for the rest (which opens the modal too). The targets
+/// are each part's column from the left's start, its width and what a
+/// click does.
+fn fit_tabs(
+    tabs: &[WorkspaceTab],
+    icon: &'static str,
+    room: usize,
+    focus: Focus,
+) -> (Vec<Span<'static>>, Vec<(usize, usize, Hit)>) {
+    let width = |tab: &WorkspaceTab| str_width(TAB_GAP) + str_width(&tab.text());
+    let all: usize = str_width(icon) + tabs.iter().map(width).sum::<usize>();
+    let mut kept: Vec<usize> = (0..tabs.len()).collect();
+    if all > room {
+        let selected = tabs.iter().position(|tab| tab.selected).unwrap_or(0);
+        let mut used = str_width(icon) + width(&tabs[selected]);
+        kept = vec![selected];
+        let more = |hidden: usize| str_width(TAB_GAP) + format!("+{hidden}").len();
+        for index in 0..tabs.len() {
+            if index == selected {
+                continue;
+            }
+            let hidden = tabs.len() - kept.len() - 1;
+            let after = used + width(&tabs[index]);
+            let marker = if hidden > 0 { more(hidden) } else { 0 };
+            if after + marker <= room {
+                used = after;
+                kept.push(index);
+            }
+        }
+        kept.sort_unstable();
+        if used + more(tabs.len() - kept.len()) > room {
+            return (Vec::new(), Vec::new());
+        }
+    }
+    let p = theme::palette();
+    let (plain, bright, quiet) = match focus {
+        Focus::List => (Style::default(), Style::default(), Style::default()),
+        Focus::Session | Focus::Terminal => (
+            Style::default().fg(p.neutral_gray),
+            Style::default().fg(p.text_bright),
+            Style::default().fg(p.text_muted),
+        ),
+    };
+    let mut spans = vec![Span::styled(icon, plain)];
+    let mut targets = vec![(0, str_width(icon), Hit::FooterKey(FooterKey::Workspace))];
+    let mut x = str_width(icon);
+    for index in &kept {
+        let tab = &tabs[*index];
+        spans.push(Span::raw(TAB_GAP));
+        x += str_width(TAB_GAP);
+        let name_style = if tab.selected {
+            bright.add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+        } else {
+            plain
+        };
+        let count_style = if tab.selected { name_style } else { quiet };
+        spans.push(Span::styled(tab.name.clone(), name_style));
+        spans.push(Span::styled(format!(" {}", tab.count), count_style));
+        let tab_width = str_width(&tab.text());
+        targets.push((x, tab_width, Hit::WorkspaceTab(*index)));
+        x += tab_width;
+    }
+    let hidden = tabs.len() - kept.len();
+    if hidden > 0 {
+        spans.push(Span::raw(TAB_GAP));
+        x += str_width(TAB_GAP);
+        let more = format!("+{hidden}");
+        targets.push((x, more.len(), Hit::FooterKey(FooterKey::Workspace)));
+        spans.push(Span::styled(more, plain));
+    }
+    (spans, targets)
 }
 
 /// `≡ Feed`, with `●N` for the entries that arrived since the feed was last
@@ -200,9 +293,6 @@ pub fn buttons(app: &App) -> Vec<Button> {
                     FooterKey::Settings,
                 ),
             ];
-            if app.has_workspaces() {
-                buttons.push(workspace_button(app));
-            }
             match app.account {
                 AccountStatus::SignedOut => {
                     buttons.push(Button::new("a", "Sign in", FooterKey::SignIn))
@@ -469,15 +559,22 @@ fn footer_on(app: &App, width: usize, day: i32) -> (Line<'static>, Vec<FooterTar
     let mode = mode_label(app, width);
     let mode_width = str_width(&mode.content);
     let message = message(app);
-    let mut buttons = buttons(app);
+    let buttons = buttons(app);
+    // With workspaces, their tabs take the session's place at the left.
+    let tabs = app.has_workspaces().then(|| workspace_tabs(app));
     // The version at the far right, while everything else keeps its place:
     // every button, the session and the message whole, and the label
     // between them, a column clear on either side (centred or not).
     let version = format!("v{}", crate::app::app_version());
     let wanted = {
-        let session = named_session(app).map_or(0, |session| {
-            spans_width(&session_label(session, usize::MAX, app.focus))
-        });
+        let session = match &tabs {
+            Some(tabs) => {
+                spans_width(&fit_tabs(tabs, app.icons().workspace(), usize::MAX, app.focus).0)
+            }
+            None => named_session(app).map_or(0, |session| {
+                spans_width(&session_label(session, usize::MAX, app.focus))
+            }),
+        };
         let message = spans_width(&message);
         let separator = if session > 0 && message > 0 {
             str_width(SEPARATOR)
@@ -499,16 +596,6 @@ fn footer_on(app: &App, width: usize, day: i32) -> (Line<'static>, Vec<FooterTar
         };
         kept == buttons.len() && room >= wanted && left + mode_width + CLEAR <= right
     };
-    // The workspace's button likewise, before the version: it never cuts
-    // the session, the message or another button.
-    if let Some(index) = buttons
-        .iter()
-        .position(|button| button.target == FooterKey::Workspace)
-    {
-        if !whole(width, &buttons) {
-            buttons.remove(index);
-        }
-    }
     let with_version = width
         .checked_sub(str_width(&version) + 1)
         .filter(|&rest| whole(rest, &buttons));
@@ -517,15 +604,24 @@ fn footer_on(app: &App, width: usize, day: i32) -> (Line<'static>, Vec<FooterTar
     let (kept, room) = keep_buttons(width_left, mode_width, spans_width(&message), &buttons);
     let buttons = &buttons[..kept];
     let message = fit(message, room);
-    let mut left = match named_session(app) {
-        Some(session) => {
-            let taken = match spans_width(&message) {
-                0 => 0,
-                used => used + str_width(SEPARATOR),
-            };
-            session_label(session, room.saturating_sub(taken), app.focus)
+    let taken = match spans_width(&message) {
+        0 => 0,
+        used => used + str_width(SEPARATOR),
+    };
+    let mut tab_targets = Vec::new();
+    let mut left = match (&tabs, named_session(app)) {
+        (Some(tabs), _) => {
+            let (spans, targets) = fit_tabs(
+                tabs,
+                app.icons().workspace(),
+                room.saturating_sub(taken),
+                app.focus,
+            );
+            tab_targets = targets;
+            spans
         }
-        None => Vec::new(),
+        (None, Some(session)) => session_label(session, room.saturating_sub(taken), app.focus),
+        (None, None) => Vec::new(),
     };
     if !left.is_empty() && !message.is_empty() {
         left.push(Span::raw(SEPARATOR));
@@ -570,6 +666,13 @@ fn footer_on(app: &App, width: usize, day: i32) -> (Line<'static>, Vec<FooterTar
         u16::try_from(mode_width.min(width.saturating_sub(x))).unwrap_or(u16::MAX),
         Hit::ModeBadge,
     )];
+    targets.extend(tab_targets.into_iter().map(|(x, width, hit)| {
+        (
+            u16::try_from(x + MARGIN).unwrap_or(u16::MAX),
+            u16::try_from(width).unwrap_or(u16::MAX),
+            hit,
+        )
+    }));
     spans.push(mode);
     if app.focus == Focus::List {
         // Dark ink on the orange bar; alerts stand out in bold.
@@ -729,20 +832,7 @@ mod tests {
     }
 
     /// Rakumux mode's buttons, signed in: 49 columns with the space after.
-    /// The footer as on a daemon without workspaces: no workspace button.
-    fn without_workspaces(h: &crate::app::testing::Harness) {
-        h.fake
-            .state
-            .lock()
-            .unwrap()
-            .lacks
-            .push(session_core::api::CAPABILITY_WORKSPACES);
-    }
-
-    const BUTTONS_BUT_WORKSPACE: &str = " f ≡ Feed   ? Help   , Settings   a ✓ Signed in  ";
-
-    const ALL_BUTTONS: &str =
-        " f ≡ Feed   ? Help   , Settings   m ⊞ No workspace   a ✓ Signed in  ";
+    const ALL_BUTTONS: &str = " f ≡ Feed   ? Help   , Settings   a ✓ Signed in  ";
 
     /// The way out of session mode: 9 columns with the space after.
     const WAY_OUT: &str = " Ctrl-\\  ";
@@ -768,18 +858,22 @@ mod tests {
         let label = " RAKUMUX MODE ";
         assert_eq!(
             line(&h, 160),
-            row(&[(0, session), (70, label), (85, ALL_BUTTONS), (153, VERSION)])
+            row(&[
+                (0, session),
+                (73, label),
+                (104, ALL_BUTTONS),
+                (153, VERSION)
+            ])
         );
-        // The buttons take the label off centre, and the version goes when
-        // it doesn't fit beside everything else whole…
+        // The version takes the label off centre…
         assert_eq!(
             line(&h, 100),
-            row(&[(0, session), (17, label), (32, ALL_BUTTONS)])
+            row(&[(0, session), (29, label), (44, ALL_BUTTONS), (93, VERSION)])
         );
-        // …then the workspace's.
+        // …and goes when it doesn't fit beside everything else whole.
         assert_eq!(
             line(&h, 86),
-            row(&[(0, session), (22, label), (37, BUTTONS_BUT_WORKSPACE)])
+            row(&[(0, session), (22, label), (37, ALL_BUTTONS)])
         );
         let phone = " f ≡ Feed   ? Help  ";
         assert_eq!(
@@ -889,9 +983,8 @@ mod tests {
     #[tokio::test]
     async fn the_label_takes_the_centre_and_buttons_end_the_line() {
         let mut h = harness(vec![view("A", "api", 10)]);
-        // The account's and the workspace's buttons have their own tests.
+        // The account's button has its own test.
         h.app.account = crate::app::types::AccountStatus::Unknown;
-        without_workspaces(&h);
         let p = theme::palette();
         // Rakumux mode: the session, the label in the centre, then the
         // buttons.
@@ -957,9 +1050,8 @@ mod tests {
     #[tokio::test]
     async fn messages_follow_the_session_and_are_cut_before_buttons_go() {
         let mut h = harness(vec![view("A", "api", 10)]);
-        // The account's and the workspace's buttons have their own tests.
+        // The account's button has its own test.
         h.app.account = crate::app::types::AccountStatus::Unknown;
-        without_workspaces(&h);
         h.app.set_status("Layout: Tabs");
         let line = text(&footer_line(&h.app, 120));
         assert!(
@@ -1082,7 +1174,7 @@ mod tests {
     async fn a_phone_keeps_the_label_the_feed_and_help_longest() {
         let mut h = harness(vec![view("A", "api", 10)]);
         // Rakumux mode: the Feed, Help and Settings fit 60 columns (the
-        // account, then the workspace go first)…
+        // account goes first)…
         let line = text(&footer_line(&h.app, 60));
         assert!(
             line.ends_with(" RAKUMUX MODE   f ≡ Feed   ? Help   , Settings  "),
@@ -1367,9 +1459,8 @@ mod tests {
     #[tokio::test]
     async fn the_left_names_the_selected_session_or_the_one_taking_the_keys() {
         let mut h = harness(vec![view("A", "api", 20), view("B", "docs", 10)]);
-        // The account's and the workspace's buttons have their own tests.
+        // The account's button has its own test.
         h.app.account = crate::app::types::AccountStatus::Unknown;
-        without_workspaces(&h);
         let p = theme::palette();
         let line = footer_line(&h.app, 80);
         assert!(

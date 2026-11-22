@@ -716,9 +716,8 @@ impl App {
         }
         // In another workspace: show that one.
         if self.list.get(id).is_none() {
-            if let Some(session) = self.list.get_anywhere(id) {
-                let workspace = session.workspace.clone();
-                self.show_workspace(workspace);
+            if self.list.get_anywhere(id).is_some() {
+                self.show_view(super::WorkspaceView::All);
             }
         }
         let Some(folder) = self.list.get(id).map(|s| s.scope.clone()) else {
@@ -1454,6 +1453,10 @@ impl App {
                 }
                 Some(Hit::FooterTip) => {
                     self.next_tip();
+                    return;
+                }
+                Some(Hit::WorkspaceTab(index)) => {
+                    self.click_workspace_tab(index);
                     return;
                 }
                 Some(Hit::FooterKey(key)) => {

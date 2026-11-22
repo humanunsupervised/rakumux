@@ -745,7 +745,7 @@ async fn rakumux_mode_shows_the_mode_the_selected_session_help_and_settings_in_t
     assert!(footer.contains(" RAKUMUX MODE   f ≡ Feed "), "{footer:?}");
     assert!(
         crate::components::footer::without_version(&footer)
-            .ends_with(" ? Help   , Settings   m ⊞ No workspace   a ✓ Signed in  "),
+            .ends_with(" ? Help   , Settings   a ✓ Signed in  "),
         "{footer:?}"
     );
     let screen: String = buffer.content().iter().map(|c| c.symbol()).collect();
@@ -5362,9 +5362,7 @@ async fn signed_out_the_footer_offers_sign_in_and_a_tap_starts_it() {
     let (mut h, account) = account_harness(testing::FakeAccount::default());
     let version = crate::components::footer::version_text();
     assert!(
-        footer(&h).ends_with(&format!(
-            " , Settings   m ⊞ No workspace   a Sign in  {version}"
-        )),
+        footer(&h).ends_with(&format!(" , Settings   a Sign in  {version}")),
         "{:?}",
         footer(&h)
     );
@@ -5403,7 +5401,7 @@ async fn signed_out_the_footer_offers_sign_in_and_a_tap_starts_it() {
     let (mut h, _) = account_harness(testing::FakeAccount::signed_in());
     assert!(
         crate::components::footer::without_version(&footer(&h))
-            .ends_with(" , Settings   m ⊞ No workspace   a ✓ Signed in  "),
+            .ends_with(" , Settings   a ✓ Signed in  "),
         "{:?}",
         footer(&h)
     );
@@ -5656,6 +5654,8 @@ async fn settings_have_no_switches_for_what_signing_in_brings() {
         testing::FakeAccount::signed_in(),
     ] {
         let (h, _) = account_harness(account);
+        // A server that has everything greys nothing out.
+        h.fake.state.lock().unwrap().keeps_workspaces = true;
         let rows = h.app.modal_context(false).general;
         assert!(rows.iter().any(|row| row.label == "Account"));
         for row in &rows {
