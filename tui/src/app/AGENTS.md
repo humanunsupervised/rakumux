@@ -62,6 +62,14 @@ new-session flow, and code boundaries.
   (`AppEvent::History`), filtered here as typed; Enter or a click (`Hit::HistoryRow`) restores
   (`AppEvent::Restored`), then selects and revives the session like Enter on a dead one. Keys in
   `handlers/history.rs`, drawing in `components/history.rs`.
+- `workspaces.rs`: workspaces (`App::workspaces`, read with each sync; capability `workspaces`):
+  the one the list shows (`SessionList::set_workspace`: only its sessions are listed, the rest wait
+  in `elsewhere`; saved as `sessions.workspace`), the workspaces modal (`AppMode::Workspaces`,
+  `WorkspacePicker`: `m`, the footer's `FooterKey::Workspace`, Settings → Workspace; `M` for the
+  selected session, `WorkspacePurpose::Move`), adding (`+ Add new workspace`, a name field),
+  deleting (`d` twice) and moving a session (`AppEvent::WorkspaceSet`). New sessions start in the
+  one shown (`new_session_workspace`). Keys in `handlers/workspaces.rs`, drawing in
+  `components/workspaces.rs`.
 - `path_complete.rs`: the folders that complete a typed path (`suggest`: folders and links to
   them, dot-folders only once the name starts with `.`, case-insensitive only when nothing else
   matches, capped reads; `expand` for `~` and relative paths). The Folders modal lists them as

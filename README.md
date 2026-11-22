@@ -98,6 +98,7 @@ itself to the program, press `\` in Rakumux mode. To use another key, set
 | `*` / `f` / `t` | Your pinned sessions / show, focus or hide the feed / rtop |
 | `P` / `/` | Filter by folder / by text |
 | `p` | Pin or unpin |
+| `m` / `M` | Switch workspace (or add one) / move the session to another workspace |
 | `w` / `W` | Where the session (every session) has worked: the git working trees where it changed files |
 | `y` | Copy the path of a place (`↓` steps onto them), or of where the session works now |
 | `J` `K` | Move down or up (or drag the session) |
@@ -181,6 +182,7 @@ rakumux pin dev
 rakumux kill dev
 rakumux rm dev
 rakumux history                                 # deleted sessions; rakumux restore <id> brings one back
+rakumux workspace move dev Launch               # also ls, add, rm; --none takes it out of any
 rakumux daemon status                           # also start, stop, restart, logs
 rakumux --help
 ```

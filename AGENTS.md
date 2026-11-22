@@ -594,6 +594,21 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    a reply's text; once per request, though a reply is checked at every read), which `rakumux
    devices log [--json]` shows. A reply written in another machine's TUI isn't signed, so
    it's refused (`unsigned`).
+   **Workspaces on rakumux.com** (`feed/session_moves.rs`, `SessionMoveSync`; `feed/sessions.rs`;
+   contract `contracts/feed/`, "Workspaces"): while the daemon announces `workspaces` (read at each
+   (re)subscribe) the session list says `workspaces`, and once its answer `accepts` `workspaces` it
+   carries every workspace by name (`workspaces`, oldest first, empty ones too, at most 100) and
+   each session's (`workspace`, absent for none). `workspace_list` is read at each (re)subscribe,
+   every minute, after a move, and when a session's event names a workspace not read yet. The
+   replies read brings the moves asked on rakumux.com or in the app (`session_moves`), one at a
+   time, while the feed is on and the name is confirmed: each is carried out only when a paired
+   device signed it (`move_session`: `session`, `workspace`, null for none), only for a session
+   the list has, as the user: into the workspace of that name (exactly, else ignoring case, else a
+   new one made here) or out of any, and reported `moved`, or `failed` (`not_listed`, `refused` or
+   the signature's refusal; `POST /api/v1/feed/session-moves/status`). Each id is marked handled
+   before the daemon is asked and kept with the reports not yet taken in
+   `sensagent/status/session-moves.json` (0600, an hour). A workspace made on rakumux.com with no
+   session in it stays the account's own; a machine is never asked to make an empty one.
    **Logs for the owner's viewer** (`feed/logs.rs`, `LogSync`; contract `contracts/feed/`, "Logs"):
    while `GET /api/v1/features` says `logs: {level}` (rakumux.com decides per account, owners only
    unless the deployment says otherwise) and this machine's name is confirmed, the service follows
@@ -808,7 +823,7 @@ thread its Rakumux plugin keeps: `integrations/output.rs`),
 messages, conversation_id?}`: that agent's current turn, the user's last prompt and every message
 since, whose content `session_turn` returns; the conversation tells chats apart for their one
 automatic AI title), `places` (below), `heartbeat` (`{heartbeat, run}`: the heartbeat this
-session is a run of, below), and `terminal` (pid, foreground process, title, size,
+session is a run of, below), `workspace` (the workspace it's in, none without; below), and `terminal` (pid, foreground process, title, size,
 `controlled`, `alternate_screen`, and `choice`: the prompt with numbered options its agent shows,
 capability `session.choose`) while live. Folders are `ProjectView {path, name, sessions, live,
 last_active_at, added_at, git}` on the wire.
@@ -1200,6 +1215,16 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   foreground, the Enter held back if a dialog opened; else typed without Enter, one line), never
   into the shell; dropped after 2 minutes. Memory only: a restart in place drops one not yet
   given. No events: clients read `heartbeat_list` again.
+- **Workspaces** (capability `workspaces`; `session_core::workspace`, `control/service/workspaces.rs`,
+  `control/registry/workspaces.rs`): named groups of this machine's sessions. A workspace is
+  `{id (ws_…), name, created_at}`, its name one trimmed line of 1–64 characters, unique on the
+  machine ignoring case, at most 100. A session is in one or in none (`SessionView::workspace`).
+  Requests: `workspace_list` (anyone), and, user only, `workspace_create {name}`,
+  `workspace_delete {id}` (its sessions are then in none, each published `updated`);
+  `session_workspace {id, workspace?}` puts a session in one or in none (a session caller only
+  itself). `CreateSession::workspace` starts a session in one; a session caller's sessions start
+  in its own. A deleted session keeps its workspace in the history, so restoring it puts it back.
+  Another machine's sessions are in none here (their view's `workspace` cleared, a move refused).
 - Resource use (user only, capability `resources`; `resources.rs`, `procinfo/`):
   `resource_usage` answers a `ResourceSample {at_ms, machine, daemon, clients, sessions}` read
   when asked, nothing kept between requests: the machine's counters (`MachineUsage`: CPUs, busy
@@ -1225,7 +1250,7 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
 | Caller | How it authenticates | May |
 |---|---|---|
 | User (TUI, CLI outside any session) | token from `service.json` | everything |
-| Session (any process inside a session, e.g. an agent) | `RAKUMUX_SESSION_ID` + `RAKUMUX_SESSION_TOKEN` | every folder of this machine: list/get/read/wait/subscribe any session (its own folder when it names none; `all` too) and list folders; create sessions in any folder, within `control::Limits` (→ `limit_exceeded`); **drive** any other session: send keys, submit, kill, revive (never itself: `permission_denied`); report, touch, rename and pin **itself**; bind its agent's conversations to itself (`session_bind`); delete, attach, answer a question dialog, read an agent's turn or chat, the session history, terminal panes, replies and managing folders → `permission_denied`; heartbeats: list, get, create (any folder, its own when it names none) and update, what it makes or changes waits for approval, paused; enable, run and delete → `permission_denied`; other machines' sessions are the user's alone |
+| Session (any process inside a session, e.g. an agent) | `RAKUMUX_SESSION_ID` + `RAKUMUX_SESSION_TOKEN` | every folder of this machine: list/get/read/wait/subscribe any session (its own folder when it names none; `all` too) and list folders; create sessions in any folder, within `control::Limits` (→ `limit_exceeded`); **drive** any other session: send keys, submit, kill, revive (never itself: `permission_denied`); report, touch, rename and pin **itself**; bind its agent's conversations to itself (`session_bind`); delete, attach, answer a question dialog, read an agent's turn or chat, the session history, terminal panes, replies and managing folders → `permission_denied`; heartbeats: list, get, create (any folder, its own when it names none) and update, what it makes or changes waits for approval, paused; enable, run and delete → `permission_denied`; workspaces: list them and move **itself** (its sessions start in its workspace), make and forget one → `permission_denied`; other machines' sessions are the user's alone |
 | Delegated (the API for an agent conversation, e.g. OpenCode 2.x via `rakumux-mcp`) | user token + agent kind + conversation id | exactly what the session that bound the conversation may do; `unauthenticated` when no running session bound it |
 
 `control::Limits` apply only to sessions created by sessions: at most 4 running per creating session,
@@ -1296,8 +1321,9 @@ accidents; they don't stop a hostile process running as the same user.
                                  new sessions from rakumux.com started or decided here and
                                  reports not yet taken; session-deletions.json and
                                  session-renames.json: the same for sessions deleted and
-                                 renamed from rakumux.com; heartbeat-actions.json: the same for
-                                 heartbeat actions), machine.json (this
+                                 renamed from rakumux.com; heartbeat-actions.json and
+                                 session-moves.json: the same for heartbeat actions and
+                                 sessions moved to another workspace), machine.json (this
                                  machine's feed name and id), paired-devices.json (the devices
                                  that sign what rakumux.com asks of it, 0600),
                                  signed-commands.log (what became of each signed
@@ -1325,6 +1351,9 @@ accidents; they don't stop a hostile process running as the same user.
   awaiting_approval, created_by_json, created_at, updated_at, next_run_at, runs, last_run_json)`
   (unique `(scope_root, name)`) and `heartbeat_runs(session_id, heartbeat_id, run, started_at)`
   (a run's row goes with its session's delete), created when missing.
+  `workspaces(id, name, created_at)` (unique `name`) and `session_workspaces(session_id,
+  workspace_id)` (a session in none has no row; kept while the session is in the history,
+  removed with the workspace or when the session is purged), created when missing.
   `PRAGMA user_version = 3` (schema 2 is migrated in place, `projects` backfilled from session
   scopes); the 0.5.x `sessions` table is dropped on first open. Live
   state (terminal ids, session tokens) is in daemon memory only.
@@ -1349,7 +1378,8 @@ accidents; they don't stop a hostile process running as the same user.
   [session ids]}: the same under the App and Status tabs, and one for the Pinned tab, each its own; left out when
   empty),
   terminal_panel ("below" | "beside": where `T` opens the terminal panel, as `|` or `-` last
-  placed it; left out while "below")}`. The folder filter isn't saved; the
+  placed it; left out while "below"), workspace (the id of the workspace the list shows; left out
+  for No workspace)}`. The folder filter isn't saved; the
   `selected_projects` of 0.6 previews, and the `remote_replies` and `remote_sessions` switches of
   0.1.32 and earlier, are ignored and dropped on the next save.
 - **Environment** injected into every session: `RAKUMUX_SESSION_ID`, `RAKUMUX_SESSION_TOKEN`,
@@ -1578,6 +1608,8 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
   Feed tab.
 - **Pin**: a user mark that lists a session in the list's Pinned tab (and shows `★` before its
   name in the list).
+- **Workspace**: a named group of this machine's sessions (`workspace_*`); the list shows one at a
+  time, or the sessions in none (No workspace). `m` switches or adds one, `M` moves a session.
 - **Session order**: where the user put each session in the list (drag, `J`/`K`); a TUI setting,
   not part of the registry.
 - **Git context**: a session's branch, linked worktree and repository name, read from `.git` files
@@ -1658,6 +1690,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 | `rakumux pin <name\|id>` / `rakumux unpin <name\|id>` | Pin (into the list's Pinned tab) / unpin |
 | `rakumux kill <name\|id> [--tree]` / `rakumux rm <name\|id>` | Terminate / delete (into the session history, 90 days) |
 | `rakumux heartbeat ls [--json] [--folder DIR \| --all] \| show <name\|id> \| add [NAME] (--every 30m \| --daily HH:MM \| --days mon,fri --at HH:MM) [--agent A] [--command C] [--prompt P \| -- PROMPT] [--paused] \| update <name\|id> … \| enable \| pause \| run \| rm <name\|id>` | Heartbeats: tasks run on a clock (`add` enables one that has a prompt and a schedule; `enable` approves an agent's; `run` starts a run now). Inside a session `add` and `update` work and wait for approval, so an agent needs no MCP (`$RAKUMUX_BIN heartbeat update hb_… --prompt … --every …`) |
+| `rakumux workspace ls [--json] \| add NAME \| rm <name\|id> \| move <session> (<workspace> \| --none)` | Workspaces: list them with their sessions' count, make one, forget one (its sessions are then in none), move a session into one (made when there's none of that name) or out of any. Inside a session `ls` works and `move` moves that session itself |
 | `rakumux history [QUERY] [--json]` / `rakumux restore <id\|name>` | Deleted sessions, most recently deleted first / bring one back into its folder, dead (`attach` or Enter revives it); a name only when one deleted session has it |
 | `rakumux folders [--json]` / `rakumux folders add\|rm <dir>` | List folders / add one / forget one without sessions (`projects` is a hidden alias; `--json` prints `{"folders": [...], "projects": [...]}`, the same list twice) |
 | `rakumux --new-server` | Replace the running daemon with this Rakumux's (in place: sessions keep running), or start one; then the TUI |
@@ -1686,7 +1719,7 @@ folder header, a new session there), `Esc` (after cancelling a pending key or th
 `Ctrl-\` back to the session you came from (with none, as after a start or a UI reload, into the
 running session in view), `Tab` last session, `1`-`9` go into that session,
 `n` new, `N` new sessions in this folder on your Sprite or here (the `☁ Sprite` toggle), `r` rename, `s` a new AI title for the session, `w` where the session has worked (`W`
-every session's), `y` copy a place's path (below), `p` pin, `J`/`K` move the session down/up, `x` close, `d`/`dd` delete (`H` the session history), `D` pair a browser or phone (`rakumux devices pair`), `z` full
+every session's), `y` copy a place's path (below), `p` pin, `m` workspaces (below), `M` move the session to another workspace, `J`/`K` move the session down/up, `x` close, `d`/`dd` delete (`H` the session history), `D` pair a browser or phone (`rakumux devices pair`), `z` full
 screen, `b` hide Master detail's list beside the session and show it again (below), `T` the
 terminal panel where it was last placed, `|` it beside the session, `-` below (below), `P` the Folders modal (Enter on the tabs: the active tab's), `/` filter, `Ctrl-y`/`Ctrl-e`/
 PgUp/PgDn scroll the preview, `\` send `Ctrl-\` to the session, `t` rtop (below), `?` Help, `,`/`o` Settings, `a` sign in (signed in: the account dialog; in the sign-in dialog `c` copies the link to the clipboard over OSC 52), `U` Update, `R`
@@ -1775,7 +1808,10 @@ MODE`), centred while it clears both sides, else between them. On the right butt
 (a darker shade of the orange bar; dark chips on the blue one): in Rakumux mode `f ≡ Feed`
 (with `●N`, `●99+` beyond 99, for the feed entries that finished during this run and arrived
 since the feed was last on screen: memory only, `FeedStore::unseen`, counted while the account's
-feed is on; it does what `f` does), `? Help` and `, Settings`, then the
+feed is on; it does what `f` does), `? Help` and `, Settings`, then `m ⊞ <workspace>` (the
+workspace shown, `No workspace` for none; a tap opens the workspaces modal; with a daemon that has
+`workspaces`, and only while the session, the message and the other buttons keep their place
+whole, as the version), then the
 Rakumux account: `a Sign in` while signed out (a tap asks for a sign-in code
 at once), `a ✓ Signed in` while signed in (a tap opens the account dialog); `Ctrl-\` alone in
 session mode (the label names the mode); and last, quieter, this Rakumux's version (`v0.1.37`, a
@@ -1977,6 +2013,20 @@ hides adds that folder to the filter. Other folders, commands and startup comman
 
 **Layouts.** Settings → Layout or `v` in Rakumux mode switches between Master detail and
 Tabs.
+
+**Workspaces.** `m`, the footer's `m ⊞ <workspace>` or Settings → Workspace
+(`app/workspaces.rs`, `components/workspaces.rs`) opens the workspaces modal: No workspace, each
+workspace with its sessions' count, the one shown marked `✓`, then `+ Add new workspace`, which
+turns into a field for the new name (Enter makes it and shows it). Enter or a click shows the
+workspace under the cursor; `d` twice deletes one (its sessions go to No workspace). The list
+(`SessionList::set_workspace`) holds only the shown workspace's sessions, every tab and the
+session tab bar with them; the others wait aside (`every_session`), so a session another client
+moves elsewhere leaves the list as it would on deletion. The one shown is saved
+(`sessions.workspace`), and a saved one that's gone shows No workspace. New sessions (`n`, Beats'
+`n`) start in it. `M` (Settings → Move to workspace) opens the same modal for the selected session
+(`Move <name> to`, `+ New workspace`): Enter moves it (`session_workspace`). Going into a session
+in another workspace (the feed, a restore) shows that workspace. A daemon without `workspaces`
+gets "restart it (S)".
 
 **rtop.** `t` in Rakumux mode or Settings → rtop (`app/rtop.rs`, `components/rtop.rs`) shows, in
 the drawer's rtop tab (above), what this machine and Rakumux use over time, drawn as btop does,
