@@ -45,6 +45,12 @@
       "maxItems": 20,
       "items": { "$ref": "urn:rakumux:feed:v1:common#/$defs/sessionMove" }
     },
+    "workspace_changes": {
+      "description": "Only for a reader that names itself (`machine`) and whose latest session list advertises `workspaces.edit`: the workspaces asked of that machine on rakumux.com to rename or delete that are still pending, oldest first, with every read until the machine reports them or they expire, whatever `after` says (they take no seq); absent otherwise.",
+      "type": "array",
+      "maxItems": 20,
+      "items": { "$ref": "urn:rakumux:feed:v1:common#/$defs/workspaceChange" }
+    },
     "heartbeat_actions": {
       "description": "Only for a reader that names itself (`machine`) and whose latest session list advertises `heartbeats`: the heartbeat actions asked of that machine on rakumux.com that are still pending, oldest first, with every read until the machine reports them or they expire, whatever `after` says (they take no seq); absent otherwise.",
       "type": "array",

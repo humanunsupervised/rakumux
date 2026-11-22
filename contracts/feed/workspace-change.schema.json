@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:workspace-change-answer",
+  "title": "A workspace change request, as stored",
+  "description": "The answer to a workspace change's status report.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "workspace_change"],
+  "properties": {
+    "version": { "const": 1 },
+    "workspace_change": { "$ref": "urn:rakumux:feed:v1:common#/$defs/workspaceChange" }
+  }
+}

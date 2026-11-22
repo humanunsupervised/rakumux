@@ -881,6 +881,69 @@
         }
       ]
     },
+    "workspaceChangeStatus": {
+      "description": "`pending` until its machine carries it out (`done`) or can't (`failed`); `expired` when it stayed pending 10 minutes.",
+      "type": "string",
+      "enum": ["pending", "done", "failed", "expired"]
+    },
+    "workspaceChangeFailure": {
+      "description": "Why a machine didn't rename or delete a workspace asked of it on rakumux.com: it has no workspace of that name (`not_found`), another of its workspaces has the new name (`name_taken`), its daemon couldn't (`refused`), or its signature (`signatureFailure`). Readers take a value they don't know as a failure without a reason.",
+      "type": "string",
+      "enum": ["not_found", "name_taken", "refused", "unsigned", "unknown_device", "bad_signature", "expired"]
+    },
+    "workspaceChange": {
+      "description": "A workspace asked on rakumux.com to be renamed (`rename`, to `name`) or deleted (`delete`: its sessions are then in no workspace), for one machine that has a workspace of that name. It names the workspace by its name, never a path or a command; pages ask each machine that has it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "machine", "workspace", "action", "status", "created_at", "status_at"],
+      "properties": {
+        "id": {
+          "description": "The ULID the page made for the request, one per machine: a machine carries out at most one change for an id.",
+          "$ref": "#/$defs/ulid"
+        },
+        "machine": { "$ref": "#/$defs/machine" },
+        "workspace": {
+          "description": "The workspace's name now.",
+          "$ref": "#/$defs/workspaceName"
+        },
+        "action": { "type": "string", "enum": ["rename", "delete"] },
+        "name": {
+          "description": "With `rename`: its new name.",
+          "$ref": "#/$defs/workspaceName"
+        },
+        "signed": {
+          "description": "The command a device paired with the machine signed for it (`signedCommand`, kind `workspace_change`: `workspace`, `action`, `name`, null for a delete).",
+          "$ref": "#/$defs/signedCommand"
+        },
+        "status": { "$ref": "#/$defs/workspaceChangeStatus" },
+        "failure": { "$ref": "#/$defs/workspaceChangeFailure" },
+        "created_at": { "$ref": "#/$defs/timestampMs" },
+        "status_at": {
+          "description": "When its status last changed (`created_at` while pending).",
+          "$ref": "#/$defs/timestampMs"
+        }
+      },
+      "allOf": [
+        {
+          "oneOf": [
+            { "required": ["name"], "properties": { "action": { "const": "rename" }, "name": { "$ref": "#/$defs/workspaceName" } } },
+            { "properties": { "action": { "const": "delete" }, "name": false } }
+          ]
+        },
+        {
+          "oneOf": [
+            { "properties": { "status": { "enum": ["pending", "done", "expired"] }, "failure": false } },
+            {
+              "required": ["failure"],
+              "properties": {
+                "status": { "const": "failed" },
+                "failure": { "$ref": "#/$defs/workspaceChangeFailure" }
+              }
+            }
+          ]
+        }
+      ]
+    },
     "heartbeatSchedule": {
       "description": "When a heartbeat runs, in its machine's local time: every `minutes` (counted from the last due time), daily at `at`, or on the weekdays `days` at `at`. Readers take a `kind` they don't know as no schedule.",
       "type": "object",

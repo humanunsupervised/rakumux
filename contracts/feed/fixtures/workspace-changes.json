@@ -1,0 +1,205 @@
+{
+  "change": {
+    "valid": [
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "workspace": "Launch",
+        "created_at": 1761220000000,
+        "status_at": 1761220000000,
+        "action": "rename",
+        "name": "Launch day",
+        "status": "pending"
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "workspace": "Launch",
+        "created_at": 1761220000000,
+        "status_at": 1761220000000,
+        "action": "delete",
+        "status": "pending"
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "workspace": "Launch",
+        "created_at": 1761220000000,
+        "status_at": 1761220002000,
+        "action": "rename",
+        "name": "Ship",
+        "status": "done"
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "workspace": "Launch",
+        "created_at": 1761220000000,
+        "status_at": 1761220600000,
+        "action": "delete",
+        "status": "expired"
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "workspace": "Launch",
+        "created_at": 1761220000000,
+        "status_at": 1761220002000,
+        "action": "rename",
+        "name": "Research",
+        "status": "failed",
+        "failure": "name_taken"
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "workspace": "Launch",
+        "created_at": 1761220000000,
+        "status_at": 1761220002000,
+        "action": "delete",
+        "status": "failed",
+        "failure": "unsigned"
+      }
+    ],
+    "invalid": [
+      {
+        "note": "a rename without its new name",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "workspace": "Launch",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "action": "rename",
+          "status": "pending"
+        }
+      },
+      {
+        "note": "a delete with a name",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "workspace": "Launch",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "action": "delete",
+          "name": "x",
+          "status": "pending"
+        }
+      },
+      {
+        "note": "another action",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "workspace": "Launch",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "action": "merge",
+          "status": "pending"
+        }
+      },
+      {
+        "note": "a new name with white space at its end",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "workspace": "Launch",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "action": "rename",
+          "name": "Ship ",
+          "status": "pending"
+        }
+      },
+      {
+        "note": "a workspace name of two lines",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "workspace": "a\nb",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "action": "delete",
+          "status": "pending"
+        }
+      },
+      {
+        "note": "failed without why",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "workspace": "Launch",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "action": "delete",
+          "status": "failed"
+        }
+      },
+      {
+        "note": "a failure while pending",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "workspace": "Launch",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "action": "delete",
+          "status": "pending",
+          "failure": "refused"
+        }
+      },
+      {
+        "note": "a path",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "workspace": "Launch",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "action": "delete",
+          "status": "pending",
+          "cwd": "/home"
+        }
+      }
+    ]
+  },
+  "status": {
+    "valid": [
+      {
+        "version": 1,
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "status": "done"
+      },
+      {
+        "version": 1,
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "status": "failed",
+        "failure": "not_found"
+      }
+    ],
+    "invalid": [
+      {
+        "note": "done with a failure",
+        "value": {
+          "version": 1,
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "status": "done",
+          "failure": "refused"
+        }
+      },
+      {
+        "note": "failed without why",
+        "value": {
+          "version": 1,
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "status": "failed"
+        }
+      }
+    ]
+  }
+}
