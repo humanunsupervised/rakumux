@@ -1331,7 +1331,7 @@ fn own<S, A, C>(
                 );
             }
             Message::Workspaces(result) => {
-                workspaces_read.reading = false;
+                workspaces_read.answered(work, now);
                 // An older daemon after all: the list stops saying it has them.
                 match result {
                     Ok(list) => sessions.set_workspace_list(list),
@@ -2160,17 +2160,30 @@ fn follow_pairings<S, A, C>(
 struct WorkspaceRead {
     next: Duration,
     reading: bool,
+    /// Asked while a read was out: that read may have started before what
+    /// changed them, so they're read again once it answers.
+    again: bool,
 }
 
 impl WorkspaceRead {
-    /// Read them now, unless a read is out already (its answer comes soon).
+    /// Read them now, or once the read that's out answers.
     fn ask<A, C>(&mut self, work: &Workers<A, C>, now: Duration) {
         if self.reading {
+            self.again = true;
             return;
         }
         self.reading = true;
+        self.again = false;
         self.next = now + WORKSPACES_EVERY;
         let _ = work.send(Work::ReadWorkspaces);
+    }
+
+    /// The read that was out answered: read again if asked meanwhile.
+    fn answered<A, C>(&mut self, work: &Workers<A, C>, now: Duration) {
+        self.reading = false;
+        if std::mem::take(&mut self.again) {
+            self.ask(work, now);
+        }
     }
 }
 
