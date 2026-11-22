@@ -177,6 +177,7 @@ pub struct StatusRefresher<S, A, C = SystemClock> {
     paired_devices: Option<std::path::PathBuf>,
     session_rename_state: Option<std::path::PathBuf>,
     session_move_state: Option<std::path::PathBuf>,
+    workspace_change_state: Option<std::path::PathBuf>,
     heartbeat_action_state: Option<std::path::PathBuf>,
     /// This Rakumux's version, which the session list says.
     version: Option<String>,
@@ -225,6 +226,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             paired_devices: None,
             session_rename_state: None,
             session_move_state: None,
+            workspace_change_state: None,
             heartbeat_action_state: None,
             version: None,
             machine: None,
@@ -344,6 +346,18 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     /// Where renames keep their state, if anywhere.
     pub(crate) fn session_rename_state(&self) -> Option<std::path::PathBuf> {
         self.session_rename_state.clone()
+    }
+
+    /// Keep which workspace changes asked for on rakumux.com were handled in
+    /// `path`.
+    pub fn with_workspace_change_state(mut self, path: std::path::PathBuf) -> Self {
+        self.workspace_change_state = Some(path);
+        self
+    }
+
+    /// Where workspace changes keep their state, if anywhere.
+    pub(crate) fn workspace_change_state(&self) -> Option<std::path::PathBuf> {
+        self.workspace_change_state.clone()
     }
 
     /// Where moves keep their state, if anywhere.

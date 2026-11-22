@@ -687,3 +687,27 @@ fn workspaces_go_by_name_while_the_daemon_has_them_and_rakumux_com_takes_them() 
         serde_json::json!(["Launch", "Research"])
     );
 }
+
+#[test]
+fn the_list_says_workspaces_edit_only_while_the_daemon_renames_workspaces() {
+    let mut sessions = on(&[view("01K89ZQ4D2F6H8J0K2M4N6P8R0")]);
+    sessions.set_workspaces(true);
+    let capabilities = |upload: &serde_json::Value| -> Vec<String> {
+        upload["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|name| name.as_str().unwrap().to_owned())
+            .collect()
+    };
+    let first = body(sessions.next_request(NOW, WALL));
+    assert!(!capabilities(&first).contains(&"workspaces.edit".to_owned()));
+    sessions.done(true, Ok(stored(false)), NOW);
+    sessions.set_workspace_edit(true);
+    let said = body(sessions.next_request(NOW + SETTLE, WALL));
+    assert!(capabilities(&said).contains(&"workspaces.edit".to_owned()));
+    sessions.done(true, Ok(stored(false)), NOW + SETTLE);
+    sessions.set_workspace_edit(false);
+    let unsaid = body(sessions.next_request(NOW + SETTLE * 2, WALL));
+    assert!(!capabilities(&unsaid).contains(&"workspaces.edit".to_owned()));
+}

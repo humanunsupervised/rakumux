@@ -40,6 +40,7 @@ use crate::feed::{
     SessionDeletionSync, SessionMessage, SessionMoveSync, SessionRenameSync, SessionSync, TurnRead,
     Uploads,
 };
+use crate::feed::{ChangeWork, WorkspaceChangeAction, WorkspaceChangeFailure, WorkspaceChangeSync};
 use crate::status::{ConsentRevision, ConsentSnapshot, FolderConsent, StatusStore};
 
 /// How often the owner rechecks jobs and plans refreshes.
@@ -155,6 +156,9 @@ struct DaemonFeatures {
     /// It has workspaces (capability `workspaces`): they're listed, and
     /// sessions moved between them, only then.
     workspaces: bool,
+    /// It renames workspaces (capability `workspaces.rename`): with
+    /// `workspaces`, they're renamed and deleted from rakumux.com only then.
+    workspaces_rename: bool,
 }
 
 impl DaemonFeatures {
@@ -172,6 +176,7 @@ impl DaemonFeatures {
             choices: has(session_core::api::CAPABILITY_CHOOSE),
             heartbeats: has(CAPABILITY_HEARTBEATS),
             workspaces: has(session_core::api::CAPABILITY_WORKSPACES),
+            workspaces_rename: has(session_core::api::CAPABILITY_WORKSPACES_RENAME),
         }
     }
 }
@@ -251,6 +256,11 @@ enum Message {
     SessionMoveReported(FeedCompletion),
     /// The daemon's workspaces, as read (or why not).
     Workspaces(Result<Vec<Workspace>, ErrorCode>),
+    /// The daemon renamed or deleted the workspace a request from
+    /// rakumux.com (its id) named, or didn't.
+    WorkspaceChanged(String, Result<(), WorkspaceChangeFailure>),
+    /// A workspace change's status report finished.
+    WorkspaceChangeReported(FeedCompletion),
     /// The daemon's heartbeats, as read (or why not).
     Heartbeats(Result<Vec<Heartbeat>, ErrorCode>),
     /// The heartbeats' upload finished.
@@ -345,6 +355,11 @@ enum Work<A, C> {
     MoveSession(String, SessionId, Option<String>),
     /// Report a move's status.
     SessionMoveReport(FeedJob<A, C>),
+    /// Rename or delete the workspace a request from rakumux.com (its id)
+    /// names.
+    ChangeWorkspace(String, String, WorkspaceChangeAction),
+    /// Report a workspace change's status.
+    WorkspaceChangeReport(FeedJob<A, C>),
     /// Ask the daemon for its workspaces.
     ReadWorkspaces,
     /// Ask the daemon for its heartbeats.
@@ -384,6 +399,7 @@ impl<A, C> Workers<A, C> {
             | Work::DeleteSession(..)
             | Work::RenameSession(..)
             | Work::MoveSession(..)
+            | Work::ChangeWorkspace(..)
             | Work::ReadWorkspaces
             | Work::ReadHeartbeats
             | Work::HeartbeatAct(..) => self.replies.send(work),
@@ -789,6 +805,11 @@ fn own<S, A, C>(
         .signing(guard.clone());
     let mut moves = SessionMoveSync::new(machine.clone(), refresher.session_move_state())
         .signing(guard.clone());
+    let mut workspace_changes =
+        WorkspaceChangeSync::new(machine.clone(), refresher.workspace_change_state())
+            .signing(guard.clone());
+    // The daemon renames and deletes workspaces (`workspaces.rename`).
+    let mut daemon_workspace_edit = false;
     // The daemon has workspaces (capability `workspaces`), and when they're
     // read next.
     let mut daemon_workspaces = false;
@@ -871,6 +892,13 @@ fn own<S, A, C>(
             follow_deletions(&refresher, &mut deletions, confirmed, work, now);
             follow_renames(&refresher, &mut renames, confirmed, work, now);
             follow_moves(&refresher, &mut moves, confirmed, work, now);
+            follow_workspace_changes(
+                &refresher,
+                &mut workspace_changes,
+                confirmed && daemon_workspace_edit,
+                work,
+                now,
+            );
             if daemon_workspaces && now >= workspaces_read.next {
                 workspaces_read.ask(work, now);
             }
@@ -963,6 +991,8 @@ fn own<S, A, C>(
                 daemon_heartbeats = daemon.heartbeats;
                 sessions.set_workspaces(daemon.workspaces);
                 daemon_workspaces = daemon.workspaces;
+                daemon_workspace_edit = daemon.workspaces && daemon.workspaces_rename;
+                sessions.set_workspace_edit(daemon_workspace_edit);
                 if daemon_workspaces {
                     workspaces_read.ask(work, now);
                 }
@@ -1061,6 +1091,7 @@ fn own<S, A, C>(
                         &mut pairings,
                         &mut renames,
                         &mut moves,
+                        &mut workspace_changes,
                         &mut heartbeats,
                         &mut heartbeat_actions,
                         now,
@@ -1104,6 +1135,7 @@ fn own<S, A, C>(
                     pairings.read(current, &read.pairings, crate::signing::now_ms());
                     renames.read(current, std::mem::take(&mut read.session_renames));
                     moves.read(current, std::mem::take(&mut read.session_moves));
+                    workspace_changes.read(current, std::mem::take(&mut read.workspace_changes));
                     heartbeat_actions.read(current, std::mem::take(&mut read.heartbeat_actions));
                     // So does the newest release.
                     if let Some(release) = read.release.take().filter(|_| current) {
@@ -1132,6 +1164,7 @@ fn own<S, A, C>(
                         &mut pairings,
                         &mut renames,
                         &mut moves,
+                        &mut workspace_changes,
                         &mut heartbeats,
                         &mut heartbeat_actions,
                         now,
@@ -1156,6 +1189,13 @@ fn own<S, A, C>(
                 follow_deletions(&refresher, &mut deletions, sessions.confirmed(), work, now);
                 follow_renames(&refresher, &mut renames, sessions.confirmed(), work, now);
                 follow_moves(&refresher, &mut moves, sessions.confirmed(), work, now);
+                follow_workspace_changes(
+                    &refresher,
+                    &mut workspace_changes,
+                    sessions.confirmed() && daemon_workspace_edit,
+                    work,
+                    now,
+                );
                 follow_heartbeat_actions(
                     &refresher,
                     &mut heartbeat_actions,
@@ -1261,6 +1301,35 @@ fn own<S, A, C>(
                 moves.reported(current, outcome, now);
                 follow_moves(&refresher, &mut moves, sessions.confirmed(), work, now);
             }
+            Message::WorkspaceChanged(id, result) => {
+                workspace_changes.changed(&id, result);
+                // Its name changed, or it's gone: read them at once.
+                if daemon_workspaces {
+                    workspaces_read.ask(work, now);
+                }
+                follow_workspace_changes(
+                    &refresher,
+                    &mut workspace_changes,
+                    sessions.confirmed() && daemon_workspace_edit,
+                    work,
+                    now,
+                );
+            }
+            Message::WorkspaceChangeReported(completion) => {
+                let current = refresher.is_current(completion.revision);
+                let outcome = completion.outcome.and_then(|result| match result {
+                    FeedResult::WorkspaceChangeReported => Ok(()),
+                    _ => Err(FeedFailure::Invalid),
+                });
+                workspace_changes.reported(current, outcome, now);
+                follow_workspace_changes(
+                    &refresher,
+                    &mut workspace_changes,
+                    sessions.confirmed() && daemon_workspace_edit,
+                    work,
+                    now,
+                );
+            }
             Message::Workspaces(result) => {
                 workspaces_read.reading = false;
                 // An older daemon after all: the list stops saying it has them.
@@ -1268,7 +1337,9 @@ fn own<S, A, C>(
                     Ok(list) => sessions.set_workspace_list(list),
                     Err(ErrorCode::Unsupported) => {
                         daemon_workspaces = false;
+                        daemon_workspace_edit = false;
                         sessions.set_workspaces(false);
+                        sessions.set_workspace_edit(false);
                     }
                     Err(_) => {}
                 }
@@ -1443,6 +1514,7 @@ fn own<S, A, C>(
                         &mut pairings,
                         &mut renames,
                         &mut moves,
+                        &mut workspace_changes,
                         &mut heartbeats,
                         &mut heartbeat_actions,
                         now,
@@ -1468,6 +1540,7 @@ fn own<S, A, C>(
                         &mut pairings,
                         &mut renames,
                         &mut moves,
+                        &mut workspace_changes,
                         &mut heartbeats,
                         &mut heartbeat_actions,
                         now,
@@ -1843,6 +1916,7 @@ fn rename(
     pairings: &mut PairingSync,
     renames: &mut SessionRenameSync,
     moves: &mut SessionMoveSync,
+    workspace_changes: &mut WorkspaceChangeSync,
     heartbeats: &mut HeartbeatSync,
     heartbeat_actions: &mut HeartbeatActionSync,
     now: Duration,
@@ -1859,6 +1933,7 @@ fn rename(
     pairings.rename(machine.to_owned());
     renames.rename(machine.to_owned());
     moves.rename(machine.to_owned());
+    workspace_changes.rename(machine.to_owned());
     heartbeats.rename(machine.to_owned(), now);
     heartbeat_actions.rename(machine.to_owned());
 }
@@ -2133,6 +2208,47 @@ fn follow_moves<S, A, C>(
                 }
                 None => {
                     moves.reported(false, Err(FeedFailure::Unauthorized), now);
+                    return;
+                }
+            },
+            None => return,
+        }
+    }
+}
+
+/// Start what workspaces asked on rakumux.com to be renamed or deleted need
+/// next: carry out one (or decide it can't be), then report. Only while
+/// signed in with the account's feed on, rakumux.com `allowed` it (this
+/// machine's name confirmed) and the daemon renames workspaces.
+fn follow_workspace_changes<S, A, C>(
+    refresher: &StatusRefresher<S, A, C>,
+    changes: &mut WorkspaceChangeSync,
+    allowed: bool,
+    work: &Workers<A, C>,
+    now: Duration,
+) where
+    S: StatusStore,
+    A: CredentialStore + 'static,
+    C: WallClock + 'static,
+{
+    let enabled = refresher.account().is_some() && refresher.feed_switch() == Some(true) && allowed;
+    changes.set_enabled(enabled, now);
+    // One change and one report out at a time: a few rounds at most.
+    for _ in 0..4 {
+        match changes.next_work(now) {
+            Some(ChangeWork::Change {
+                id,
+                workspace,
+                action,
+            }) => {
+                let _ = work.send(Work::ChangeWorkspace(id, workspace, action));
+            }
+            Some(ChangeWork::Report(request)) => match refresher.feed_job(request) {
+                Some(job) => {
+                    let _ = work.send(Work::WorkspaceChangeReport(job));
+                }
+                None => {
+                    changes.reported(false, Err(FeedFailure::Unauthorized), now);
                     return;
                 }
             },
@@ -2703,6 +2819,20 @@ where
                 let result =
                     crate::feed::carry_out_session_move(api, &session, workspace.as_deref());
                 Message::SessionMoved(id, result)
+            }
+            Ok(Work::ChangeWorkspace(id, workspace, action)) => {
+                let result = crate::feed::carry_out_workspace_change(api, &workspace, &action);
+                Message::WorkspaceChanged(id, result)
+            }
+            Ok(Work::WorkspaceChangeReport(job)) => {
+                let revision = job.revision;
+                match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
+                    Ok(completion) => Message::WorkspaceChangeReported(completion),
+                    Err(_) => Message::WorkspaceChangeReported(FeedCompletion {
+                        revision,
+                        outcome: Err(FeedFailure::Unavailable(None)),
+                    }),
+                }
             }
             Ok(Work::ReadWorkspaces) => {
                 Message::Workspaces(api.workspaces().map_err(|error| error.code))

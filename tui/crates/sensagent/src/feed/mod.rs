@@ -37,6 +37,7 @@ mod turn;
 mod updates;
 mod uploads;
 mod wire;
+mod workspace_changes;
 
 pub(crate) use agents::feed_agent;
 pub use cache::{
@@ -73,6 +74,10 @@ pub use turn::{FeedTurn, FeedTurnStatus};
 pub(crate) use updates::is_version;
 pub(crate) use uploads::{fetch, Uploads, CLEAN_EVERY};
 pub use wire::FeedFailure;
+pub(crate) use workspace_changes::{
+    carry_out as carry_out_workspace_change, ChangeAction as WorkspaceChangeAction,
+    ChangeFailure as WorkspaceChangeFailure, ChangeWork, WorkspaceChangeSync, WORKSPACES_EDIT,
+};
 
 /// Whether `id` is a feed entry's: a ULID in Crockford base32 capitals.
 pub fn is_entry_id(id: &str) -> bool {

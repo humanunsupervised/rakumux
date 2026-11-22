@@ -531,6 +531,14 @@ impl SessionSync {
         self.set_capability(super::WORKSPACES, supported);
     }
 
+    /// Whether the daemon renames and deletes workspaces (capabilities
+    /// `workspaces` and `workspaces.rename`): the list says
+    /// `workspaces.edit` only then, so rakumux.com asks changes only of a
+    /// machine that carries them out.
+    pub fn set_workspace_edit(&mut self, supported: bool) {
+        self.set_capability(super::WORKSPACES_EDIT, supported);
+    }
+
     /// The daemon's workspaces now, oldest first: their names go with the
     /// list (to a cloud that takes them), sent again when they change.
     pub fn set_workspace_list(&mut self, workspaces: Vec<Workspace>) {

@@ -153,6 +153,9 @@ pub(crate) enum FeedRequest {
     SessionRenameStatus { body: Vec<u8> },
     /// Say whether a session rakumux.com asked to move was moved, as `body`.
     SessionMoveStatus { body: Vec<u8> },
+    /// Say whether a workspace rakumux.com asked to rename or delete was, as
+    /// `body`.
+    WorkspaceChangeStatus { body: Vec<u8> },
     /// Upload this machine's whole list of heartbeats, as `body`.
     Heartbeats { body: Vec<u8> },
     /// Say how a heartbeat action asked for on rakumux.com went, as `body`.
@@ -1206,6 +1209,10 @@ struct WireReplies {
     /// (`session_moves`), read row by row.
     #[serde(default)]
     session_moves: Option<serde_json::Value>,
+    /// Workspaces asked of this machine to rename or delete
+    /// (`workspace_changes`), read row by row.
+    #[serde(default)]
+    workspace_changes: Option<serde_json::Value>,
     /// Heartbeat actions asked of this machine (`heartbeat_actions`), read row by row.
     #[serde(default)]
     heartbeat_actions: Option<serde_json::Value>,
@@ -1245,6 +1252,8 @@ pub(crate) struct RepliesRead {
     pub session_renames: Vec<super::session_renames::RenameAsk>,
     /// The moves pending for this machine, when the read brought them.
     pub session_moves: Vec<super::session_moves::MoveAsk>,
+    /// The workspace changes pending for this machine, when the read brought them.
+    pub workspace_changes: Vec<super::workspace_changes::ChangeAsk>,
     /// The heartbeat actions pending for this machine, when the read brought them.
     pub heartbeat_actions: Vec<super::heartbeat_actions::ActionAsk>,
     /// The newest stable release rakumux.com knows of, when it says.
@@ -1315,6 +1324,7 @@ pub(crate) fn replies(reply: &FeedHttpReply) -> Result<RepliesRead, FeedFailure>
         session_deletions: super::session_deletions::asks(page.session_deletions),
         session_renames: super::session_renames::asks(page.session_renames),
         session_moves: super::session_moves::asks(page.session_moves),
+        workspace_changes: super::workspace_changes::asks(page.workspace_changes),
         heartbeat_actions: super::heartbeat_actions::asks(page.heartbeat_actions),
         release: super::updates::release(page.release),
     })

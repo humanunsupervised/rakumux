@@ -321,6 +321,7 @@ impl FeedSync {
                 | FeedResult::SessionDeletionReported
                 | FeedResult::SessionRenameReported
                 | FeedResult::SessionMoveReported
+                | FeedResult::WorkspaceChangeReported
                 | FeedResult::HeartbeatsStored
                 | FeedResult::HeartbeatActionReported
                 | FeedResult::PairingOpened { .. }

@@ -488,6 +488,133 @@ fn sessions_move_between_workspaces_asked_on_rakumux_com_only_when_signed() {
     daemon.stop();
 }
 
+/// Workspaces renamed and deleted on rakumux.com: the list says
+/// `workspaces.edit` once the daemon renames workspaces, and the machine
+/// carries out each change a paired device signed, the workspace found by its
+/// name ignoring case; a rename to a name another has fails `name_taken`, a
+/// delete leaves its sessions in none, and an unsigned change or one for a
+/// workspace the machine hasn't is refused. Its next list carries the names.
+#[test]
+fn workspaces_are_renamed_and_deleted_from_rakumux_com_only_when_signed() {
+    let world = World::new();
+    world.cloud.state().accepts = vec!["workspaces"];
+    let mut daemon = world.start_daemon();
+    let client = world.client();
+    let launch = client.workspace_create("Launch").unwrap();
+    client.workspace_create("Research").unwrap();
+    let lead = client
+        .create(CreateSession {
+            scope: Some(ScopeRoot::resolve(&world.work).unwrap()),
+            name: Some("lead".into()),
+            cwd: None,
+            argv: Some(vec!["/bin/sleep".into(), "600".into()]),
+            startup_cmds: Vec::new(),
+            env: Vec::new(),
+            cols: 80,
+            rows: 24,
+            machine: None,
+            prefill: None,
+            first_input: None,
+            workspace: Some(launch.id.clone()),
+        })
+        .unwrap();
+    let mut service = world.start_service(1);
+    let workspaces = || -> Value {
+        let state = world.cloud.state();
+        state
+            .sessions
+            .as_ref()
+            .map_or(Value::Null, |list| list["workspaces"].clone())
+    };
+    let lead_listed = || -> Option<Value> {
+        let state = world.cloud.state();
+        state.sessions.as_ref().and_then(|list| {
+            list["sessions"]
+                .as_array()?
+                .iter()
+                .find(|s| s["id"] == lead.id.as_str())
+                .cloned()
+        })
+    };
+    world.wait("the session list to say workspaces.edit", || {
+        world.cloud.state().says("workspaces.edit") && workspaces() == json!(["Launch", "Research"])
+    });
+    let reported = |id: &str| -> Option<Value> {
+        world
+            .cloud
+            .state()
+            .workspace_change_reports
+            .iter()
+            .find(|report| report["id"] == id)
+            .cloned()
+    };
+    let names = || -> Vec<String> {
+        client
+            .workspaces()
+            .unwrap()
+            .into_iter()
+            .map(|w| w.name)
+            .collect()
+    };
+
+    // Renamed, named in another case; its session stays in it.
+    let renamed = world
+        .cloud
+        .ask_workspace_change(MACHINE, "launch", Some("Ship"), true);
+    world.wait("the rename reported", || reported(&renamed).is_some());
+    assert_eq!(
+        reported(&renamed).unwrap()["status"],
+        "done",
+        "{}",
+        world.diagnostics()
+    );
+    assert_eq!(names(), ["Ship", "Research"]);
+    assert_eq!(
+        client.get(&lead.id).unwrap().workspace,
+        Some(launch.id.clone())
+    );
+    world.wait("the session list to carry the new name", || {
+        workspaces() == json!(["Ship", "Research"])
+            && lead_listed().is_some_and(|s| s["workspace"] == "Ship")
+    });
+
+    // A name another has, an unsigned change and a workspace it hasn't.
+    let taken = world
+        .cloud
+        .ask_workspace_change(MACHINE, "Ship", Some("research"), true);
+    let unsigned = world
+        .cloud
+        .ask_workspace_change(MACHINE, "Ship", None, false);
+    let missing = world
+        .cloud
+        .ask_workspace_change(MACHINE, "Gone", None, true);
+    world.wait("the three changes reported", || {
+        [&taken, &unsigned, &missing]
+            .iter()
+            .all(|id| reported(id).is_some())
+    });
+    assert_eq!(reported(&taken).unwrap()["failure"], "name_taken");
+    assert_eq!(reported(&unsigned).unwrap()["failure"], "unsigned");
+    assert_eq!(reported(&missing).unwrap()["failure"], "not_found");
+    assert_eq!(names(), ["Ship", "Research"]);
+
+    // Deleted: its session is in none.
+    let deleted = world
+        .cloud
+        .ask_workspace_change(MACHINE, "Ship", None, true);
+    world.wait("the delete reported", || reported(&deleted).is_some());
+    assert_eq!(reported(&deleted).unwrap()["status"], "done");
+    assert_eq!(names(), ["Research"]);
+    assert_eq!(client.get(&lead.id).unwrap().workspace, None);
+    world.wait("the session list to carry the delete", || {
+        workspaces() == json!(["Research"])
+            && lead_listed().is_some_and(|s| s.get("workspace").is_none())
+    });
+    service.stop();
+    let _ = client.shutdown();
+    daemon.stop();
+}
+
 /// A machine updates only from itself: it never says `remote_update`, and an
 /// update rakumux.com asks of it anyway (an older rakumux.com, or one someone
 /// else changed) is never installed or even answered, while what else the

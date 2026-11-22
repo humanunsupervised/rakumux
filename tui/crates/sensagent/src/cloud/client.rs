@@ -33,6 +33,7 @@ const FEED_NEW_SESSION_STATUS_PATH: &str = "/api/v1/feed/new-sessions/status";
 const FEED_SESSION_DELETION_STATUS_PATH: &str = "/api/v1/feed/session-deletions/status";
 const FEED_SESSION_RENAME_STATUS_PATH: &str = "/api/v1/feed/session-renames/status";
 const FEED_SESSION_MOVE_STATUS_PATH: &str = "/api/v1/feed/session-moves/status";
+const FEED_WORKSPACE_CHANGE_STATUS_PATH: &str = "/api/v1/feed/workspace-changes/status";
 const FEED_HEARTBEATS_PATH: &str = "/api/v1/feed/heartbeats";
 const FEED_HEARTBEAT_ACTION_STATUS_PATH: &str = "/api/v1/feed/heartbeat-actions/status";
 const FEED_PAIRINGS_PATH: &str = "/api/v1/feed/pairings";
@@ -72,6 +73,7 @@ pub struct CloudAIConfig {
     feed_session_deletion_status: Url,
     feed_session_rename_status: Url,
     feed_session_move_status: Url,
+    feed_workspace_change_status: Url,
     feed_heartbeats: Url,
     feed_heartbeat_action_status: Url,
     feed_pairings: Url,
@@ -182,6 +184,9 @@ pub(crate) enum FeedHttp<'a> {
     SessionRenameStatus(&'a [u8]),
     /// `POST /api/v1/feed/session-moves/status` with a move's status.
     SessionMoveStatus(&'a [u8]),
+    /// `POST /api/v1/feed/workspace-changes/status` with a workspace change's
+    /// status.
+    WorkspaceChangeStatus(&'a [u8]),
     /// `POST /api/v1/feed/heartbeats` with this machine's heartbeats.
     Heartbeats(&'a [u8]),
     /// `POST /api/v1/feed/heartbeat-actions/status` with a heartbeat action's status.
@@ -266,6 +271,7 @@ impl CloudAIConfig {
         let feed_session_deletion_status = path(FEED_SESSION_DELETION_STATUS_PATH);
         let feed_session_rename_status = path(FEED_SESSION_RENAME_STATUS_PATH);
         let feed_session_move_status = path(FEED_SESSION_MOVE_STATUS_PATH);
+        let feed_workspace_change_status = path(FEED_WORKSPACE_CHANGE_STATUS_PATH);
         let feed_heartbeats = path(FEED_HEARTBEATS_PATH);
         let feed_heartbeat_action_status = path(FEED_HEARTBEAT_ACTION_STATUS_PATH);
         let feed_pairings = path(FEED_PAIRINGS_PATH);
@@ -292,6 +298,7 @@ impl CloudAIConfig {
             feed_session_deletion_status,
             feed_session_rename_status,
             feed_session_move_status,
+            feed_workspace_change_status,
             feed_heartbeats,
             feed_heartbeat_action_status,
             feed_pairings,
@@ -533,6 +540,7 @@ impl CloudAIClient {
             | FeedHttp::SessionDeletionStatus(body)
             | FeedHttp::SessionRenameStatus(body)
             | FeedHttp::SessionMoveStatus(body)
+            | FeedHttp::WorkspaceChangeStatus(body)
             | FeedHttp::Heartbeats(body)
             | FeedHttp::HeartbeatActionStatus(body)
             | FeedHttp::PairingOpen(body)
@@ -548,6 +556,7 @@ impl CloudAIClient {
                     FeedHttp::SessionDeletionStatus(_) => &self.config.feed_session_deletion_status,
                     FeedHttp::SessionRenameStatus(_) => &self.config.feed_session_rename_status,
                     FeedHttp::SessionMoveStatus(_) => &self.config.feed_session_move_status,
+                    FeedHttp::WorkspaceChangeStatus(_) => &self.config.feed_workspace_change_status,
                     FeedHttp::Heartbeats(_) => &self.config.feed_heartbeats,
                     FeedHttp::HeartbeatActionStatus(_) => &self.config.feed_heartbeat_action_status,
                     FeedHttp::PairingOpen(_) => &self.config.feed_pairings,

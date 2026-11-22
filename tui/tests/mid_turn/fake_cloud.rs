@@ -193,6 +193,11 @@ fn sign_read(phone: &Phone, machine: &str, files: &HashMap<String, Vec<u8>>, rea
     sign("session_renames", "rename_session", &["session", "name"]);
     sign("session_moves", "move_session", &["session", "workspace"]);
     sign(
+        "workspace_changes",
+        "workspace_change",
+        &["workspace", "action", "name"],
+    );
+    sign(
         "heartbeat_actions",
         "heartbeat_action",
         &["heartbeat", "action"],
@@ -260,6 +265,10 @@ pub struct State {
     pub moves: Vec<Value>,
     /// Move status reports, as sent.
     pub move_reports: Vec<Value>,
+    /// Workspaces asked to be renamed or deleted (`workspaceChange`), as stored.
+    pub workspace_changes: Vec<Value>,
+    /// Workspace change status reports, as sent.
+    pub workspace_change_reports: Vec<Value>,
     /// What a session list's answer says the cloud takes (`accepts`).
     pub accepts: Vec<&'static str>,
     /// The latest heartbeats upload, as sent.
@@ -472,6 +481,32 @@ impl FakeCloud {
             asked["signed"] = Value::Null;
         }
         self.state().moves.push(asked);
+        id
+    }
+
+    /// Ask this machine to rename its workspace `workspace` to `name`, or to
+    /// delete it without one, as the website does; `signed` false leaves it
+    /// unsigned (`"signed": null`, never signed as served). The request's id.
+    #[allow(dead_code)]
+    pub fn ask_workspace_change(
+        &self,
+        machine: &str,
+        workspace: &str,
+        name: Option<&str>,
+        signed: bool,
+    ) -> String {
+        let id = ulid();
+        let at = now_ms();
+        let action = if name.is_some() { "rename" } else { "delete" };
+        let mut asked = json!({"id": id, "machine": machine, "workspace": workspace,
+            "action": action, "status": "pending", "created_at": at, "status_at": at});
+        if let Some(name) = name {
+            asked["name"] = json!(name);
+        }
+        if !signed {
+            asked["signed"] = Value::Null;
+        }
+        self.state().workspace_changes.push(asked);
         id
     }
 
@@ -769,6 +804,14 @@ impl Served {
                         .collect();
                     read["session_moves"] = json!(pending);
                 }
+                if state.says("workspaces.edit") {
+                    let pending: Vec<&Value> = state
+                        .workspace_changes
+                        .iter()
+                        .filter(|asked| asked["status"] == "pending")
+                        .collect();
+                    read["workspace_changes"] = json!(pending);
+                }
                 if state.says("rename_sessions") {
                     let pending: Vec<&Value> = state
                         .renames
@@ -852,6 +895,22 @@ impl Served {
                 let stored = stored.clone();
                 state.move_reports.push(body);
                 answer(200, json!({"version": 1, "session_move": stored}))
+            }
+            ("POST", "/api/v1/feed/workspace-changes/status") => {
+                let Some(stored) = state
+                    .workspace_changes
+                    .iter_mut()
+                    .find(|asked| asked["id"] == body["id"])
+                else {
+                    return error(404, "invalid_request");
+                };
+                stored["status"] = body["status"].clone();
+                if !body["failure"].is_null() {
+                    stored["failure"] = body["failure"].clone();
+                }
+                let stored = stored.clone();
+                state.workspace_change_reports.push(body);
+                answer(200, json!({"version": 1, "workspace_change": stored}))
             }
             ("POST", "/api/v1/feed/session-renames/status") => {
                 let Some(stored) = state
