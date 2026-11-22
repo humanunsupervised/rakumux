@@ -86,6 +86,15 @@ pub trait SessionApi: Send + Sync {
         let _ = id;
         Err(unsupported("workspaces"))
     }
+    /// Give workspace `id` another name.
+    fn workspace_rename(
+        &self,
+        id: &crate::ids::WorkspaceId,
+        name: &str,
+    ) -> Result<crate::workspace::Workspace> {
+        let _ = (id, name);
+        Err(unsupported("renaming workspaces"))
+    }
     /// Put session `id` in `workspace`, or in none.
     fn set_workspace(
         &self,
@@ -807,6 +816,20 @@ impl SessionApi for Client {
         }
     }
 
+    fn workspace_rename(
+        &self,
+        id: &crate::ids::WorkspaceId,
+        name: &str,
+    ) -> Result<crate::workspace::Workspace> {
+        match self.request(&Request::WorkspaceRename {
+            id: id.clone(),
+            name: name.to_owned(),
+        })? {
+            Response::Workspace { workspace } => Ok(workspace),
+            other => Err(unexpected(&other)),
+        }
+    }
+
     fn set_workspace(
         &self,
         id: &SessionId,
@@ -1454,6 +1477,7 @@ fn is_idempotent(request: &Request) -> bool {
             | Request::SessionPin { .. }
             | Request::SessionWorkspace { .. }
             | Request::WorkspaceList
+            | Request::WorkspaceRename { .. }
             | Request::SessionGet { .. }
             | Request::SessionRead(_)
             | Request::SessionTurn { .. }
@@ -2143,6 +2167,7 @@ mod tests {
                 | Request::WorkspaceList
                 | Request::WorkspaceCreate { .. }
                 | Request::WorkspaceDelete { .. }
+                | Request::WorkspaceRename { .. }
                 | Request::SessionWorkspace { .. }
                 | Request::ResourceUsage
                 | Request::TerminalOpen(_)

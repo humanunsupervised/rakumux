@@ -195,6 +195,13 @@ fn sessions_live_in_workspaces_move_between_them_and_keep_them_across_a_restart(
         ErrorCode::PermissionDenied
     );
     assert_eq!(
+        inside
+            .workspace_rename(&launch.id, "Mine")
+            .unwrap_err()
+            .code,
+        ErrorCode::PermissionDenied
+    );
+    assert_eq!(
         inside.set_workspace(&loose.id, None).unwrap_err().code,
         ErrorCode::PermissionDenied
     );
@@ -214,6 +221,27 @@ fn sessions_live_in_workspaces_move_between_them_and_keep_them_across_a_restart(
         Some("Research")
     );
     assert_eq!(workspace_of(&client, &child.id).as_deref(), Some("Launch"));
+
+    // Renamed: its sessions stay in it; a name another has is refused.
+    let renamed = client
+        .workspace_rename(&research.id, " Deep research ")
+        .unwrap();
+    assert_eq!(renamed.name, "Deep research");
+    assert_eq!(
+        workspace_of(&client, &loose.id).as_deref(),
+        Some("Deep research")
+    );
+    assert_eq!(
+        client
+            .workspace_rename(&research.id, "launch")
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        client.workspace_rename(&gone, "Other").unwrap_err().code,
+        ErrorCode::NotFound
+    );
 
     // Forgotten: its sessions are in none, and the others stay.
     client.workspace_delete(&research.id).unwrap();

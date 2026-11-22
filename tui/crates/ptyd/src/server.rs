@@ -84,6 +84,7 @@ pub const CAPABILITIES: &[&str] = &[
     session_core::api::CAPABILITY_HEARTBEATS,
     session_core::api::CAPABILITY_FIRST_INPUT,
     session_core::api::CAPABILITY_WORKSPACES,
+    session_core::api::CAPABILITY_WORKSPACES_RENAME,
     "attach",
     "subscribe",
     "list",
@@ -165,6 +166,7 @@ const KNOWN_OPS: &[&str] = &[
     "workspace_create",
     "workspace_delete",
     "session_workspace",
+    "workspace_rename",
 ];
 
 /// `kind` tags of `api::Auth`.
@@ -2136,6 +2138,10 @@ mod tests {
                 id: id.clone(),
                 workspace: None,
             },
+            Request::WorkspaceRename {
+                id: session_core::ids::WorkspaceId::generate(),
+                name: "Ship".into(),
+            },
         ];
         assert_eq!(requests.len(), KNOWN_OPS.len());
         // A new variant breaks this match: list it above and in KNOWN_OPS.
@@ -2184,6 +2190,7 @@ mod tests {
                 | Request::WorkspaceCreate { .. }
                 | Request::WorkspaceDelete { .. }
                 | Request::SessionWorkspace { .. }
+                | Request::WorkspaceRename { .. }
                 | Request::DaemonStatus
                 | Request::ResourceUsage
                 | Request::DaemonShutdown

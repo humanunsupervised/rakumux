@@ -659,6 +659,7 @@ impl Inner {
             Request::WorkspaceList => self.workspace_list(caller),
             Request::WorkspaceCreate { name } => self.workspace_create(caller, &name),
             Request::WorkspaceDelete { id } => self.workspace_delete(caller, &id),
+            Request::WorkspaceRename { id, name } => self.workspace_rename(caller, &id, &name),
             Request::SessionWorkspace { id, workspace } => {
                 self.session_workspace(caller, &id, workspace.as_ref())
             }

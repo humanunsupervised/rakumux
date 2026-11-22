@@ -70,6 +70,7 @@ pub(crate) enum Op {
     WorkspaceList,
     WorkspaceCreate,
     WorkspaceDelete,
+    WorkspaceRename,
     SessionWorkspace,
 }
 
@@ -117,6 +118,7 @@ impl Op {
             Op::WorkspaceList => "workspace.list",
             Op::WorkspaceCreate => "workspace.create",
             Op::WorkspaceDelete => "workspace.delete",
+            Op::WorkspaceRename => "workspace.rename",
             Op::SessionWorkspace => "session.workspace",
         }
     }
@@ -153,6 +155,7 @@ impl Op {
                 | Op::HeartbeatRun
                 | Op::WorkspaceCreate
                 | Op::WorkspaceDelete
+                | Op::WorkspaceRename
                 | Op::SessionWorkspace
         )
     }
@@ -190,7 +193,7 @@ pub(crate) fn authorize(
         // Binds conversations to the caller itself (the service checks).
         Op::Bind => Ok(()),
         Op::WorkspaceList => Ok(()),
-        Op::WorkspaceCreate | Op::WorkspaceDelete => {
+        Op::WorkspaceCreate | Op::WorkspaceDelete | Op::WorkspaceRename => {
             Err(denied(op, "workspaces are made and forgotten by the user"))
         }
         Op::Report | Op::Touch | Op::Rename | Op::Pin | Op::SessionWorkspace => match on_self {

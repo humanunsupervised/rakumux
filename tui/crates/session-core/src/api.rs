@@ -389,6 +389,13 @@ pub enum Request {
     WorkspaceDelete {
         id: WorkspaceId,
     },
+    /// User only (capability `workspaces.rename`): give a workspace another
+    /// name (trimmed; unique, else `invalid_argument`). Answered with
+    /// `Workspace`.
+    WorkspaceRename {
+        id: WorkspaceId,
+        name: String,
+    },
     /// User only: put a session in a workspace, or in none. Answered with
     /// `Session`.
     SessionWorkspace {
@@ -703,6 +710,9 @@ pub const CAPABILITY_HEARTBEATS: &str = "heartbeats";
 /// `workspace_*` requests, `session_workspace`, `SessionView::workspace` and
 /// `CreateSession::workspace`: named groups of sessions.
 pub const CAPABILITY_WORKSPACES: &str = "workspaces";
+
+/// `workspace_rename`: a workspace takes another name.
+pub const CAPABILITY_WORKSPACES_RENAME: &str = "workspaces.rename";
 
 /// `CreateSession::first_input`: text typed into a new session's agent once
 /// its prompt shows.

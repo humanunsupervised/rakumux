@@ -111,6 +111,46 @@ impl Inner {
         result.map(|_| Response::Ok)
     }
 
+    pub(super) fn workspace_rename(
+        &self,
+        caller: &Caller,
+        id: &WorkspaceId,
+        name: &str,
+    ) -> Result<Response, ApiError> {
+        let mut state = self.lock();
+        let result = policy::authorize(caller, Op::WorkspaceRename, None).and_then(|()| {
+            let index = state
+                .workspaces
+                .iter()
+                .position(|workspace| &workspace.id == id)
+                .ok_or_else(|| missing(id))?;
+            let name = checked_name(name)
+                .ok_or_else(|| invalid("a workspace's name is one line of 1 to 64 characters"))?;
+            let taken = state.workspaces.iter().any(|workspace| {
+                &workspace.id != id && workspace.name.to_lowercase() == name.to_lowercase()
+            });
+            if taken {
+                return Err(invalid(format!(
+                    "there is a workspace named {name} already"
+                )));
+            }
+            registry(&state.registry)?.rename_workspace(id, &name)?;
+            state.workspaces[index].name = name;
+            Ok(state.workspaces[index].clone())
+        });
+        let detail = result.as_ref().ok().map(|w| audit::clip(&w.name));
+        self.audit_outcome(
+            &state,
+            caller,
+            Op::WorkspaceRename,
+            None,
+            None,
+            detail,
+            &result,
+        );
+        result.map(|workspace| Response::Workspace { workspace })
+    }
+
     pub(super) fn session_workspace(
         &self,
         caller: &Caller,

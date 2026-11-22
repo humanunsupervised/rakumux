@@ -51,6 +51,16 @@ impl Registry {
         Ok(())
     }
 
+    /// Name workspace `id` `name`. Another with that name:
+    /// `RegistryError::NameTaken`.
+    pub fn rename_workspace(&self, id: &WorkspaceId, name: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE workspaces SET name = ?2 WHERE id = ?1",
+            params![id.as_str(), name],
+        )?;
+        Ok(())
+    }
+
     /// Forget a workspace: its sessions are in none from now on.
     pub fn delete_workspace(&self, id: &WorkspaceId) -> Result<()> {
         let tx = self.conn.unchecked_transaction()?;
