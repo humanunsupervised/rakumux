@@ -510,7 +510,7 @@ credentials, and no commands for a machine to run: a new session names a folder 
 an agent from a fixed list. Files attached to replies travel only through the attachment download, never in a
 JSON body, and only from rakumux.com to the reply's machine. Schemas reject such fields, not
 secrets inside the text: the status service sends replies and chats only while signed in, never
-a private session's, and masks keys, credential assignments and tokens in every text first
+a private session's, and masks keys, credential assignments, URLs' passwords and tokens in every text first
 (best effort).
 
 ## Conformance tests

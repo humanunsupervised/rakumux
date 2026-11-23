@@ -244,7 +244,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    take (the feed contract's agent list, `feed/agents.rs`: `claude-code`, `codex`, `opencode`,
    `copilot`, `cursor-agent`, `pi`, `grok`, `kimi`, `droid`, `amp`; never queued, so one can't
    hold back a batch; the same goes for chats, and the session list names such a session's
-   `program`), masks keys, credential assignments and tokens, and uploads them with the session's name, folder name and git
+   `program`), masks keys, credential assignments, URLs' passwords and tokens (`cloud/context.rs`: services' key formats, AWS, Slack, Google, Hugging Face and npm among them, and upper-case variables named for a secret, `DB_PASS`), and uploads them with the session's name, folder name and git
    branch (`POST /api/v1/feed/entries`, batches of up to 50,
    idempotent on the reply id). It reads the account's feed back (`GET /api/v1/feed?after=SEQ`;
    entries carry their turn's `prompt`, and every page the account's prompts still waiting for
@@ -257,7 +257,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    (`session_transcript`) after where it was last uploaded, at most every 5 s while it changes
    (every second while the replies read asks for 1 s: rakumux.com open, a reply waiting here, or
    the half minute after reply activity; `ReplySync::watched`),
-   its texts cleaned (escape sequences and controls removed, keys, credential assignments and
+   its texts cleaned (escape sequences and controls removed, keys, credential assignments, URLs' passwords and
    tokens masked) and uploaded as messages (`POST /api/v1/feed/messages`, ≤ 100 and ~2 MiB a
    request); where each session's chat is up to is kept in `sensagent/status/chats.json`
    (0600), so a restart carries on. Once a `sessions-stored` answer `accepts` `subagents`, chats

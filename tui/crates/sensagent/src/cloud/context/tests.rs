@@ -344,6 +344,22 @@ fn environment_assignments_bearers_and_known_token_formats_are_masked() {
             "rkma.v1.",
             "eyJzdWIiOiJ1c2VyXzEyMyJ9.c2lnbmF0dXJlLXNpZ25hdHVyZQ"
         ),
+        "DB_PASS=synthetic-db-pass",
+        "SMTP_PWD: synthetic-smtp",
+        "STRIPE_KEY=synthetic-stripe",
+        "SENTRY_DSN=https://synthetic@o1.ingest.sentry.io/1",
+        "aws_secret_access_key = synthetic/aws+secret",
+        concat!("AKIA", "ABCDEFGHIJKLMNOP"),
+        concat!("xoxb-", "1234567890-abcdefghijkl"),
+        concat!("hooks.slack.com/services/", "T0000/B0000/synthetic"),
+        concat!("AIza", "SyAbcdefghijklmnopqrstuvwxyz0123456"),
+        concat!("GOCSPX-", "abcdefghijklmnopqrstuvwx"),
+        concat!("hf_", "abcdefghijklmnopqrstuvwxyz123456"),
+        concat!("npm_", "abcdefghijklmnopqrstuvwxyz0123456789"),
+        concat!("glpat-", "abcdefghijklmnopqrst"),
+        concat!("pscale_pw_", "abcdefghijklmnopqrstuvwxyz"),
+        concat!("tskey-auth-", "abcdefghijklmnop"),
+        concat!("whsec_", "abcdefghijklmnopqrstuvwxyz"),
     ] {
         let input = format!("Checking synthetic updates\n{secret_line}");
         let request = build(false, Some(&input), None).unwrap();
@@ -354,6 +370,40 @@ fn environment_assignments_bearers_and_known_token_formats_are_masked() {
         assert!(text.contains("[REDACTED]"), "{secret_line}");
         assert!(!text.contains(secret_line));
         assert!(!text.contains("synthetic-json-token"));
+    }
+}
+
+#[test]
+fn a_urls_password_is_masked_and_the_rest_of_it_stays() {
+    for (input, expected) in [
+        (
+            concat!(
+                "DATABASE=postgres://app:",
+                "synthetic-pw@db.example.com:5432/main"
+            ),
+            "DATABASE=postgres://app:[REDACTED]@db.example.com:5432/main",
+        ),
+        (
+            concat!("redis://:", "synthetic-pw@cache:6379"),
+            "redis://:[REDACTED]@cache:6379",
+        ),
+    ] {
+        assert_eq!(crate::cloud::chat_text(input).unwrap(), expected);
+    }
+}
+
+#[test]
+fn code_and_urls_that_hold_no_secret_are_left_alone() {
+    for text in [
+        "primary_key: true",
+        "fetch(url, { credentials: \"include\" })",
+        "MAX_TOKENS=4096",
+        "https://example.com:8080/path?q=1",
+        "git@github.com:owner/repo.git",
+        "postgres://localhost:5432/main",
+        "export PATH=$HOME/bin:$PATH",
+    ] {
+        assert_eq!(crate::cloud::chat_text(text).unwrap(), text);
     }
 }
 

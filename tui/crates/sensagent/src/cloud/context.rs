@@ -27,6 +27,8 @@ struct Patterns {
     meaningful: Regex,
     private_key: Regex,
     assignment: Regex,
+    env_assignment: Regex,
+    url_password: Regex,
     token: Regex,
     unix_path: Regex,
     windows_path: Regex,
@@ -48,11 +50,39 @@ static PATTERNS: LazyLock<Result<Patterns, regex::Error>> = LazyLock::new(|| {
             r"(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|\z)",
         )?,
         assignment: Regex::new(
-            r#"(?i)(?:authorization[ \t]*:[ \t]*bearer[ \t]+[^\s"'<>]+|["']?\b(?:[a-z0-9]+_)*(?:api[_-]?key|access[_-]?token|refresh[_-]?token|session[_-]?token|client[_-]?secret|secret[_-]?key|password|passwd|secret|token)["']?[ \t]*[:=][ \t]*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+))"#,
+            r#"(?i)(?:authorization[ \t]*:[ \t]*bearer[ \t]+[^\s"'<>]+|["']?\b(?:[a-z0-9]+_)*(?:api[_-]?key|access[_-]?key|private[_-]?key|access[_-]?token|refresh[_-]?token|session[_-]?token|client[_-]?secret|secret[_-]?key|passphrase|password|passwd|secret|token)["']?[ \t]*[:=][ \t]*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+))"#,
         )?,
-        token: Regex::new(
-            r"\b(?:sk-(?:ant-)?[A-Za-z0-9_-]{20,}|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\b|\brkm_[A-Za-z0-9_-]{43}|\brkma\.v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
+        // Environment variables named for a secret, as `.env` files and shells
+        // write them: `DB_PASS=…`, `STRIPE_KEY: …`. Upper case only, so code
+        // such as `primary_key: true` keeps its values.
+        env_assignment: Regex::new(
+            r#"\b[A-Z][A-Z0-9_]*_(?:KEY|PASS|PWD|SECRETS|CREDENTIALS?|DSN|SALT)["']?[ \t]*[:=][ \t]*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)"#,
         )?,
+        // The password in a URL's user information: `postgres://user:…@host`.
+        url_password: Regex::new(
+            r#"(?i)\b[a-z][a-z0-9+.-]*://[^\s/?#@:"'<>]*:(?P<password>[^\s/?#@"'<>]+)@"#,
+        )?,
+        // Services' own key formats.
+        token: Regex::new(concat!(
+            r"\b(?:",
+            r"sk-(?:ant-)?[A-Za-z0-9_-]{20,}",
+            r"|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}|whsec_[A-Za-z0-9]{24,}",
+            r"|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}",
+            r"|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
+            r"|(?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}",
+            r"|xox[abposre]-[A-Za-z0-9-]{10,}|xapp-[0-9]-[A-Za-z0-9-]{10,}",
+            r"|AIza[0-9A-Za-z_-]{35}|GOCSPX-[A-Za-z0-9_-]{20,}|ya29\.[A-Za-z0-9_-]{20,}",
+            r"|hf_[A-Za-z0-9]{30,}|npm_[A-Za-z0-9]{36}",
+            r"|SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}",
+            r"|pscale_(?:tkn|pw|oauth)_[A-Za-z0-9_-]{20,}|tskey-[a-z]+-[A-Za-z0-9-]{10,}",
+            r"|do[por]_v1_[a-f0-9]{64}|sbp_[a-f0-9]{40}|shp(?:at|ss|ca|pa)_[a-fA-F0-9]{32}",
+            r"|gsk_[A-Za-z0-9]{20,}|xai-[A-Za-z0-9]{20,}|lin_api_[A-Za-z0-9]{20,}",
+            r"|dp\.(?:st|pt|ct|sa)\.[A-Za-z0-9_-]{20,}|SK[0-9a-f]{32}|key-[0-9a-f]{32}",
+            r")\b",
+            r"|\bFlyV1 [A-Za-z0-9_+/=,-]{20,}",
+            r"|hooks\.slack\.com/(?:services|workflows|triggers)/[A-Za-z0-9/_-]+",
+            r"|\brkm_[A-Za-z0-9_-]{43}|\brkma\.v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
+        ))?,
         unix_path: Regex::new(r#"(?m)(?P<before>^|[ \t\r\n"'=(])/(?:[^\s"'<>|]+)"#)?,
         windows_path: Regex::new(r#"(?im)(?P<before>^|[ \t\r\n"'=(])[a-z]:\\[^\s"'<>|]+"#)?,
     })
@@ -211,11 +241,7 @@ pub(crate) fn feed_text(input: &str) -> Option<String> {
     let patterns = PATTERNS.as_ref().ok()?;
     let clean = patterns.prohibited.replace_all(input, "");
     let mut mask = vec![0u8; clean.len()];
-    for pattern in [&patterns.private_key, &patterns.assignment, &patterns.token] {
-        for found in pattern.find_iter(&clean) {
-            mark(&mut mask, found.start(), found.end(), SECRET_MASK);
-        }
-    }
+    mark_secrets(&clean, &mut mask, patterns);
     let rendered = render_masks(&clean, &mask);
     let text = rendered.trim();
     patterns.meaningful.is_match(text).then(|| text.to_owned())
@@ -242,11 +268,7 @@ pub(crate) fn chat_text(input: &str) -> Option<String> {
     let plain = patterns.escapes.replace_all(input, "");
     let clean = patterns.prohibited.replace_all(&plain, "");
     let mut mask = vec![0u8; clean.len()];
-    for pattern in [&patterns.private_key, &patterns.assignment, &patterns.token] {
-        for found in pattern.find_iter(&clean) {
-            mark(&mut mask, found.start(), found.end(), SECRET_MASK);
-        }
-    }
+    mark_secrets(&clean, &mut mask, patterns);
     Some(render_masks(&clean, &mask))
 }
 
@@ -254,11 +276,7 @@ fn redact(input: &str, secrets: &[&SecretValue], patterns: &Patterns) -> String 
     // Mark original byte spans once. Rewriting text repeatedly can destroy key
     // delimiters or expand replacement labels when a short secret matches them.
     let mut mask = vec![0u8; input.len()];
-    for pattern in [&patterns.private_key, &patterns.assignment, &patterns.token] {
-        for found in pattern.find_iter(input) {
-            mark(&mut mask, found.start(), found.end(), SECRET_MASK);
-        }
-    }
+    mark_secrets(input, &mut mask, patterns);
     for secret in secrets {
         mark_known_secret(
             input.as_bytes(),
@@ -279,6 +297,27 @@ fn redact(input: &str, secrets: &[&SecretValue], patterns: &Patterns) -> String 
         }
     }
     render_masks(input, &mask)
+}
+
+/// Marks every secret the patterns know in `text`: private key blocks,
+/// credential assignments, environment variables named for a secret, a URL's
+/// password and services' key formats.
+fn mark_secrets(text: &str, mask: &mut [u8], patterns: &Patterns) {
+    for pattern in [
+        &patterns.private_key,
+        &patterns.assignment,
+        &patterns.env_assignment,
+        &patterns.token,
+    ] {
+        for found in pattern.find_iter(text) {
+            mark(mask, found.start(), found.end(), SECRET_MASK);
+        }
+    }
+    for found in patterns.url_password.captures_iter(text) {
+        if let Some(password) = found.name("password") {
+            mark(mask, password.start(), password.end(), SECRET_MASK);
+        }
+    }
 }
 
 fn mark_known_secret(input: &[u8], needle: &[u8], mask: &mut [u8]) {

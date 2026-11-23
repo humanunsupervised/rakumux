@@ -211,6 +211,18 @@ fn a_machines_warnings_and_errors_reach_the_log_viewer_masked() {
              2026-10-13T08:15:04.000Z INFO  [control] chatter\n"
         ),
     );
+    // Split so secret scanners don't take these synthetic keys for real ones.
+    append(
+        &ptyd_log,
+        concat!(
+            "2026-10-13T08:15:04.500Z WARN  [machines] retrying postgres://app:",
+            "synthetic-pw@db:5432/main with DB_PASS=synthetic-db-pass ",
+            "AKIA",
+            "ABCDEFGHIJKLMNOP xoxb-",
+            "1234567890-abcdefghijkl hf_",
+            "abcdefghijklmnopqrstuvwxyz123456\n"
+        ),
+    );
     append(
         &logs.join("api.log"),
         "2026-10-13T08:15:05Z WARN listener closed\n",
@@ -232,7 +244,7 @@ fn a_machines_warnings_and_errors_reach_the_log_viewer_masked() {
         "2026-10-13T08:15:08.000Z ERROR [keys] pressed s3cret\n",
     );
 
-    wait("every program's line", &mut || uploaded(&cloud).len() >= 5);
+    wait("every program's line", &mut || uploaded(&cloud).len() >= 6);
     let events = uploaded(&cloud);
     let find = |source: &str| {
         events
@@ -252,6 +264,14 @@ fn a_machines_warnings_and_errors_reach_the_log_viewer_masked() {
     assert_eq!(find("account_service")["level"], "warn");
 
     let text = serde_json::to_string(&events).unwrap();
+    let retrying = events
+        .iter()
+        .find(|event| event["component"] == "machines")
+        .unwrap_or_else(|| panic!("no retrying line in {events:?}"));
+    assert_eq!(
+        retrying["message"],
+        "retrying postgres://app:[REDACTED]@db:5432/main with [REDACTED] [REDACTED] [REDACTED] [REDACTED]"
+    );
     for absent in ["from before", "still not asked", "chatter", "s3cret"] {
         assert!(!text.contains(absent), "{absent} in {text}");
     }
