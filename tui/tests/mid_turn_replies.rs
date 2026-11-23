@@ -356,6 +356,71 @@ fn a_session_asked_on_rakumux_com_to_be_renamed_takes_the_name_once() {
     daemon.stop();
 }
 
+/// A slow rakumux.com keeps both shared workers busy (AI titles and chat
+/// uploads answered only after 12 s): what the replies read brings is still
+/// carried out within seconds, as the read has a worker of its own.
+#[test]
+fn requests_from_rakumux_com_are_read_while_titles_and_uploads_are_slow() {
+    let world = World::new();
+    let mut daemon = world.start_daemon();
+    let client = world.client();
+    let session = world.start_claude(&client);
+    let _other = client
+        .create(CreateSession {
+            scope: Some(ScopeRoot::resolve(&world.work).unwrap()),
+            name: Some("review".into()),
+            cwd: None,
+            argv: Some(vec!["/bin/sleep".into(), "600".into()]),
+            startup_cmds: Vec::new(),
+            env: Vec::new(),
+            cols: 80,
+            rows: 24,
+            machine: None,
+            prefill: None,
+            first_input: None,
+            workspace: None,
+        })
+        .unwrap();
+    {
+        let mut state = world.cloud.state();
+        state.summaries = true;
+        state.title = "Slow title".into();
+        state.stall = vec![
+            ("/api/v1/ai/session-status", Duration::from_secs(12)),
+            ("/api/v1/feed/messages", Duration::from_secs(12)),
+        ];
+    }
+    let mut service = world.start_service(1);
+    world.wait("the session list to say it renames sessions", || {
+        world.cloud.state().says("rename_sessions")
+    });
+    world.wait("two slow requests to hold both shared workers", || {
+        world.cloud.state().stalled >= 2
+    });
+    let asked = Instant::now();
+    let renamed = world
+        .cloud
+        .ask_rename(MACHINE, session.id.as_str(), "while slow");
+    world.wait("the rename reported", || {
+        world
+            .cloud
+            .state()
+            .rename_reports
+            .iter()
+            .any(|report| report["id"] == renamed.as_str())
+    });
+    let took = asked.elapsed();
+    assert!(
+        took < Duration::from_secs(6),
+        "the rename took {took:?} behind slow requests\n{}",
+        world.diagnostics()
+    );
+    assert_eq!(client.get(&session.id).unwrap().name, "while slow");
+    service.stop();
+    let _ = client.shutdown();
+    daemon.stop();
+}
+
 /// Workspaces on rakumux.com: once the cloud takes them, the session list
 /// names every workspace (an empty one too) and each session's; a signed move
 /// from rakumux.com puts a session in the workspace of that name (made on the

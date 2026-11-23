@@ -376,11 +376,15 @@ enum Work<A, C> {
 /// messages written in a TUI have a worker of their own, so they never wait
 /// behind the shared workers' file downloads (up to a minute each), AI
 /// descriptions and chat uploads: a TUI waits 30 s for its answer, and gives
-/// up on one the cloud then stores all the same. rtop's readings go there
-/// too, every couple of seconds while someone watches.
+/// up on one the cloud then stores all the same. Reading rakumux.com (the
+/// replies read, which brings replies and every request to carry out), the
+/// reports of what was done, pairing, the realtime token and rtop's readings
+/// have another, so a slow rakumux.com answering titles or uploads never holds
+/// back what the user asked there, and an rtop upload never holds back typing.
 struct Workers<A, C> {
     shared: Sender<Work<A, C>>,
     replies: Sender<Work<A, C>>,
+    polls: Sender<Work<A, C>>,
 }
 
 impl<A, C> Workers<A, C> {
@@ -393,8 +397,6 @@ impl<A, C> Workers<A, C> {
             | Work::WriteMessage(..)
             | Work::Enrol(..)
             | Work::Revoke(..)
-            | Work::ReadResources
-            | Work::ResourcesUpload(..)
             | Work::CreateSession(..)
             | Work::DeleteSession(..)
             | Work::RenameSession(..)
@@ -403,6 +405,17 @@ impl<A, C> Workers<A, C> {
             | Work::ReadWorkspaces
             | Work::ReadHeartbeats
             | Work::HeartbeatAct(..) => self.replies.send(work),
+            Work::ReplyRequest(..)
+            | Work::Realtime(..)
+            | Work::Pairing(..)
+            | Work::NewSessionReport(..)
+            | Work::SessionDeletionReport(..)
+            | Work::SessionRenameReport(..)
+            | Work::SessionMoveReport(..)
+            | Work::WorkspaceChangeReport(..)
+            | Work::HeartbeatActionReport(..)
+            | Work::ReadResources
+            | Work::ResourcesUpload(..) => self.polls.send(work),
             work => self.shared.send(work),
         }
     }
@@ -417,8 +430,8 @@ struct SignIn {
 
 /// Runs a [`StatusRefresher`] for one Rakumux home: an owner thread holding the
 /// coordinator, a thread following the daemon's sessions, two workers for
-/// captures and requests, and one for replies being typed in and written in a
-/// TUI ([`Workers`]). Not an installed service or an IPC boundary: the embedding
+/// captures and requests, one for replies being typed in and written in a
+/// TUI, and one reading rakumux.com and reporting back ([`Workers`]). Not an installed service or an IPC boundary: the embedding
 /// process owns it and must keep controls user-only. Dropping it stops the owner at
 /// once. The source thread and workers end on their own: a worker blocked in a request
 /// at the request's deadline, submitting nothing more.
@@ -470,7 +483,13 @@ impl RefreshRunner {
         let queue = Arc::new(Mutex::new(queue));
         let (replies, reply_queue) = mpsc::channel::<Work<A, C>>();
         let reply_queue = Mutex::new(reply_queue);
-        let work = Workers { shared, replies };
+        let (polls, poll_queue) = mpsc::channel::<Work<A, C>>();
+        let poll_queue = Mutex::new(poll_queue);
+        let work = Workers {
+            shared,
+            replies,
+            polls,
+        };
         let stop = Arc::new(AtomicBool::new(false));
         let mut runner = Self {
             messages: messages.clone(),
@@ -486,6 +505,10 @@ impl RefreshRunner {
         let (reply_api, reply_messages) = (api.clone(), messages.clone());
         spawn("rakumux-status-reply", move || {
             perform(&reply_queue, &*reply_api, &reply_messages)
+        })?;
+        let (poll_api, poll_messages) = (api.clone(), messages.clone());
+        spawn("rakumux-status-poll", move || {
+            perform(&poll_queue, &*poll_api, &poll_messages)
         })?;
         let owner_messages = messages.clone();
         runner.owner = Some(spawn("rakumux-status-owner", move || {

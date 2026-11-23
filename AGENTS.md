@@ -275,7 +275,10 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    its answer was lost isn't stored, or typed in, twice). Replies being typed in and those
    written in a TUI have a worker of their own (`rakumux-status-reply`), apart from the two that
    fetch files, make AI titles and upload chats, so a TUI's write doesn't wait behind them past
-   the 30 s it waits for its answer. While the feed is on the service reads the account's replies as they change
+   the 30 s it waits for its answer; reading rakumux.com (the replies read and every request it
+   brings), the reports of what was done, pairing, the realtime token and rtop's readings have
+   another (`rakumux-status-poll`), so a slow rakumux.com answering titles or uploads never holds
+   them back. While the feed is on the service reads the account's replies as they change
    (`GET /api/v1/feed/replies?after=SEQ&machine=NAME`, as soon as the answer's `poll_ms` says:
    every second while a reply this machine hasn't read yet waits for it or the user has the
    website open, and for

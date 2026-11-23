@@ -238,6 +238,10 @@ pub struct State {
     pub summaries: bool,
     /// The title each AI session-status request is answered with.
     pub title: String,
+    /// Paths (by prefix) answered only after this long, as a slow rakumux.com
+    /// would, and how many such answers have started waiting.
+    pub stall: Vec<(&'static str, std::time::Duration)>,
+    pub stalled: usize,
     /// The level the features read asks this machine's logs from (`logs`); none: not asked.
     pub logs_level: Option<&'static str>,
     /// Log uploads (`POST /api/v1/feed/logs`), as sent.
@@ -674,6 +678,19 @@ impl Served {
                 200,
                 json!({"version": 1, "access_token": token, "expires_at": now_ms() + 15 * 60_000}),
             );
+        }
+        let stall = {
+            let mut state = self.state();
+            let stall = state
+                .stall
+                .iter()
+                .find(|(prefix, _)| request.path.starts_with(prefix))
+                .map(|(_, wait)| *wait);
+            state.stalled += usize::from(stall.is_some());
+            stall
+        };
+        if let Some(wait) = stall {
+            std::thread::sleep(wait);
         }
         let mut state = self.state();
         if bearer != state.token || machine_id != Some(self.machine.id.as_str()) {
