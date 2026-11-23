@@ -132,7 +132,7 @@ impl WorkspaceTab {
     }
 }
 
-/// The footer's workspace tabs: All, each workspace, Unassigned.
+/// The footer's workspace tabs: All, each workspace, No workspace.
 fn workspace_tabs(app: &App) -> Vec<WorkspaceTab> {
     let shown = app.list.workspace_view();
     app.workspace_views()
@@ -1590,7 +1590,7 @@ mod tests {
         let tabs = [
             ("All", 3, false),
             ("Launch", 1, true),
-            ("Unassigned", 2, false),
+            ("No workspace", 2, false),
         ]
         .map(|(name, count, selected)| WorkspaceTab {
             name: name.to_owned(),
@@ -1600,7 +1600,7 @@ mod tests {
         for focus in [Focus::List, Focus::Session] {
             let (spans, targets) = fit_tabs(&tabs, "⊞", usize::MAX, focus);
             let line = Line::from(spans.clone());
-            assert_eq!(text(&line), " ⊞   All 3   Launch 1   Unassigned 2 ");
+            assert_eq!(text(&line), " ⊞   All 3   Launch 1   No workspace 2 ");
             // Every part but the gaps is on a button's background.
             let bg = |part: &str| {
                 spans
@@ -1610,7 +1610,7 @@ mod tests {
                     .unwrap_or_else(|| panic!("{part} has no background"))
             };
             assert_eq!(bg("⊞"), bg("All"));
-            assert_eq!(bg("All"), bg("Unassigned"));
+            assert_eq!(bg("All"), bg("No workspace"));
             assert_ne!(bg("Launch"), bg("All"), "the shown tab stands out");
             assert!(spans
                 .iter()
@@ -1625,14 +1625,14 @@ mod tests {
             let (spans, targets) = labelled(all + 11);
             assert_eq!(
                 text(&Line::from(spans.clone())),
-                "workspaces  ⊞   All 3   Launch 1   Unassigned 2 "
+                "workspaces  ⊞   All 3   Launch 1   No workspace 2 "
             );
             assert!(!spans[0].style.add_modifier.contains(Modifier::BOLD));
             assert_eq!(targets[2], (23, 10, Hit::WorkspaceTab(1)));
             let (spans, _) = labelled(all + 10);
             assert_eq!(
                 text(&Line::from(spans)),
-                " ⊞   All 3   Launch 1   Unassigned 2 "
+                " ⊞   All 3   Launch 1   No workspace 2 "
             );
             let (spans, _) = labelled(all - 1);
             assert!(!text(&Line::from(spans)).contains("workspaces"));

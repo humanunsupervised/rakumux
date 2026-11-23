@@ -136,7 +136,7 @@ fn sessions_move_between_workspaces_from_the_cli() {
         (vec![("Launch".into(), 1), ("Research".into(), 1)], 0)
     );
     let table = world.ok(&["workspace", "ls"]);
-    assert!(table.contains("Unassigned"), "{table}");
+    assert!(table.contains("No workspace"), "{table}");
     assert!(table.contains("Research"), "{table}");
     let ls: Value = serde_json::from_str(&world.ok(&["ls", "--json"])).unwrap();
     let launch = world.workspaces()["workspaces"][0]["id"]
@@ -154,7 +154,7 @@ fn sessions_move_between_workspaces_from_the_cli() {
 
     assert!(world
         .ok(&["workspace", "move", "web", "--none"])
-        .contains("Moved web to Unassigned"));
+        .contains("Moved web to No workspace"));
     assert!(world
         .ok(&["workspace", "rename", "research", "Deep research"])
         .contains("Renamed workspace Research to Deep research"));

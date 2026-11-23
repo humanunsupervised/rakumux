@@ -1,19 +1,19 @@
 //! Workspaces: named groups of this machine's sessions, which the daemon
 //! keeps (capability `workspaces`). The list shows every session (All, where
-//! a first start begins), the sessions in none (Unassigned), or one
+//! a first start begins), the sessions in none (No workspace), or one
 //! workspace's; the view shown is saved (`sessions.workspace`), so the next
 //! start shows it again. New sessions start in the workspace shown (in none
-//! under All and Unassigned).
+//! under All and No workspace).
 //!
-//! The footer's tabs (All, each workspace, Unassigned, each with its
+//! The footer's tabs (All, each workspace, No workspace, each with its
 //! sessions' count) switch the view; its `⊞`, `m` and Settings → Workspace
-//! open the workspaces modal: All, every workspace, Unassigned, then
+//! open the workspaces modal: All, every workspace, No workspace, then
 //! `+ Add new workspace`. Enter (or a click) shows the row under the cursor,
 //! or names a new workspace and shows it. `M` (Settings → Move to
 //! workspace) opens it for the selected session, without All: Enter moves
 //! the session there (into a new one from `+ New workspace`). `e` renames
 //! the workspace under the cursor (its name turns into a field), and `d`
-//! twice deletes it: its sessions are then Unassigned. The key line's
+//! twice deletes it: its sessions are then in none. The key line's
 //! `e rename` and `d delete` take a click too.
 
 use session_core::api::{ApiError, CAPABILITY_WORKSPACES};
@@ -65,6 +65,9 @@ pub struct WorkspacePicker {
     pub error: Option<String>,
 }
 
+/// What the sessions in no workspace are listed under.
+pub const NO_WORKSPACE: &str = "No workspace";
+
 impl App {
     /// The connected daemon keeps workspaces.
     pub fn has_workspaces(&self) -> bool {
@@ -73,7 +76,7 @@ impl App {
             .is_some_and(|capabilities| capabilities.iter().any(|c| c == CAPABILITY_WORKSPACES))
     }
 
-    /// What the view shown is called: `All`, `Unassigned` or the
+    /// What the view shown is called: `All`, `No workspace` or the
     /// workspace's name.
     pub fn workspace_name(&self) -> String {
         self.view_name(self.list.workspace_view())
@@ -83,15 +86,15 @@ impl App {
     pub fn view_name(&self, view: &WorkspaceView) -> String {
         match view {
             WorkspaceView::All => "All".to_owned(),
-            WorkspaceView::Unassigned => "Unassigned".to_owned(),
+            WorkspaceView::Unassigned => NO_WORKSPACE.to_owned(),
             WorkspaceView::In(id) => self.name_of(Some(id)),
         }
     }
 
-    /// The name of workspace `id`, or `Unassigned`.
+    /// The name of workspace `id`, or `No workspace`.
     fn name_of(&self, id: Option<&WorkspaceId>) -> String {
         id.and_then(|id| self.workspaces.iter().find(|w| &w.id == id))
-            .map_or_else(|| "Unassigned".to_owned(), |w| w.name.clone())
+            .map_or_else(|| NO_WORKSPACE.to_owned(), |w| w.name.clone())
     }
 
     /// A sync read the daemon's workspaces (`None`: it keeps none). A saved
@@ -107,7 +110,7 @@ impl App {
         }
     }
 
-    /// The views in the footer's order: All, every workspace, Unassigned.
+    /// The views in the footer's order: All, every workspace, No workspace.
     pub fn workspace_views(&self) -> Vec<WorkspaceView> {
         std::iter::once(WorkspaceView::All)
             .chain(
@@ -120,7 +123,7 @@ impl App {
     }
 
     /// The rows of the modal: All (to show only), every workspace,
-    /// Unassigned, then add one.
+    /// No workspace, then add one.
     pub fn workspace_rows(&self) -> Vec<WorkspaceRow> {
         let moving = matches!(
             &self.mode,
@@ -168,7 +171,7 @@ impl App {
     /// A click on the footer's tab `index` (`workspace_views`' order).
     pub fn click_workspace_tab(&mut self, index: usize) {
         if let Some(view) = self.workspace_views().into_iter().nth(index) {
-            self.show_view(view);
+            self.pick_view(view);
         }
     }
 
@@ -182,7 +185,7 @@ impl App {
             return;
         };
         if session.machine.is_some() {
-            self.set_status("A session on another machine stays Unassigned here.");
+            self.set_status("A session on another machine is in no workspace here.");
             return;
         }
         let purpose = WorkspacePurpose::Move {
@@ -321,7 +324,7 @@ impl App {
         };
         self.mode = AppMode::Normal;
         match (purpose, view) {
-            (WorkspacePurpose::Switch, view) => self.show_view(view),
+            (WorkspacePurpose::Switch, view) => self.pick_view(view),
             (WorkspacePurpose::Move { session, .. }, WorkspaceView::In(id)) => {
                 self.move_session_to(session, Some(id))
             }
@@ -481,7 +484,7 @@ impl App {
             self.workspaces.push(workspace);
         }
         match purpose {
-            WorkspacePurpose::Switch => self.show_view(WorkspaceView::In(id)),
+            WorkspacePurpose::Switch => self.pick_view(WorkspaceView::In(id)),
             WorkspacePurpose::Move { session, .. } => self.move_session_to(session, Some(id)),
         }
     }
@@ -508,9 +511,20 @@ impl App {
         self.set_status(format!("Deleted workspace {}", workspace.name));
     }
 
+    /// The user picked `view`: the left column shows its sessions.
+    pub fn pick_view(&mut self, view: WorkspaceView) {
+        self.show_sessions_tab();
+        self.show_view(view);
+    }
+
+    /// The workspace session `id` is in, shown or not.
+    pub fn workspace_of(&self, id: &SessionId) -> Option<&Workspace> {
+        let workspace = self.list.get_anywhere(id)?.workspace.as_ref()?;
+        self.workspaces.iter().find(|w| &w.id == workspace)
+    }
+
     /// Show `view`'s sessions, and keep it for the next start.
     pub fn show_view(&mut self, view: WorkspaceView) {
-        self.show_sessions_tab();
         let changed = self.list.workspace_view() != &view;
         self.list.set_workspace_view(view.clone());
         self.save_view();
@@ -562,7 +576,7 @@ impl App {
     }
 
     /// The workspace new sessions start in: the one shown (none under All
-    /// and Unassigned).
+    /// and No workspace).
     pub fn new_session_workspace(&self) -> Option<WorkspaceId> {
         match self.list.workspace_view() {
             WorkspaceView::In(id) if self.has_workspaces() => Some(id.clone()),
@@ -684,7 +698,7 @@ mod tests {
         assert_eq!(shown(&h), ["A", "B", "C"]);
         let line = footer(&mut h, 160);
         assert!(
-            line.starts_with(" workspaces  ⊞   All 3   Launch 1   Unassigned 2  "),
+            line.starts_with(" workspaces  ⊞   All 3   Launch 1   No workspace 2  "),
             "{line:?}"
         );
         assert!(!line.contains("session:"), "{line:?}");
@@ -709,7 +723,7 @@ mod tests {
         click(&mut h, Hit::WorkspaceTab(0));
         assert_eq!(shown(&h), ["A", "B", "C"]);
         assert_eq!(saved(&h), None);
-        // The ⊞ opens the modal: All, each workspace, Unassigned, then add.
+        // The ⊞ opens the modal: All, each workspace, No workspace, then add.
         footer(&mut h, 160);
         click(&mut h, Hit::FooterKey(FooterKey::Workspace));
         let screen = draw(&mut h, 160, 40);
@@ -718,8 +732,8 @@ mod tests {
                 .find(text)
                 .unwrap_or_else(|| panic!("{text}: {screen}"))
         };
-        assert!(at("✓ All") < at("Launch") && at("Launch") < at("Unassigned"));
-        assert!(at("Unassigned") < at("+ Add new workspace"));
+        assert!(at("✓ All") < at("Launch") && at("Launch") < at("No workspace"));
+        assert!(at("No workspace") < at("+ Add new workspace"));
         h.press(KeyCode::Down).await;
         h.press(KeyCode::Enter).await;
         assert_eq!(shown(&h), ["A"]);
@@ -741,10 +755,13 @@ mod tests {
         h.app.refresh();
         h.app.process_pending();
         let line = footer(&mut h, 160);
-        assert!(line.contains("Infrastructure 0   Unassigned 2"), "{line:?}");
+        assert!(
+            line.contains("Infrastructure 0   No workspace 2"),
+            "{line:?}"
+        );
         let narrow = footer(&mut h, 110);
         assert!(
-            narrow.contains("Unassigned 2"),
+            narrow.contains("No workspace 2"),
             "the one shown stays: {narrow:?}"
         );
         assert!(narrow.contains('+'), "{narrow:?}");
@@ -786,7 +803,7 @@ mod tests {
             Some(&research.id)
         );
         assert_eq!(shown(&h).len(), 1);
-        // Under All and Unassigned new sessions are in none.
+        // Under All and No workspace new sessions are in none.
         h.rakumux().await;
         h.app.show_view(WorkspaceView::All);
         assert_eq!(h.app.new_session_workspace(), None);
@@ -823,7 +840,7 @@ mod tests {
             !h.app.workspace_rows().contains(&WorkspaceRow::All),
             "no All when moving"
         );
-        assert_eq!(picker(&h).cursor, 1, "on Unassigned, where it is");
+        assert_eq!(picker(&h).cursor, 1, "on No workspace, where it is");
         h.press(KeyCode::Up).await;
         h.press(KeyCode::Enter).await;
         assert!(h.fake.calls().iter().any(|c| c == "set_workspace B W1"));
@@ -863,7 +880,7 @@ mod tests {
         assert_eq!(h.app.list.workspace_view(), &WorkspaceView::Unassigned);
         assert_eq!(shown(&h), ["A", "B", "C"]);
         assert_eq!(saved(&h).as_deref(), Some("unassigned"));
-        // All and Unassigned can't be deleted or renamed.
+        // All and No workspace can't be deleted or renamed.
         for row in [0, 1] {
             if let AppMode::Workspaces(picker) = &mut h.app.mode {
                 picker.cursor = row;
@@ -935,7 +952,7 @@ mod tests {
         h.app.open_workspaces();
         h.app.process_pending();
         let screen = draw(&mut h, 45, 30);
-        assert!(screen.contains("Unassigned"), "{screen}");
+        assert!(screen.contains("No workspace"), "{screen}");
         click(&mut h, Hit::WorkspaceRow(1));
         assert_eq!(shown(&h), ["A"]);
     }
@@ -973,6 +990,6 @@ mod tests {
         h.app.process_pending();
         assert_eq!(shown(&h), ["C"]);
         assert_eq!(h.app.view_count(&WorkspaceView::In(launch().id)), 2);
-        assert!(footer(&mut h, 160).contains("Launch 2   Unassigned 1"));
+        assert!(footer(&mut h, 160).contains("Launch 2   No workspace 1"));
     }
 }

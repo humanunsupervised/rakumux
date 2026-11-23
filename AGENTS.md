@@ -1649,7 +1649,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 - **Pin**: a user mark that lists a session in the list's Pinned tab (and shows `★` before its
   name in the list).
 - **Workspace**: a named group of this machine's sessions (`workspace_*`); the list shows every
-  session (All), one workspace's, or those in none (Unassigned), picked with the footer's tabs.
+  session (All), one workspace's, or those in none (No workspace), picked with the footer's tabs.
   `m` switches, adds, renames or deletes one; `M` moves a session.
 - **Session order**: where the user put each session in the list (drag, `J`/`K`); a TUI setting,
   not part of the registry.
@@ -1731,7 +1731,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 | `rakumux pin <name\|id>` / `rakumux unpin <name\|id>` | Pin (into the list's Pinned tab) / unpin |
 | `rakumux kill <name\|id> [--tree]` / `rakumux rm <name\|id>` | Terminate / delete (into the session history, 90 days) |
 | `rakumux heartbeat ls [--json] [--folder DIR \| --all] \| show <name\|id> \| add [NAME] (--every 30m \| --daily HH:MM \| --days mon,fri --at HH:MM) [--agent A] [--command C] [--prompt P \| -- PROMPT] [--paused] \| update <name\|id> … \| enable \| pause \| run \| rm <name\|id>` | Heartbeats: tasks run on a clock (`add` enables one that has a prompt and a schedule; `enable` approves an agent's; `run` starts a run now). Inside a session `add` and `update` work and wait for approval, so an agent needs no MCP (`$RAKUMUX_BIN heartbeat update hb_… --prompt … --every …`) |
-| `rakumux workspace ls [--json] \| add NAME \| rename <name\|id> NAME \| rm <name\|id> \| move <session> (<workspace> \| --none)` | Workspaces: list them with their sessions' count (and the Unassigned ones), make one, rename one, forget one (its sessions are then Unassigned), move a session into one (made when there's none of that name) or out of any. Inside a session `ls` works and `move` moves that session itself |
+| `rakumux workspace ls [--json] \| add NAME \| rename <name\|id> NAME \| rm <name\|id> \| move <session> (<workspace> \| --none)` | Workspaces: list them with their sessions' count (and how many are in none), make one, rename one, forget one (its sessions are then in none), move a session into one (made when there's none of that name) or out of any. Inside a session `ls` works and `move` moves that session itself |
 | `rakumux history [QUERY] [--json]` / `rakumux restore <id\|name>` | Deleted sessions, most recently deleted first / bring one back into its folder, dead (`attach` or Enter revives it); a name only when one deleted session has it |
 | `rakumux folders [--json]` / `rakumux folders add\|rm <dir>` | List folders / add one / forget one without sessions (`projects` is a hidden alias; `--json` prints `{"folders": [...], "projects": [...]}`, the same list twice) |
 | `rakumux --new-server` | Replace the running daemon with this Rakumux's (in place: sessions keep running), or start one; then the TUI |
@@ -1837,7 +1837,8 @@ shows the selected card whole in the list (`▴ less`, or `Space` again, back; `
 this window's); `←`/`→` and the keys that act on the list's
 session do nothing. It lists the account's machines' turns, newest first, each a card
 (`components/feed.rs`, `app::feed::Card`), ten rows tall and a row apart: on its top border the
-session's name, then quieter its agent, folder, repository (only for this machine's sessions
+workspace its session is in (this machine's sessions, whichever workspace is shown: entries carry
+none), in its own colour (`App::workspace_colors`), `›` and the session's name, then quieter its agent, folder, repository (only for this machine's sessions
 listed here, from their git context, and not when named like the folder: entries carry none) and
 `⎇ branch`, and at the right its age and status
 (`done`, `sending`, `working`, or the newest reply written back to it: `reply waiting`, `reply
@@ -2070,23 +2071,23 @@ Tabs.
 **Workspaces.** With a daemon that has `workspaces`, the footer's left holds the workspace tabs
 in place of the session's name (`components/footer.rs::fit_tabs`): a light `workspaces` label
 (`label_tabs`: only while every tab, button, message and the version fit beside it; a click opens
-the modal), `⊞` (the workspaces modal), then `All N` (every session), each workspace's `Name N` and `Unassigned N` (the sessions in none),
+the modal), `⊞` (the workspaces modal), then `All N` (every session), each workspace's `Name N` and `No workspace N` (the sessions in none),
 N each one's sessions, each a button (`tab_styles`: the footer buttons' chip, a column apart; the
 one shown lit, dark on the orange bar, in the accent on the blue one); a click switches
 (`Hit::WorkspaceTab`).
 Short of room the one shown stays with as many others, in order, as fit beside `+N`, which opens
 the modal; they give way where the session's name did. `m` or Settings → Workspace
 (`app/workspaces.rs`, `components/workspaces.rs`) opens the workspaces modal: All, each
-workspace, Unassigned, each with its count, the one shown marked `✓`, then `+ Add new
+workspace, No workspace, each with its count, the one shown marked `✓`, then `+ Add new
 workspace`, which turns into a field for the new name (Enter makes it and shows it). Enter or a
 click shows the row under the cursor; `e` renames the workspace under it in place, `d` twice
-deletes it (its sessions are then Unassigned); the key line's `e rename` and `d delete` take a
+deletes it (its sessions are then in none); the key line's `e rename` and `d delete` take a
 click. The list (`SessionList::set_workspace_view`, `WorkspaceView`) holds only the view's
 sessions, every tab and the session tab bar with them; the others wait aside
 (`every_session`), so a session another client moves elsewhere leaves the list as it would on
 deletion. The view is saved (`sessions.workspace`: absent for All, where a first start begins,
 `unassigned`, or a workspace's id), and a saved workspace that's gone shows All. New sessions
-(`n`, a heartbeat's `Ask agent`) start in the workspace shown (in none under All and Unassigned). `M` (Settings →
+(`n`, a heartbeat's `Ask agent`) start in the workspace shown (in none under All and No workspace). `M` (Settings →
 Move to workspace) opens the same modal for the selected session, without All (`Move <name>
 to`, `+ New workspace`): Enter moves it (`session_workspace`). Going into a session another view
 hides (the feed, a restore) shows All. A daemon without `workspaces` gets "restart it (S)", and

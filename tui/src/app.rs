@@ -453,6 +453,9 @@ pub struct App {
     pub places_open: HashSet<SessionId>,
     /// Each repository's label colour in the list, as of the last frame.
     pub repo_colors: crate::components::format::RepoColors,
+    /// Each workspace's colour, as drawn last (its name on the Inbox's
+    /// cards).
+    pub workspace_colors: crate::components::format::RepoColors,
     pub mode: AppMode,
     /// Whole terminal area (kept current by the event loop and `draw`).
     pub area: Rect,
@@ -589,6 +592,7 @@ impl App {
             hovered_place: None,
             places_open: HashSet::new(),
             repo_colors: Default::default(),
+            workspace_colors: Default::default(),
             mode: AppMode::Normal,
             area: Rect::new(0, 0, 80, 24),
             hits: Vec::new(),

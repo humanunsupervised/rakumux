@@ -63,7 +63,7 @@ new-session flow, and code boundaries.
   (`AppEvent::Restored`), then selects and revives the session like Enter on a dead one. Keys in
   `handlers/history.rs`, drawing in `components/history.rs`.
 - `workspaces.rs`: workspaces (`App::workspaces`, read with each sync; capability `workspaces`):
-  the view the list shows (`WorkspaceView`: All, Unassigned or one workspace;
+  the view the list shows (`WorkspaceView`: All, `Unassigned` (shown as No workspace) or one workspace;
   `SessionList::set_workspace_view`: only its sessions are listed, the rest wait in `elsewhere`;
   saved as `sessions.workspace`), the footer's tabs (`workspace_views`, `view_count`,
   `click_workspace_tab`; drawn by `components/footer.rs::fit_tabs` in the session's place), the

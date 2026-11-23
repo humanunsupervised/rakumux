@@ -64,7 +64,7 @@ pub(crate) fn run(
                 }),
             };
             let moved = api.set_workspace(&session.id, workspace.as_ref().map(|w| &w.id))?;
-            let to = workspace.map_or_else(|| "Unassigned".to_owned(), |w| w.name);
+            let to = workspace.map_or_else(|| "No workspace".to_owned(), |w| w.name);
             writeln!(
                 out,
                 "Moved {} to {}",
@@ -130,7 +130,7 @@ fn ls(api: &dyn SessionApi, json: bool, out: &mut dyn Write) -> Result<i32, CliE
         .map_err(output_error)?;
         return Ok(0);
     }
-    let mut names = vec!["Unassigned".to_owned()];
+    let mut names = vec!["No workspace".to_owned()];
     let mut counts = vec![count(None).to_string()];
     let mut ids = vec!["-".to_owned()];
     for workspace in &workspaces {

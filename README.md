@@ -185,7 +185,7 @@ rakumux pin dev
 rakumux kill dev
 rakumux rm dev
 rakumux history                                 # deleted sessions; rakumux restore <id> brings one back
-rakumux workspace move dev Launch               # also ls, add, rename, rm; --none: Unassigned
+rakumux workspace move dev Launch               # also ls, add, rename, rm; --none: No workspace
 rakumux daemon status                           # also start, stop, restart, logs
 rakumux --help
 ```

@@ -60,6 +60,8 @@ impl App {
         });
         let count = crate::theme::palette().repo_labels().len();
         self.repo_colors = RepoColors::assign(repos, count);
+        let workspaces = self.workspaces.iter().map(|w| w.name.clone());
+        self.workspace_colors = RepoColors::assign(workspaces, count);
     }
 
     /// Whether the session's places are open under its row.

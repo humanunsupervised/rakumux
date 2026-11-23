@@ -1,5 +1,5 @@
 //! The workspaces modal (`m`, the footer's `⊞`, Settings → Workspace; `M` to
-//! move a session): All (not when moving), every workspace, Unassigned, each
+//! move a session): All (not when moving), every workspace, No workspace, each
 //! with its sessions' count, the one shown (or the session's) marked `✓`,
 //! then `+ Add new workspace`, which turns into the new name's field; a
 //! workspace being renamed turns into one in its place.
@@ -13,7 +13,7 @@ use ratatui::{
 };
 
 use super::format::truncate;
-use crate::app::workspaces::{WorkspacePicker, WorkspacePurpose, WorkspaceRow};
+use crate::app::workspaces::{WorkspacePicker, WorkspacePurpose, WorkspaceRow, NO_WORKSPACE};
 use crate::app::{App, Hit, WorkspaceView};
 use crate::layout::str_width;
 use crate::theme;
@@ -162,7 +162,7 @@ pub fn draw_workspaces(
                         None => continue,
                     },
                     WorkspaceRow::All => (WorkspaceView::All, "All"),
-                    _ => (WorkspaceView::Unassigned, "Unassigned"),
+                    _ => (WorkspaceView::Unassigned, NO_WORKSPACE),
                 };
                 let deleting = row_id.is_some() && picker.deleting.as_ref() == row_id;
                 let right = if deleting {

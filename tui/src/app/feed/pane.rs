@@ -362,7 +362,8 @@ impl App {
         }) else {
             return;
         };
-        if self.list.get(&session).is_some() {
+        // In another workspace too: going in shows every session.
+        if self.list.get_anywhere(&session).is_some() {
             self.go_into(session);
             return;
         }
@@ -379,7 +380,7 @@ impl App {
     pub fn feed_session(&self) -> Option<&session_core::model::SessionView> {
         let card = self.feed.selected_card()?;
         self.list
-            .get(&SessionId::from_string(card.session_id().to_owned()))
+            .get_anywhere(&SessionId::from_string(card.session_id().to_owned()))
     }
 
     /// `card`'s session when it's this machine's and listed here: what its
@@ -389,7 +390,14 @@ impl App {
             return None;
         }
         self.list
-            .get(&SessionId::from_string(card.session_id().to_owned()))
+            .get_anywhere(&SessionId::from_string(card.session_id().to_owned()))
+    }
+
+    /// The name of the workspace `card`'s session is in, when it's this
+    /// machine's and listed here (entries carry none).
+    pub fn feed_card_workspace(&self, card: Card<'_>) -> Option<&str> {
+        let id = self.feed_card_session(card)?.id.clone();
+        self.workspace_of(&id).map(|w| w.name.as_str())
     }
 
     /// Rows of the area the selected reply is read in, for paging.

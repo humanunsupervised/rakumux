@@ -282,7 +282,7 @@ fn a_heartbeat_is_made_renamed_and_deleted_in_the_real_tui() {
     // Beats, empty: the row that makes one, and its form.
     screen.shows("+ New session");
     // The footer says what its tabs are.
-    screen.shows("workspaces  ⊞   All 0   Unassigned 0");
+    screen.shows("workspaces  ⊞   All 0   No workspace 0");
     screen.send("B", &[]);
     screen.shows("+ New heartbeat");
     screen.keys(&["enter"]);

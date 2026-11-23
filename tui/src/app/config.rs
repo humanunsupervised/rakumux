@@ -175,7 +175,7 @@ pub struct SessionsConfig {
     )]
     pub terminal_panel: PanelPlacement,
     /// The workspace shown (its id), so the next start shows it again;
-    /// left out for No workspace.
+    /// left out for All.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,
     #[serde(flatten)]

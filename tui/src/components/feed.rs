@@ -483,10 +483,71 @@ fn preview(
     (lines, more)
 }
 
-/// A card's top border, `width` columns: `╭ session  agent · folder · repo ⎇
-/// branch ─── age · ● status ╮`. Short of room, the status keeps only its
-/// mark, then the agent, folder, repository and branch give way from the
-/// end, then the session's name.
+/// Columns a workspace's name gets before its session's.
+const WORKSPACE_COLS: usize = 16;
+/// Columns a session's name keeps before its workspace's gives way.
+const NAME_MIN_COLS: usize = 10;
+/// Between a workspace's name and its session's.
+const IN_WORKSPACE: &str = " › ";
+
+/// `workspace › session` of `card` in at most `room` columns: the workspace
+/// (when its session is in one known here) in its own colour, then the
+/// session in `style`. Short of room the workspace's name is cut, then left
+/// out, then the session's is cut.
+fn card_name(app: &App, card: Card, room: usize, style: Style) -> Vec<Span<'static>> {
+    let p = theme::palette();
+    let name = plain(card.session_name());
+    let mut spans = Vec::new();
+    let mut left = room;
+    if let Some(workspace) = app.feed_card_workspace(card) {
+        let kept = str_width(&name).min(NAME_MIN_COLS) + str_width(IN_WORKSPACE);
+        let shown = plain(workspace);
+        let wanted = str_width(&shown).min(WORKSPACE_COLS);
+        let cols = wanted.min(room.saturating_sub(kept));
+        if cols > 0 && cols >= wanted.min(4) {
+            let labels = p.repo_labels();
+            let colour = labels[app.workspace_colors.of(workspace, labels.len())];
+            let shown = truncate(&shown, cols);
+            left = room - str_width(&shown) - str_width(IN_WORKSPACE);
+            spans.push(Span::styled(
+                shown,
+                Style::default().fg(colour).add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::styled(
+                IN_WORKSPACE,
+                Style::default().fg(p.text_muted),
+            ));
+        }
+    }
+    spans.push(Span::styled(truncate(&name, left), style));
+    spans
+}
+
+/// Columns of `spans`.
+fn spans_width(spans: &[Span]) -> usize {
+    spans.iter().map(|span| str_width(&span.content)).sum()
+}
+
+/// A reply or prompt read whole: its [`card_name`], then `place`, in `width`
+/// columns.
+fn card_title(app: &App, card: Card, place: &str, width: usize) -> Line<'static> {
+    let p = theme::palette();
+    let name = Style::default()
+        .fg(p.text_bright)
+        .add_modifier(Modifier::BOLD);
+    let mut spans = card_name(app, card, width, name);
+    let rest = width.saturating_sub(spans_width(&spans));
+    spans.push(Span::styled(
+        truncate(&format!(" · {place}"), rest),
+        Style::default().fg(p.text_muted),
+    ));
+    Line::from(spans)
+}
+
+/// A card's top border, `width` columns: `╭ workspace › session  agent ·
+/// folder · repo ⎇ branch ─── age · ● status ╮`. Short of room, the status
+/// keeps only its mark, then the agent, folder, repository and branch give
+/// way from the end, then the workspace's and the session's name.
 fn card_top(
     app: &App,
     card: Card,
@@ -515,10 +576,10 @@ fn card_top(
         Card::Entry(entry) => entry.finished_at,
     };
     let age = relative_time(now, at / 1000);
-    let name = plain(card.session_name());
     let mut meta = card_meta(app, card);
     // The status's word goes first when the left part wouldn't fit whole.
-    let left_width = str_width(&name) + 2 + str_width(&meta);
+    let named = spans_width(&card_name(app, card, usize::MAX, name_style));
+    let left_width = named + 2 + str_width(&meta);
     let whole = str_width(&age) + str_width(status.label()) + 7;
     let label = if left_width + whole + 5 <= width {
         status.label()
@@ -539,19 +600,17 @@ fn card_top(
     let right_width: usize = right.iter().map(|span| str_width(&span.content)).sum();
     // Corners, the spaces around the left part, and at least one dash.
     let room = width.saturating_sub(right_width + 5);
-    let name = truncate(&name, room);
-    let meta_room = room.saturating_sub(str_width(&name) + 2);
+    let name = card_name(app, card, room, name_style);
+    let named = spans_width(&name);
+    let meta_room = room.saturating_sub(named + 2);
     meta = if meta_room >= 4 {
         truncate(&meta, meta_room)
     } else {
         String::new()
     };
-    let mut spans = vec![
-        Span::styled("╭", border),
-        Span::raw(" "),
-        Span::styled(name.clone(), name_style),
-    ];
-    let mut used = 2 + str_width(&name);
+    let mut spans = vec![Span::styled("╭", border), Span::raw(" ")];
+    spans.extend(name);
+    let mut used = 2 + named;
     if !meta.is_empty() {
         used += 2 + str_width(&meta);
         spans.push(Span::raw("  "));
@@ -664,21 +723,7 @@ fn draw_feed_reply(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, H
         about.push("sending".into());
     }
     let mut lines = vec![
-        Line::from(vec![
-            Span::styled(
-                truncate(&plain(&entry.session_name), width),
-                Style::default()
-                    .fg(p.text_bright)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                truncate(
-                    &format!(" · {}", origin(app, entry)),
-                    width.saturating_sub(str_width(&entry.session_name)),
-                ),
-                muted,
-            ),
-        ]),
+        card_title(app, Card::Entry(entry), &origin(app, entry), width),
         Line::from(Span::styled(truncate(&about.join(" · "), width), muted)),
     ];
     let can_reply = app.feed.reply_to(Card::Entry(entry)).is_some();
@@ -812,7 +857,6 @@ fn draw_open(
     if open.machine != app.feed.machine() {
         place.push(format!("on {}", plain(&open.machine)));
     }
-    let name = plain(&open.session_name);
     let sent = match open.prompt.at {
         Some(at) => match relative_time(now_secs(), at / 1000).as_str() {
             "now" => "asked just now".to_owned(),
@@ -821,21 +865,7 @@ fn draw_open(
         None => "asked".to_owned(),
     };
     let mut lines = vec![
-        Line::from(vec![
-            Span::styled(
-                truncate(&name, width),
-                Style::default()
-                    .fg(p.text_bright)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                truncate(
-                    &format!(" · {}", place.join(" · ")),
-                    width.saturating_sub(str_width(&name)),
-                ),
-                muted,
-            ),
-        ]),
+        card_title(app, Card::Open(open), &place.join(" · "), width),
         Line::from(Span::styled(
             truncate(&format!("{sent} · working"), width),
             muted,

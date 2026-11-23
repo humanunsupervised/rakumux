@@ -2840,6 +2840,98 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cards_name_the_workspace_first_in_its_colour() {
+        use rakumux_sensagent::feed::FeedStatus;
+        use session_core::workspace::Workspace;
+        let workspace = |id: &str, name: &str| Workspace {
+            id: session_core::ids::WorkspaceId::from_string(id),
+            name: name.into(),
+            created_at: 1,
+        };
+        let (launch, infra) = (workspace("W1", "Launch"), workspace("W2", "Infrastructure"));
+        let mut a = view("A", "api", 30);
+        a.workspace = Some(launch.id.clone());
+        let mut b = view("B", "docs", 20);
+        b.workspace = Some(infra.id.clone());
+        let fake = FakeApi::new(vec![a, b, view("C", "loose", 10)]);
+        {
+            let mut state = fake.state.lock().unwrap();
+            state.workspaces = vec![launch.clone(), infra];
+            state.keeps_workspaces = true;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let account = std::sync::Arc::new(crate::app::testing::FakeAccount::with_feed());
+        let mut options = options(&fake, scope(), &dir);
+        options.account = account.clone();
+        // Only Launch's sessions are listed.
+        options.settings.sessions.workspace = Some(launch.id.as_str().to_owned());
+        let mut h = start(options, fake, dir);
+        let machine = rakumux_sensagent::feed::machine_name();
+        account.queue_feed(feed_page(
+            FeedStatus::Ready,
+            vec![
+                reply("R1", "A", "api", &machine, 4, "One."),
+                reply("R2", "B", "docs", &machine, 3, "Two."),
+                reply("R3", "C", "loose", &machine, 2, "Three."),
+                // Another machine's: no workspace is known.
+                reply("R4", "A", "far", "lab-box", 1, "Four."),
+            ],
+        ));
+        h.app.toggle_feed();
+        h.app
+            .on_tick(std::time::Instant::now() + std::time::Duration::from_secs(3));
+        h.app.process_pending();
+        let screen = render(&mut h.app, 160, 48);
+        for card in [
+            "╭ Launch › api  ",
+            "╭ Infrastructure › docs  ",
+            "╭ loose  ",
+            "╭ far  ",
+        ] {
+            assert!(screen.contains(card), "{card}: {screen}");
+        }
+        // Each in its own colour, unlike the session's.
+        let mut terminal = Terminal::new(TestBackend::new(160, 48)).unwrap();
+        terminal.draw(|f| draw(f, &mut h.app)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let colour = |text: &str| {
+            let (row, line) = screen
+                .lines()
+                .enumerate()
+                .find(|(_, line)| line.contains(text))
+                .unwrap();
+            let at = crate::layout::str_width(&line[..line.find(text).unwrap()]);
+            buffer.get(at as u16 + 2, row as u16).fg
+        };
+        let p = crate::theme::palette();
+        let (launch, infra) = (colour("╭ Launch"), colour("╭ Infrastructure"));
+        assert!(p.repo_labels().contains(&launch) && p.repo_labels().contains(&infra));
+        assert_ne!(launch, infra);
+        assert_ne!(launch, colour("╭ far"));
+        // Read whole, first too.
+        h.press(KeyCode::End).await;
+        h.press(KeyCode::Enter).await;
+        let whole = render(&mut h.app, 160, 48);
+        assert!(whole.contains("Launch › api · "), "{whole}");
+        h.press(KeyCode::Esc).await;
+        // A session of a workspace that isn't shown: Enter goes into it,
+        // showing every workspace's, and the Inbox stays.
+        h.press(KeyCode::Up).await;
+        h.press(KeyCode::Enter).await;
+        h.press(KeyCode::Enter).await;
+        assert_eq!(h.app.focus, Focus::Session);
+        assert_eq!(h.selected().as_deref(), Some("B"));
+        assert_eq!(h.app.list.workspace_view(), &crate::app::WorkspaceView::All);
+        assert!(h.app.feed_shown());
+        // Narrow, the workspace's name is cut before the session's goes.
+        h.app.resize(40, 30);
+        h.rakumux().await;
+        h.press(KeyCode::Esc).await;
+        let phone = render(&mut h.app, 40, 30);
+        assert!(phone.contains("› docs"), "{phone}");
+    }
+
+    #[tokio::test]
     async fn f_shows_the_inbox_in_the_sessions_place_and_again_brings_them_back() {
         let mut h = feed_harness(crate::app::testing::FakeAccount::with_feed(), None);
         let screen = render(&mut h.app, 160, 48);
