@@ -204,8 +204,8 @@ async fn a_release_rakumux_com_announces_is_offered_at_once() {
 /// The feed shown with `f`, with the keys.
 async fn show_feed(h: &mut Harness) {
     h.press(KeyCode::Char('f')).await;
-    assert!(h.app.feed_has_keys(), "the feed has the keys");
-    assert!(h.app.feed_shown(), "the feed shows");
+    assert!(h.app.feed_has_keys(), "the inbox has the keys");
+    assert!(h.app.feed_shown(), "the inbox shows");
 }
 
 /// Entries that finished after this window started (so they can be new).
@@ -1105,7 +1105,7 @@ async fn a_reply_that_isnt_stored_keeps_its_box_open_and_says_why() {
         .error_message
         .as_deref()
         .unwrap_or_default()
-        .contains("feed isn't on"));
+        .contains("inbox isn't on"));
     assert_eq!(dialog.input.value(), "Try again");
     h.press(KeyCode::Esc).await;
     assert!(matches!(h.app.mode, AppMode::Normal));

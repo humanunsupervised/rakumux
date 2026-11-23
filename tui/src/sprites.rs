@@ -223,7 +223,7 @@ impl Step {
             Step::Install => "Install Rakumux",
             Step::Start => "Start it",
             Step::Connect => "Connect",
-            Step::Feed => "Connect the feed",
+            Step::Feed => "Connect the inbox",
         }
     }
 }
@@ -542,7 +542,7 @@ fn connect_feed(
         &format!("set -e; mkdir -p '{dir}'; chmod 700 '{dir}'"),
     )?;
     if code != 0 {
-        return Err(format!("preparing the feed there: {}", first_line(&output)));
+        return Err(format!("preparing the inbox there: {}", first_line(&output)));
     }
     sprites.write_file(
         name,

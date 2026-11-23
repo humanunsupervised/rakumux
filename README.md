@@ -6,7 +6,7 @@
 
 楽 (*raku*) means easy, and read *gaku* it means music: tmux, made easy.
 
-![Rakumux: the session list with where each session works, a live Claude Code session and the Feed](assets/rakumux-screenshot.png)
+![Rakumux: the session list with where each session works, a live Claude Code session and the Inbox](assets/rakumux-screenshot.png)
 
 Run Claude Code, Codex, OpenCode, GitHub Copilot, Cursor, Pi, Grok, Kimi Code, Droid and Amp side
 by side, on your own subscriptions, along with any other program. Rakumux shows which agent is working, which needs you and which has finished. Your
@@ -95,7 +95,7 @@ itself to the program, press `\` in Rakumux mode. To use another key, set
 | `Tab` / `1`–`9` | Last session / that session |
 | `n` | New session in the current folder |
 | `←` `→` | Switch tabs: Pinned, Status, Repos, Agent |
-| `*` / `f` / `t` | Your pinned sessions / show, focus or hide the feed / rtop |
+| `*` / `f` / `t` | Your pinned sessions / show, focus or hide the inbox / rtop |
 | `P` / `/` | Filter by folder / by text |
 | `p` | Pin or unpin |
 | `m` / `M` | Workspaces: switch, add, rename (`e`) or delete (`d`) / move the session to another workspace |
@@ -134,10 +134,10 @@ Tabs across the top of the list group your sessions:
 
 Inside a repository or an app, sessions are listed by status.
 
-`f` (or the footer's **≡ Feed** button) shows the **Feed** beside your sessions: your agents'
+`f` (or the footer's **≡ Inbox** button) shows the **Inbox** beside your sessions: your agents'
 replies, newest first (needs an account). It's a tab of the drawer on the right in Master detail
 (a tab of its own in Tabs). `Enter` reads a reply, again goes into its session; `Esc`
-gives the list the keys back, and `f` hides the feed. The button counts the replies that came in
+gives the list the keys back, and `f` hides the inbox. The button counts the replies that came in
 since you last looked.
 
 `t` shows **rtop** in the same drawer: the CPU, memory and network this machine, Rakumux and
@@ -238,10 +238,10 @@ with nothing to turn on.
 **AI session titles** name each agent session after what it's doing. A name you give (`r`)
 stays. Press `s`, or the `↻` after a hovered name, for a new title.
 
-**Agent feed** collects your agents' replies and chats from every signed-in machine:
+**Inbox** collects your agents' replies and chats from every signed-in machine:
 
-- in Rakumux's Feed (`f`);
-- at [rakumux.com/feed](https://rakumux.com/feed), with your sessions by status, folder and app.
+- in Rakumux's Inbox (`f`);
+- at [rakumux.com/inbox](https://rakumux.com/inbox), with your sessions by status, folder and app.
 
 **Writing back:** you can answer an agent from rakumux.com or another machine. Rakumux types your
 message into the session once the agent is waiting for you, or while it works when it's Claude
@@ -266,7 +266,7 @@ The free plan covers all of this and keeps 7 days of history; Pro keeps 90. See
 
 ## From your phone
 
-- **Browser:** open rakumux.com in your phone's browser for the feed, your sessions and writing
+- **Browser:** open rakumux.com in your phone's browser for the inbox, your sessions and writing
   back.
 - **SSH:** the app fits phone-width terminals. Tap a session to go in. `Ctrl-\`, or a tap on the
   `SESSION` badge, goes back to the list.

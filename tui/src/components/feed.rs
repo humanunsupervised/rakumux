@@ -142,7 +142,7 @@ fn draw_feed_list(
     match status(app) {
         FeedStatus::SignedOut => {
             let lines = vec![
-                Line::from(Span::styled("Sign in to see your feed:", strong)),
+                Line::from(Span::styled("Sign in to see your inbox:", strong)),
                 Line::from(vec![
                     Span::styled(",", key),
                     Span::styled(" Settings → Account", muted),
@@ -153,7 +153,7 @@ fn draw_feed_list(
         }
         FeedStatus::Off => {
             let line = Line::from(Span::styled(
-                "The feed isn't on for your account yet.",
+                "The inbox isn't on for your account yet.",
                 strong,
             ));
             message(f, area, vec![line]);
@@ -161,7 +161,7 @@ fn draw_feed_list(
         }
         FeedStatus::Loading if app.feed.cards().is_empty() => {
             let line = Line::from(Span::styled(
-                format!("{} Loading the feed…", get_spinner_char()),
+                format!("{} Loading the inbox…", get_spinner_char()),
                 muted,
             ));
             message(f, area, vec![line]);

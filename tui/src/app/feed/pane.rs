@@ -118,7 +118,7 @@ impl App {
     pub(in crate::app) fn drop_feed_divider(&mut self) {
         self.feed_divider = DividerState::default();
         if let Err(error) = self.save_settings() {
-            self.set_status(format!("Feed width changed but not saved: {error}"));
+            self.set_status(format!("Inbox width changed but not saved: {error}"));
         }
     }
 

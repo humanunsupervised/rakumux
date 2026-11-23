@@ -130,7 +130,7 @@ impl App {
         let failure = match written.status {
             ReplyWriteStatus::Sent => None,
             ReplyWriteStatus::SignedOut => Some("You're signed out: sign in again to reply."),
-            ReplyWriteStatus::Off => Some("The feed isn't on for your account yet."),
+            ReplyWriteStatus::Off => Some("The inbox isn't on for your account yet."),
             ReplyWriteStatus::Invalid => Some("rakumux.com refused it."),
             ReplyWriteStatus::Unavailable | ReplyWriteStatus::Unknown => {
                 Some("Couldn't reach rakumux.com. Try again.")

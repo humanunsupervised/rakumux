@@ -124,7 +124,7 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
   session shows live, in full colour; on the folder filter, a folder header or + New
   session the last session stays in view), `gg`/`G` top/bottom, `Ctrl-d`/`Ctrl-u` half a page,
   `{`/`}` previous/next folder, `←`/`→` switch the list's tabs (Status, Folders, App), `f` shows,
-  focuses or hides the Feed (what agents said: a pane on the right, a tab in Tabs); `Enter` or
+  focuses or hides the Inbox (what agents said: a pane on the right, a tab in Tabs); `Enter` or
   `i` goes in (reviving a dead session, restarting an
   exited one; on a folder header, a new session there), `Esc` (once it has
   cancelled a pending key or the filter) or `Ctrl-\` goes back to the session you came from (or,
@@ -134,7 +134,7 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
   where it was last (`|` beside the session, `-` below it), `P` folders, `/` filter, `\`
   sends `Ctrl-\` to the session, `?` Help, `,` or `o` Settings, `R` restart the UI, `S` restart the server, `q` quit. The footer is a
   full-width bar that shows the mode, in zoom too, with `session: <name>` in its centre:
-  orange in Rakumux mode (with the `f ≡ Feed`, `? Help` and `, Settings` buttons on the right,
+  orange in Rakumux mode (with the `f ≡ Inbox`, `? Help` and `, Settings` buttons on the right,
   and, where the row has room to spare, a tip of the day just left of them: a click shows the next
   one; Settings → Tips in the footer turns them off), muted blue in
   session mode (with a `Ctrl-\ Rakumux` button). Help and Settings list the keys, and

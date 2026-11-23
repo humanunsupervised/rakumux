@@ -415,7 +415,7 @@ impl KeyAction {
             KeyAction::NumberedSession => "Go into session 1 to 9",
             KeyAction::NextSession => "Next session",
             KeyAction::PreviousSession => "Previous session",
-            KeyAction::Feed => "Feed (show, focus or hide)",
+            KeyAction::Feed => "Inbox (show, focus or hide)",
             KeyAction::NextTab => "Next tab (Pinned, Status, Repos, Agent)",
             KeyAction::PreviousTab => "Previous tab",
             KeyAction::Top => "Top of the list",
@@ -591,7 +591,7 @@ impl KeyAction {
                  Master detail (a tab of its own in Tabs), beside rtop. Space shows a card whole in the \
                  list (again: back); Enter reads a reply whole, again goes into \
                  its session when it runs here; r writes back to it; Esc gives the list the \
-                 keys back. The footer's Feed button counts the replies that came since you \
+                 keys back. The footer's Inbox button counts the replies that came since you \
                  last looked. Needs your Rakumux account (Settings → Account)."
                 .into(),
             KeyAction::NextFolder | KeyAction::PreviousFolder => {
@@ -619,7 +619,7 @@ impl KeyAction {
                 "Each session shows the folder it works in now. w opens the list under it (W \
                  every session's, a click on its ▸ too): every other git working \
                  tree where it changed files, most recent first, with its repository, branch \
-                 and when. Read on this machine from what the agent did. With the Agent feed \
+                 and when. Read on this machine from what the agent did. With the Inbox \
                  on, their names, branches and times go to rakumux.com, never full paths."
                     .into()
             }
@@ -669,7 +669,7 @@ impl KeyAction {
             KeyAction::TerminalPanelBeside | KeyAction::TerminalPanelBelow => {
                 "| opens the terminal panel beside the session, - below it, or moves it there \
                  while it's open; T then reopens it there. Beside needs 60 columns for the \
-                 session and 40 for the panel (a docked Feed narrows to make room): \
+                 session and 40 for the panel (a docked Inbox narrows to make room): \
                  narrower, it shows below. Phones show it below."
                     .into()
             }
@@ -679,7 +679,7 @@ impl KeyAction {
             KeyAction::Rtop => "This window, the Rakumux server, its other clients and \
                  every running session, each session's processes under it: CPU (100% is one \
                  CPU), memory and network, about every second, in the drawer on the right \
-                 beside the Feed (f switches to it). s sorts the sessions, ←/→ fold a \
+                 beside the Inbox (f switches to it). s sorts the sessions, ←/→ fold a \
                  session's processes, Enter goes into it, Esc gives the list the keys back. \
                  Network counts each process's TCP connections to other machines (Linux; the \
                  machine's total everywhere). Nothing is recorded."
@@ -1741,7 +1741,7 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     doc.heading("rtop");
     doc.text(
         "t in Rakumux mode, or Settings, rtop, shows what this machine and Rakumux use over \
-         the last few minutes, as graphs, in the drawer on the right beside the Feed (its band names both; f and t switch, \
+         the last few minutes, as graphs, in the drawer on the right beside the Inbox (its band names both; f and t switch, \
          and hide it while their tab has the keys): this window, the server, its other \
          windows and clients, then every running session with its processes under it (the \
          shell, the agent and what it started). CPU is a percentage of one CPU, memory is \
@@ -1781,14 +1781,14 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     }
     doc.bullet("Detail: the session's terminal screen, updating as the program runs.");
     doc.bullet(
-        "The feed (`f`): what your agents said when they finished a turn, on every machine of \
+        "The inbox (`f`): what your agents said when they finished a turn, on every machine of \
          your account, in a pane on the right (a tab in Tabs); `f` again hides it.",
     );
     doc.bullet(format!(
         "Footer, the bottom row: a full-width orange bar in Rakumux mode, a muted blue one \
          while a program takes keys. At the left the session it's about (session: name), then \
          messages and the daemon connection when it isn't up; the mode in the middle \
-         (RAKUMUX MODE, SESSION MODE or TERMINAL MODE); buttons on the right: the feed (`f`, \
+         (RAKUMUX MODE, SESSION MODE or TERMINAL MODE); buttons on the right: the inbox (`f`, \
          with a count of new replies), this Help (`?`) and Settings (`,`) in Rakumux mode, \
          `{p}`, the way to Rakumux mode, in a session. Settings lists every key."
     ));
@@ -1848,7 +1848,7 @@ fn moving_around(doc: &mut Doc, k: &KeyNames) {
         ),
         row(
             "f",
-            "The feed: shows it with the keys, gives it the keys, or hides it. What agents \
+            "The inbox: shows it with the keys, gives it the keys, or hides it. What agents \
              said when they finished a turn, on every machine of your account (signed in: \
              Settings → Account), in a pane on the right (a tab in Tabs). With \
              its keys, ↑/↓ go through the replies; Space shows a card whole in the list (again: \
@@ -1912,7 +1912,7 @@ fn mouse(doc: &mut Doc) {
          to show everything, or outside it to close it.",
     );
     doc.bullet(
-        "Click the footer's Feed button to show the feed (again to hide it). Click Feed \
+        "Click the footer's Inbox button to show the inbox (again to hide it). Click Inbox \
          or rtop on the drawer's band to switch. Click a reply or an rtop row to select it, again \
          to read it or go into its session; click either side to give it the keys. Drag the \
          line left of the drawer to resize it.",
@@ -1928,7 +1928,7 @@ fn mouse(doc: &mut Doc) {
     doc.bullet(
         "Click the mode in the middle of the footer: SESSION MODE switches to Rakumux mode, \
          RAKUMUX MODE does what Esc does (back to the session you came from; while the drawer \
-         has the keys, Esc there). Click a button on the right of the footer (`f ≡ Feed`, `? Help`, \
+         has the keys, Esc there). Click a button on the right of the footer (`f ≡ Inbox`, `? Help`, \
          `, Settings`, or in a session the Rakumux key) to do what it says. Phones send taps \
          as clicks, so all of this works there too.",
     );
@@ -2272,10 +2272,10 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
           Master detail layout."
     ));
 
-    doc.heading("The feed");
+    doc.heading("The inbox");
     doc.text(format!(
-        "`f` shows the feed: in Master detail a pane on the right, and the session \
-         narrows to make room while it keeps {} columns; a narrower window shows the feed in \
+        "`f` shows the inbox: in Master detail a pane on the right, and the session \
+         narrows to make room while it keeps {} columns; a narrower window shows the inbox in \
          the session's place in Rakumux mode only. Tabs gives it a tab of its own before the \
          sessions'. On a phone it fills the screen. Every start hides it.",
         layout::FEED_SESSION_MIN_COLS
@@ -3918,7 +3918,7 @@ mod tests {
             ("Rakumux mode", "C-a"),
             ("Back to the session you came from", "Esc, C-a"),
             ("Go into the selected session", "Enter, i, l"),
-            ("Feed (show, focus or hide)", "f"),
+            ("Inbox (show, focus or hide)", "f"),
             ("Next tab (Pinned, Status, Repos, Agent)", "→"),
             ("Previous tab", "←"),
             ("Last session", "Tab"),

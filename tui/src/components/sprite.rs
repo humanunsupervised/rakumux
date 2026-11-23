@@ -39,9 +39,9 @@ fn ready_lines(
     done: Style,
 ) -> Vec<Line<'static>> {
     let mut there = match feed {
-        FeedSetUp::On => "Rakumux runs there, and its agents' replies reach your feed.".to_owned(),
+        FeedSetUp::On => "Rakumux runs there, and its agents' replies reach your inbox.".to_owned(),
         FeedSetUp::Failed(error) => {
-            format!("Rakumux runs there; its feed couldn't be connected: {error}.")
+            format!("Rakumux runs there; its inbox couldn't be connected: {error}.")
         }
         FeedSetUp::SignedOut | FeedSetUp::Skipped => "Rakumux runs there.".to_owned(),
     };
@@ -251,7 +251,7 @@ mod tests {
             [
                 "✓ my-sprite is ready",
                 "",
-                "Rakumux runs there, and its agents' replies reach your feed. \
+                "Rakumux runs there, and its agents' replies reach your inbox. \
                  claude, codex and gh are installed.",
                 "",
                 "In its first session in a folder:",

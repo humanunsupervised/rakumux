@@ -742,7 +742,7 @@ async fn rakumux_mode_shows_the_mode_the_selected_session_help_and_settings_in_t
         .collect();
     assert!(footer.starts_with(" session: ● a "), "A: {footer:?}");
     // The mode (left of the middle, for the version), then the buttons.
-    assert!(footer.contains(" RAKUMUX MODE   f ≡ Feed "), "{footer:?}");
+    assert!(footer.contains(" RAKUMUX MODE   f ≡ Inbox "), "{footer:?}");
     assert!(
         crate::components::footer::without_version(&footer)
             .ends_with(" ? Help   , Settings   a ✓ Signed in  "),
@@ -3407,8 +3407,8 @@ async fn an_older_daemon_without_sessions_all_lists_its_folders_by_name() {
                 "the branch an agent works on",
                 "each agent's latest output",
                 "AI titles from agents' chats",
-                "the agent feed",
-                "whole chats in the agent feed",
+                "the inbox",
+                "whole chats in the inbox",
                 "where each session has worked",
                 "rtop",
                 "the session history",
@@ -3943,8 +3943,8 @@ async fn an_older_daemon_falls_back_to_the_launch_folder() {
                 "the branch an agent works on",
                 "each agent's latest output",
                 "AI titles from agents' chats",
-                "the agent feed",
-                "whole chats in the agent feed",
+                "the inbox",
+                "whole chats in the inbox",
                 "where each session has worked",
                 "rtop",
                 "the session history",
@@ -5664,7 +5664,7 @@ async fn settings_have_no_switches_for_what_signing_in_brings() {
         }
         for label in [
             "AI session titles",
-            "Agent feed",
+            "Inbox",
             "Replies from rakumux.com",
             "New sessions from rakumux.com",
         ] {

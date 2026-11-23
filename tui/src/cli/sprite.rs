@@ -63,15 +63,15 @@ pub(crate) fn run(
             )
             .map_err(output_error)?;
             let feed = match &connected.feed {
-                sprites::FeedSetUp::On => "Its agents' replies reach your feed, and replies \
+                sprites::FeedSetUp::On => "Its agents' replies reach your inbox, and replies \
                     you write on rakumux.com are typed into them."
                     .to_owned(),
                 sprites::FeedSetUp::SignedOut | sprites::FeedSetUp::Skipped => "Sign in \
-                    (`rakumux account login`) and connect again for its replies in your feed."
+                    (`rakumux account login`) and connect again for its replies in your inbox."
                     .to_owned(),
                 sprites::FeedSetUp::Failed(error) => {
                     format!(
-                        "Its feed couldn't be connected ({}); connect again to retry.",
+                        "Its inbox couldn't be connected ({}); connect again to retry.",
                         printable(error)
                     )
                 }

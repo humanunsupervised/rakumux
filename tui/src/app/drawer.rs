@@ -45,7 +45,7 @@ impl DrawerTab {
     /// Its name on the band and the Tabs layout's tab.
     pub fn label(self) -> &'static str {
         match self {
-            DrawerTab::Feed => "Feed",
+            DrawerTab::Feed => "Inbox",
             DrawerTab::Beats => "Beats",
             DrawerTab::Rtop => "rtop",
         }

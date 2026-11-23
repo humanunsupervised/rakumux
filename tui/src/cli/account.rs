@@ -219,7 +219,7 @@ fn describe(account: Option<&Account>) -> String {
     match account {
         Some(account) => format!("Signed in as {}.", printable(account.name())),
         None => "Not signed in. `rakumux account login` signs in for AI session titles and \
-                 the agent feed."
+                 the inbox."
             .into(),
     }
 }

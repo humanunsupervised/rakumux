@@ -20,7 +20,7 @@ new-session flow, and code boundaries.
   The detail has no title row: the footer names the session in view (`session: ● <name>`, the
   mark its list row has). The footer is a full-width bar with that at its left, then messages,
   and the mode label (`RAKUMUX MODE`, `SESSION MODE`, `TERMINAL MODE`) in its centre: orange with dark text in
-  Rakumux mode (`f ≡ Feed`, with `●N` new entries, `FooterKey::Feed` → `App::toggle_feed`;
+  Rakumux mode (`f ≡ Inbox`, with `●N` new entries, `FooterKey::Feed` → `App::toggle_feed`;
   `? Help` and `, Settings` buttons in a darker orange, and `Sign in` while signed out,
   `FooterKey::SignIn` → `App::start_sign_in`), muted blue in session and
   terminal input modes (a `Ctrl-\` button); the label and buttons are hit targets.
@@ -96,12 +96,12 @@ new-session flow, and code boundaries.
   capped at 500, the selection kept by id, the reply's scroll, `reading` (the selected reply
   read whole in the cards' place), the service's generation and revision, and the ids that were
   on screen: `mark_seen`, `unseen` counts the rest that finished after the window started) and
-  `pane.rs`, which puts it on the drawer's Feed tab (`drawer.rs`, below): `feed_has_keys` and
+  `pane.rs`, which puts it on the drawer's Inbox tab (`drawer.rs`, below): `feed_has_keys` and
   `feed_shown` are the drawer's on that tab; `feed_columns` puts the reply beside the cards from
   100 columns in the Tabs layout; `toggle_feed` (`f`, the footer's `FooterKey::Feed`, Settings'
   `KeyAction::Feed`) is `toggle_drawer(Feed)`; `feed_back` is the feed's Esc. It polls `AccountAccess::feed` off the UI thread every 2 s while
   on screen, and every 10 s as a background read while the account's feed is on, so
-  `feed_unseen` can count for the footer and the Feed tab (again at once while `more`). Its keys
+  `feed_unseen` can count for the footer and the Inbox tab (again at once while `more`). Its keys
   (`feed_key`: ←/→ and `h` do nothing, `l` is Enter, ↑/↓ scroll a reply being read, Space
   expands the selected card in the list, `toggle_feed_expand`; `Hit::FeedExpand` is its
   `▾ more`/`▴ less`, `click_feed_expand`) and Enter
@@ -128,7 +128,7 @@ new-session flow, and code boundaries.
   Esc, `drawer_key` its keys, `drawer_session` what the footer names. Every change runs
   `drawer_moved`: the session on screen takes its new pane size (`sync_terminal_size`), and the
   tab that came on screen starts (feed read, rtop sample)
-  while the other stops. `components/drawer.rs::draw_drawer` draws the band (`≡ Feed   ▥ rtop`,
+  while the other stops. `components/drawer.rs::draw_drawer` draws the band (`≡ Inbox   ▥ rtop`,
   the active one underlined, the accent while it has the keys) and the active tab;
   `components/session_tabs.rs` draws the Tabs layout's drawer tab, named by its active tab.
 - `list_tabs.rs`: `App::tab_label` (the active tab names its filter, inactive ones say Repos /
@@ -367,5 +367,5 @@ timers ───────────┘                                     
   empty, live, exited and dead states in both layouts, at phone sizes (45×40, 40×20) for the
   list-then-session layout, taps and dialogs, and at narrow-window sizes (90×40, 90×20) for the
   stacked layout.
-- The drawer: `feed/tests.rs` for the Feed tab, `ui.rs` for its rendering, rtop and switching tabs
+- The drawer: `feed/tests.rs` for the Inbox tab, `ui.rs` for its rendering, rtop and switching tabs
   (`rtop_from_settings_…`, `the_drawer_switches_…`, `the_tabs_layout_names_the_drawer_…`).

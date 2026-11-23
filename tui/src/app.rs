@@ -1039,7 +1039,7 @@ impl App {
                 (
                     "Account",
                     value,
-                    "Sign in to your Rakumux account for AI session titles, the agent feed and rtop on rakumux.com, and to reply to your agents and start sessions here from rakumux.com. Your agents' chats and this machine's session list go to rakumux.com, keys and tokens masked, private sessions never. Same as `rakumux account login`.",
+                    "Sign in to your Rakumux account for AI session titles, the inbox and rtop on rakumux.com, and to reply to your agents and start sessions here from rakumux.com. Your agents' chats and this machine's session list go to rakumux.com, keys and tokens masked, private sessions never. Same as `rakumux account login`.",
                 )
             }
             SettingsItem::Workspace => {
@@ -1067,7 +1067,7 @@ impl App {
             SettingsItem::Rtop => (
                 "rtop",
                 "CPU, memory, network · t".into(),
-                "What this machine, this window, the Rakumux server and every running session's processes use now: CPU, memory and network traffic, about every second, in the drawer on the right beside the Feed. Nothing is recorded.",
+                "What this machine, this window, the Rakumux server and every running session's processes use now: CPU, memory and network traffic, about every second, in the drawer on the right beside the Inbox. Nothing is recorded.",
             ),
             SettingsItem::SessionHistory => {
                 let available = self.has_session_history();
@@ -1098,7 +1098,7 @@ impl App {
                 (
                     "Terminal panel placement",
                     value.to_string(),
-                    "Where T opens the terminal panel: below the session, or beside it where the window has room for both (60 columns for the session, 40 for the panel; a docked Feed narrows to make room). Narrower windows and phones show it below. - and | open it there or move it while it's open.",
+                    "Where T opens the terminal panel: below the session, or beside it where the window has room for both (60 columns for the session, 40 for the panel; a docked Inbox narrows to make room). Narrower windows and phones show it below. - and | open it there or move it while it's open.",
                 )
             }
         };
@@ -1736,10 +1736,10 @@ const DAEMON_FEATURES: [(&str, &str); 14] = [
         session_core::api::CAPABILITY_TURN,
         "AI titles from agents' chats",
     ),
-    (session_core::api::CAPABILITY_REPLIES, "the agent feed"),
+    (session_core::api::CAPABILITY_REPLIES, "the inbox"),
     (
         session_core::api::CAPABILITY_TRANSCRIPT,
-        "whole chats in the agent feed",
+        "whole chats in the inbox",
     ),
     (
         session_core::api::CAPABILITY_PLACES,

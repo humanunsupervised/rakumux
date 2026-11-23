@@ -852,7 +852,7 @@ mod tests {
         assert_eq!(hidden.terminal.unwrap().right(), session.right());
         assert!(hidden.terminal.unwrap().width > session.width);
         assert!(
-            screen.lines().nth(1).unwrap().contains("≡ Feed"),
+            screen.lines().nth(1).unwrap().contains("≡ Inbox"),
             "{screen}"
         );
     }
@@ -2359,7 +2359,7 @@ mod tests {
         tap(&mut h, Hit::FooterKey(FooterKey::Rakumux));
         assert_eq!(h.app.focus, Focus::List);
 
-        // `? Help` and `, Settings` open them (Settings from 48 columns).
+        // `? Help` and `, Settings` open them (Settings from 49 columns).
         render(&mut h.app, width, height);
         tap(&mut h, Hit::FooterKey(FooterKey::Help));
         assert_eq!(modal_tab(&h), Some(Modal::Help.first_tab()));
@@ -2367,7 +2367,7 @@ mod tests {
         render(&mut h.app, width, height);
         let settings = Hit::FooterKey(FooterKey::Settings);
         assert!(!h.app.hits.iter().any(|(_, hit)| *hit == settings));
-        render(&mut h.app, 48, height);
+        render(&mut h.app, 49, height);
         tap(&mut h, settings);
         assert_eq!(modal_tab(&h), Some(ModalTab::Settings));
         h.press(KeyCode::Esc).await;
@@ -2455,7 +2455,7 @@ mod tests {
                         Hit::FooterKey(crate::app::FooterKey::Help) => " ? Help ",
                         Hit::FooterKey(crate::app::FooterKey::Settings) => " , Settings ",
                         Hit::FooterKey(crate::app::FooterKey::Account) => " a ✓ Signed in ",
-                        Hit::FooterKey(crate::app::FooterKey::Feed) => " f ≡ Feed ",
+                        Hit::FooterKey(crate::app::FooterKey::Feed) => " f ≡ Inbox ",
                         Hit::FooterKey(crate::app::FooterKey::Workspace) => " m ⊞ No workspace ",
                         other => panic!("{other:?}"),
                     };
@@ -2597,8 +2597,8 @@ mod tests {
         assert!(wide.contains("hello from the fake"), "{wide}");
         assert_eq!(screen.detail.unwrap().right(), feed.x - 1);
         // The pane's band names it, bright while it has the keys.
-        assert_eq!(pane[1], "   ≡ Feed   ♥ Beats   ▥ rtop", "{wide}");
-        assert_eq!(pane[2], "   ▁▁▁▁▁▁", "{wide}");
+        assert_eq!(pane[1], "   ≡ Inbox   ♥ Beats   ▥ rtop", "{wide}");
+        assert_eq!(pane[2], "   ▁▁▁▁▁▁▁", "{wide}");
         let mut terminal = Terminal::new(TestBackend::new(160, 48)).unwrap();
         terminal.draw(|f| draw(f, &mut h.app)).unwrap();
         let p = crate::theme::palette();
@@ -2635,12 +2635,12 @@ mod tests {
         assert!(footer.starts_with(" session: ● api "), "{footer:?}");
         assert!(footer.contains(" RAKUMUX MODE "), "{footer:?}");
         assert!(!footer.contains("FEED"), "{footer:?}");
-        assert!(footer.contains(" f ≡ Feed "), "{footer:?}");
+        assert!(footer.contains(" f ≡ Inbox "), "{footer:?}");
         // Enter: the reply whole in the cards' place, `‹` on the band.
         h.press(KeyCode::Enter).await;
         let wide = render(&mut h.app, 160, 48);
         let pane = pane_column(&wide, feed.x);
-        assert_eq!(pane[1], "   ‹ ≡ Feed   ♥ Beats   ▥ rtop", "{wide}");
+        assert_eq!(pane[1], "   ‹ ≡ Inbox   ♥ Beats   ▥ rtop", "{wide}");
         assert!(wide.contains("Enter goes into its session"), "{wide}");
         assert!(wide.contains("Run cargo test to check."), "{wide}");
         assert!(wide.contains("hello from the fake"), "{wide}");
@@ -2656,7 +2656,7 @@ mod tests {
         let divider = h.app.screen().divider.unwrap();
         assert!(narrow.contains("api  claude · repo"), "{narrow}");
         let feed_band = narrow.lines().nth(usize::from(divider.y) + 2).unwrap();
-        assert!(feed_band.contains("≡ Feed"), "{narrow}");
+        assert!(feed_band.contains("≡ Inbox"), "{narrow}");
     }
 
     #[tokio::test]
@@ -2735,26 +2735,26 @@ mod tests {
         use rakumux_sensagent::feed::FeedStatus;
         let mut h = feed_harness(FakeAccount::default(), None);
         let screen = render(&mut h.app, 160, 48);
-        assert!(screen.contains("Sign in to see your feed:"), "{screen}");
+        assert!(screen.contains("Sign in to see your inbox:"), "{screen}");
         assert!(screen.contains(", Settings → Account"), "{screen}");
         let mut h = feed_harness(FakeAccount::signed_in(), None);
         let screen = render(&mut h.app, 160, 48);
         assert!(
-            screen.contains("The feed isn't on for your account yet."),
+            screen.contains("The inbox isn't on for your account yet."),
             "{screen}"
         );
         // A narrow pane wraps it rather than cutting it off.
         h.app.settings.sessions.feed_width = Some(30);
         let screen = render(&mut h.app, 160, 48);
-        assert!(screen.contains("The feed isn't on for your"), "{screen}");
-        assert!(screen.contains("account yet."), "{screen}");
+        assert!(screen.contains("The inbox isn't on for"), "{screen}");
+        assert!(screen.contains("your account yet."), "{screen}");
         let mut h = feed_harness(FakeAccount::with_feed(), None);
         let screen = render(&mut h.app, 160, 48);
         assert!(screen.contains("No replies yet"), "{screen}");
         let loading = feed_page(FeedStatus::Loading, Vec::new());
         let mut h = feed_harness(FakeAccount::with_feed(), Some(loading));
         let screen = render(&mut h.app, 160, 48);
-        assert!(screen.contains("Loading the feed…"), "{screen}");
+        assert!(screen.contains("Loading the inbox…"), "{screen}");
         let kept = feed_page(
             FeedStatus::Unavailable,
             vec![reply("R", "A", "api", "lab", 1, "Kept from before.")],
@@ -2832,7 +2832,7 @@ mod tests {
             }
             assert!(screen.contains("Cargo.toml"), "{name}\n{screen}");
             if name.contains("feed") {
-                assert!(screen.contains("≡ Feed"), "{name}\n{screen}");
+                assert!(screen.contains("≡ Inbox"), "{name}\n{screen}");
             }
         }
     }
@@ -2849,7 +2849,7 @@ mod tests {
         };
         let row = first(&mut h);
         assert!(
-            row.contains("◔ Status ▾") && row.contains("≡ Feed"),
+            row.contains("◔ Status ▾") && row.contains("≡ Inbox"),
             "{row}"
         );
         assert!(render(&mut h.app, 160, 48).contains("+ New session"));
@@ -2894,14 +2894,14 @@ mod tests {
                 .to_string()
         };
         let shown = footer(&mut h);
-        assert!(shown.contains(" f ≡ Feed ●2   ? Help "), "{shown:?}");
+        assert!(shown.contains(" f ≡ Inbox ●2   ? Help "), "{shown:?}");
         // A tap: the feed, with the keys; nothing is new any more.
         tap(&mut h, Hit::FooterKey(FooterKey::Feed));
         assert!(h.app.feed_shown());
         assert!(h.app.feed_has_keys());
         let shown = footer(&mut h);
         assert!(shown.contains(" RAKUMUX MODE "), "{shown:?}");
-        assert!(shown.contains(" f ≡ Feed   ? Help "), "{shown:?}");
+        assert!(shown.contains(" f ≡ Inbox   ? Help "), "{shown:?}");
         // The label does what Esc does: the list gets the keys back, the
         // feed stays.
         tap(&mut h, Hit::ModeBadge);
@@ -2921,7 +2921,7 @@ mod tests {
         let phone = render(&mut h.app, 40, 20);
         let shown = phone.lines().last().unwrap();
         assert!(
-            shown.ends_with(" RAKUMUX MODE   f ≡ Feed   ? Help  "),
+            shown.ends_with(" RAKUMUX MODE   f ≡ Inbox   ? Help  "),
             "{shown:?}"
         );
     }
@@ -2945,7 +2945,7 @@ mod tests {
         let phone = render(&mut h.app, 45, 40);
         assert_eq!(
             phone.lines().nth(1).unwrap().trim_end(),
-            "   ≡ Feed   ♥ Beats   ▥ rtop",
+            "   ≡ Inbox   ♥ Beats   ▥ rtop",
             "{phone}"
         );
         assert!(phone.contains("nightly-build"), "{phone}");
@@ -2954,7 +2954,7 @@ mod tests {
         let reading = render(&mut h.app, 45, 40);
         assert_eq!(
             reading.lines().nth(1).unwrap().trim_end(),
-            "   ‹ ≡ Feed   ♥ Beats   ▥ rtop",
+            "   ‹ ≡ Inbox   ♥ Beats   ▥ rtop",
             "{reading}"
         );
         assert!(reading.contains("finished 5m ago"), "{reading}");
@@ -2987,14 +2987,14 @@ mod tests {
         let rows: Vec<&str> = screen.lines().collect();
         // Before the sessions' tabs and a line, unnumbered.
         assert!(
-            rows[0].starts_with(" ◔ Status ▾   ≡ Feed  │  1 ● docs "),
+            rows[0].starts_with(" ◔ Status ▾   ≡ Inbox  │  1 ● docs "),
             "{:?}",
             rows[0]
         );
         // Selected: the cards on the left, the selected reply beside them.
         let width = usize::from(crate::layout::sidebar_width(160));
         let cards = list_column(&screen, width);
-        assert_eq!(cards[2], "   ≡ Feed   ♥ Beats   ▥ rtop", "{screen}");
+        assert_eq!(cards[2], "   ≡ Inbox   ♥ Beats   ▥ rtop", "{screen}");
         assert!(cards[5].starts_with(" ╭ api  claude · repo ─"), "{screen}");
         assert!(rows[2].chars().nth(width) == Some('│'), "{screen}");
         assert!(screen.contains("finished 2m ago"), "{screen}");
@@ -3010,7 +3010,7 @@ mod tests {
         h.press(KeyCode::Esc).await;
         let screen = render(&mut h.app, 160, 48);
         assert!(
-            screen.lines().next().unwrap().contains("≡ Feed"),
+            screen.lines().next().unwrap().contains("≡ Inbox"),
             "{screen}"
         );
         assert!(screen.contains("hello from the fake"), "{screen}");
@@ -3115,7 +3115,7 @@ mod tests {
         assert_eq!((drawer.x, drawer.right()), (116, 160));
         let pane = drawer_text(&screen, usize::from(drawer.x));
         for text in [
-            "Feed   ",
+            "Inbox   ",
             "rtop",
             "this window",
             "rakumux-ptyd",
@@ -3190,7 +3190,7 @@ mod tests {
         render(&mut h.app, 160, 48);
         h.app.process_pending();
         let calls = |h: &Harness| h.fake.calls().iter().filter(|c| *c == "resources").count();
-        assert_eq!(calls(&h), 0, "the Feed's tab doesn't sample");
+        assert_eq!(calls(&h), 0, "the Inbox's tab doesn't sample");
 
         // `t` switches the drawer to rtop with the keys, in the same place.
         let feed_area = h.app.screen().feed;
@@ -3239,7 +3239,7 @@ mod tests {
         h.press(KeyCode::Char('t')).await;
         let screen = render(&mut h.app, 160, 48);
         let bar = screen.lines().next().unwrap();
-        assert!(bar.contains("rtop") && !bar.contains("Feed"), "{bar}");
+        assert!(bar.contains("rtop") && !bar.contains("Inbox"), "{bar}");
         h.app.process_pending();
         let screen = render(&mut h.app, 160, 48);
         // Full width: every column, the processes' arguments too.
@@ -3250,7 +3250,7 @@ mod tests {
             .next()
             .unwrap()
             .to_string();
-        assert!(bar.contains("Feed") && !bar.contains("rtop"), "{bar}");
+        assert!(bar.contains("Inbox") && !bar.contains("rtop"), "{bar}");
 
         // A phone: the drawer fills the screen while it has the keys; Esc
         // hides it.

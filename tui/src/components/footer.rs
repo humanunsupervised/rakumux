@@ -230,8 +230,8 @@ fn tab_styles(focus: Focus) -> (Style, Style, Style) {
 fn feed_label(app: &App) -> String {
     let icon = app.icons().feed();
     match feed_count(app) {
-        Some(count) => format!("{icon} Feed {count}"),
-        None => format!("{icon} Feed"),
+        Some(count) => format!("{icon} Inbox {count}"),
+        None => format!("{icon} Inbox"),
     }
 }
 
@@ -842,8 +842,8 @@ mod tests {
         row
     }
 
-    /// Rakumux mode's buttons, signed in: 49 columns with the space after.
-    const ALL_BUTTONS: &str = " f ≡ Feed   ? Help   , Settings   a ✓ Signed in  ";
+    /// Rakumux mode's buttons, signed in: 50 columns with the space after.
+    const ALL_BUTTONS: &str = " f ≡ Inbox   ? Help   , Settings   a ✓ Signed in  ";
 
     /// The way out of session mode: 9 columns with the space after.
     const WAY_OUT: &str = " Ctrl-\\  ";
@@ -872,26 +872,26 @@ mod tests {
             row(&[
                 (0, session),
                 (73, label),
-                (104, ALL_BUTTONS),
+                (103, ALL_BUTTONS),
                 (153, VERSION)
             ])
         );
         // The version takes the label off centre…
         assert_eq!(
             line(&h, 100),
-            row(&[(0, session), (29, label), (44, ALL_BUTTONS), (93, VERSION)])
+            row(&[(0, session), (28, label), (43, ALL_BUTTONS), (93, VERSION)])
         );
         // …and goes when it doesn't fit beside everything else whole.
         assert_eq!(
             line(&h, 86),
-            row(&[(0, session), (22, label), (37, ALL_BUTTONS)])
+            row(&[(0, session), (21, label), (36, ALL_BUTTONS)])
         );
-        let phone = " f ≡ Feed   ? Help  ";
+        let phone = " f ≡ Inbox   ? Help  ";
         assert_eq!(
             line(&h, 45),
-            row(&[(0, " ● api"), (10, label), (25, phone)])
+            row(&[(0, " ● api"), (9, label), (24, phone)])
         );
-        assert_eq!(line(&h, 40), row(&[(5, label), (20, phone)]));
+        assert_eq!(line(&h, 40), row(&[(4, label), (19, phone)]));
         // Session mode: the label in the centre, the Rakumux key alone on
         // the right.
         h.press(KeyCode::Enter).await;
@@ -1078,7 +1078,7 @@ mod tests {
         // buttons…
         let line = text(&footer_line(&h.app, 80));
         assert!(
-            line.starts_with(" session: ● api  Layout: Tabs    RAKUMUX MODE   f ≡ Feed "),
+            line.starts_with(" session: ● api  Layout: Tabs   RAKUMUX MODE   f ≡ Inbox "),
             "{line:?}"
         );
         // …then the session gives way: its name alone, then nothing.
@@ -1087,14 +1087,14 @@ mod tests {
         assert!(line.ends_with(" ? Help   , Settings  "), "{line:?}");
         let line = text(&footer_line(&h.app, 64));
         assert!(
-            line.starts_with(" Layout: Tabs    RAKUMUX MODE "),
+            line.starts_with(" Layout: Tabs   RAKUMUX MODE "),
             "{line:?}"
         );
         assert!(line.ends_with(" ? Help   , Settings  "), "{line:?}");
         // Then the buttons go from the right: Settings, then Help.
         let line = text(&footer_line(&h.app, 50));
         assert!(line.starts_with(" Layout: Tabs "), "{line:?}");
-        assert!(line.ends_with(" f ≡ Feed   ? Help  "), "{line:?}");
+        assert!(line.ends_with(" f ≡ Inbox   ? Help  "), "{line:?}");
         // A long message is cut to keep the buttons while it keeps 30
         // columns (the session has given way already)…
         let long = "A status message long enough to need the whole line here, and then some";
@@ -1107,7 +1107,7 @@ mod tests {
         // …then the buttons go…
         let line = text(&footer_line(&h.app, 70));
         assert!(
-            line.ends_with(" RAKUMUX MODE   f ≡ Feed   ? Help  "),
+            line.ends_with(" RAKUMUX MODE   f ≡ Inbox   ? Help  "),
             "{line:?}"
         );
         // …and the message takes the row up to the label.
@@ -1188,16 +1188,16 @@ mod tests {
         // account goes first)…
         let line = text(&footer_line(&h.app, 60));
         assert!(
-            line.ends_with(" RAKUMUX MODE   f ≡ Feed   ? Help   , Settings  "),
+            line.ends_with(" RAKUMUX MODE   f ≡ Inbox   ? Help   , Settings  "),
             "{line:?}"
         );
         // …then Settings, then Help: the Feed's button stays longest…
         for width in [45, 40] {
             let line = text(&footer_line(&h.app, width));
-            assert!(line.ends_with(" f ≡ Feed   ? Help  "), "{line:?}");
+            assert!(line.ends_with(" f ≡ Inbox   ? Help  "), "{line:?}");
         }
-        let line = text(&footer_line(&h.app, 26));
-        assert_eq!(line, " RAKUMUX MODE   f ≡ Feed  ");
+        let line = text(&footer_line(&h.app, 27));
+        assert_eq!(line, " RAKUMUX MODE   f ≡ Inbox  ");
         // …and the label longer still, in its short word when even its
         // full ones don't fit.
         assert_eq!(text(&footer_line(&h.app, 20)), "    RAKUMUX MODE ");
@@ -1262,14 +1262,14 @@ mod tests {
         };
         h.app.feed.apply(page((0..3).map(entry).collect()));
         // Counted only while the account keeps the feed (signed in, on).
-        assert_eq!(buttons(&h.app)[0].label, "≡ Feed");
+        assert_eq!(buttons(&h.app)[0].label, "≡ Inbox");
         h.app.account = AccountStatus::SignedIn(crate::account::Account {
             feed: Some(true),
             ..crate::app::testing::FakeAccount::person()
         });
-        assert_eq!(buttons(&h.app)[0].label, "≡ Feed ●3");
+        assert_eq!(buttons(&h.app)[0].label, "≡ Inbox ●3");
         h.app.feed.apply(page((0..120).map(entry).collect()));
-        assert_eq!(buttons(&h.app)[0].label, "≡ Feed ●99+");
+        assert_eq!(buttons(&h.app)[0].label, "≡ Inbox ●99+");
         assert_eq!(buttons(&h.app)[0].target, FooterKey::Feed);
     }
 

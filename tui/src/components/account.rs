@@ -47,7 +47,7 @@ pub fn draw_account(f: &mut Frame, dialog: &AccountDialog, area: Rect) {
         AccountDialogState::SignedOut => (
             vec![
                 Line::from(
-                    "Sign in for AI session titles, the agent feed and your sessions on \
+                    "Sign in for AI session titles, the inbox and your sessions on \
                      rakumux.com.",
                 ),
                 Line::from(""),
