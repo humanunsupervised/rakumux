@@ -186,7 +186,8 @@ pub fn draw_rename_dialog(f: &mut Frame, dialog: &RenameDialog, area: Rect) {
     let keys = [("Enter", "Rename"), ("Esc", "Cancel")];
     let height = 8 + key_rows(&keys, popup_width(area.width, 60));
     let popup = popup_area_fixed_height(area, 60, height);
-    let inner = dialog_frame(f, popup, "Rename session", palette().accent_primary);
+    let title = format!("Rename {}", dialog.target.noun());
+    let inner = dialog_frame(f, popup, &title, palette().accent_primary);
     let above = draw_keys(f, inner, &keys);
     let rows = Layout::default()
         .direction(Direction::Vertical)

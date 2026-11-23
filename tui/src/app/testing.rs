@@ -425,11 +425,14 @@ impl SessionApi for FakeApi {
             id,
             scope: spec.scope.unwrap_or_else(scope),
             name,
-            agent: Some("claude".into()),
             command: spec
                 .fields
                 .command
-                .unwrap_or_else(|| "claude --permission-mode acceptEdits".into()),
+                .unwrap_or_else(|| match spec.fields.agent.as_deref() {
+                    None | Some("claude") => "claude --permission-mode acceptEdits".into(),
+                    Some(agent) => agent.into(),
+                }),
+            agent: spec.fields.agent.or(Some("claude".into())),
             prompt: spec.fields.prompt.unwrap_or_default(),
             schedule: spec.fields.schedule,
             enabled: spec.enabled,
@@ -443,6 +446,25 @@ impl SessionApi for FakeApi {
         };
         state.heartbeats.push(heartbeat.clone());
         Ok(heartbeat)
+    }
+
+    fn heartbeat_update(
+        &self,
+        edit: session_core::heartbeat::HeartbeatEdit,
+    ) -> Result<session_core::heartbeat::Heartbeat> {
+        self.take_failure("heartbeat_update")?;
+        let mut state = self.state.lock().unwrap();
+        let name = edit.name.unwrap_or_default();
+        state
+            .calls
+            .push(format!("heartbeat_update {} {name}", edit.id));
+        let heartbeat = state
+            .heartbeats
+            .iter_mut()
+            .find(|h| h.id == edit.id)
+            .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "no heartbeat"))?;
+        heartbeat.name = name;
+        Ok(heartbeat.clone())
     }
 
     fn heartbeat_enable(

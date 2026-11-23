@@ -689,8 +689,9 @@ impl KeyAction {
                  and its agent gets the task once its prompt shows; earlier runs that wait are \
                  ended. Enter shows one whole (its prompt, command and runs; Enter there goes \
                  into a run), e approves or enables it (one an agent made or changed waits for \
-                 you, marked ?), p pauses, r runs it now, d twice deletes it. n makes an empty \
-                 one and starts the agent you last ran here, asked to fill it in with you."
+                 you, marked ?), p pauses, r runs it now, c renames it, d twice deletes it. n or + \
+                 New heartbeat makes one: its task, schedule, folder and agent; Ask agent starts \
+                 the agent instead, asked to fill it in with you."
                 .into(),
             KeyAction::Workspaces => "Groups of sessions on this machine. The list shows one \
                  workspace, or the sessions in none (No workspace); new sessions start in the \

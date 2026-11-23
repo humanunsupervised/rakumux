@@ -75,6 +75,10 @@ new-session flow, and code boundaries.
   the workspace shown (`new_session_workspace`). Keys in `handlers/workspaces.rs`, drawing in
   `components/workspaces.rs`. The test fake announces `workspaces` only with
   `FakeState::keeps_workspaces`.
+- `heartbeats.rs`: the drawer's Beats tab (`BeatsView`, `BeatAction`: the selected heartbeat's
+  buttons; `+ New heartbeat`, `Hit::BeatNew`); `heartbeat_form.rs`: the New heartbeat form
+  (`AppMode::NewHeartbeat(HeartbeatForm)`, its keys, clicks (`FormHit`) and what it makes).
+  Drawing in `components/heartbeats.rs` and `components/heartbeat_form.rs`.
 - `path_complete.rs`: the folders that complete a typed path (`suggest`: folders and links to
   them, dot-folders only once the name starts with `.`, case-insensitive only when nothing else
   matches, capped reads; `expand` for `~` and relative paths). The Folders modal lists them as

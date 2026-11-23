@@ -14,6 +14,7 @@ use session_core::api::{
     ReviveSession, Role, SessionEvent, StreamCommand, StreamEvent, TextFormat,
 };
 use session_core::client::{AttachEvent, AttachStream, SessionApi};
+use session_core::heartbeat::HeartbeatEdit;
 use session_core::ids::SessionId;
 use session_core::model::{Lifecycle, SessionStatus, SessionView};
 
@@ -1100,6 +1101,7 @@ impl App {
         }
         match &mut self.mode {
             AppMode::Renaming(dialog) => dialog.input.insert_str(text),
+            AppMode::NewHeartbeat(form) => form.paste(text),
             // Lines run on as one: the box holds one.
             AppMode::FeedReply(dialog) => dialog.input.insert_str(&text.replace(['\r', '\n'], " ")),
             AppMode::AuthEmail(dialog) => dialog.input.insert_str(text),
@@ -1158,6 +1160,10 @@ impl App {
             }
             if matches!(self.mode, AppMode::Workspaces(_)) {
                 self.workspaces_mouse(event);
+                return;
+            }
+            if matches!(self.mode, AppMode::NewHeartbeat(_)) {
+                self.heartbeat_form_mouse(event);
                 return;
             }
             // The wheel moves Settings' selection and scrolls Help.
@@ -1432,6 +1438,15 @@ impl App {
                     self.click_beat_row(index);
                     return;
                 }
+                Some(Hit::BeatNew) => {
+                    self.show_drawer_tab(DrawerTab::Beats);
+                    self.new_heartbeat();
+                    return;
+                }
+                Some(Hit::BeatAction(action)) => {
+                    self.click_beat_action(action);
+                    return;
+                }
                 Some(Hit::Drawer | Hit::DrawerBarTab) => {
                     self.focus_drawer();
                     return;
@@ -1486,7 +1501,8 @@ impl App {
                     | Hit::WorkspaceMenu
                     | Hit::WorkspaceRow(_)
                     | Hit::WorkspaceRename
-                    | Hit::WorkspaceDelete,
+                    | Hit::WorkspaceDelete
+                    | Hit::HeartbeatForm(_),
                 )
                 | None => {}
             }
@@ -2077,7 +2093,7 @@ impl App {
             return;
         };
         self.mode = AppMode::Renaming(RenameDialog {
-            session_id: session.id.clone(),
+            target: RenameTarget::Session(session.id.clone()),
             current_name: session.name.clone(),
             input: super::TextInput::new(session.name.clone()),
             error_message: None,
@@ -2094,7 +2110,10 @@ impl App {
         }
         let name = dialog.input.value().trim().to_string();
         if name.is_empty() {
-            dialog.error_message = Some("Session name cannot be empty".into());
+            dialog.error_message = Some(match &dialog.target {
+                RenameTarget::Session(_) => "Session name cannot be empty".into(),
+                RenameTarget::Heartbeat(_) => "Heartbeat name cannot be empty".into(),
+            });
             return;
         }
         if name == dialog.current_name {
@@ -2107,12 +2126,21 @@ impl App {
         };
         dialog.busy = true;
         dialog.error_message = None;
-        let id = dialog.session_id.clone();
-        self.exec.job(move || AppEvent::Renamed {
-            result: api.rename(&id, &name),
-            id,
-            automatic: false,
-        });
+        match dialog.target.clone() {
+            RenameTarget::Session(id) => self.exec.job(move || AppEvent::Renamed {
+                result: api.rename(&id, &name),
+                id,
+                automatic: false,
+            }),
+            RenameTarget::Heartbeat(id) => self.exec.job(move || AppEvent::HeartbeatRenamed {
+                result: api.heartbeat_update(HeartbeatEdit {
+                    id: id.clone(),
+                    name: Some(name),
+                    fields: Default::default(),
+                }),
+                id,
+            }),
+        }
     }
 
     pub(super) fn rename_automatically(&mut self, id: SessionId, name: String) {
@@ -2130,7 +2158,8 @@ impl App {
         result: Result<SessionView, ApiError>,
         automatic: bool,
     ) {
-        let in_dialog = matches!(&self.mode, AppMode::Renaming(d) if d.session_id == id && d.busy && !automatic);
+        let in_dialog = matches!(&self.mode, AppMode::Renaming(d)
+            if d.target == RenameTarget::Session(id.clone()) && d.busy && !automatic);
         match result {
             Ok(session) => {
                 if in_dialog {

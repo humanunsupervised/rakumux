@@ -38,6 +38,7 @@ pub mod feed;
 pub mod folders;
 pub mod grouping;
 mod handlers;
+pub mod heartbeat_form;
 pub mod heartbeats;
 mod history;
 mod keys;
@@ -217,6 +218,12 @@ pub enum Hit {
     /// A row of the Beats tab (a heartbeat, or reading one, a run): selects
     /// it, or does what Enter does when it's selected already.
     BeatRow(usize),
+    /// Beats' `+ New heartbeat`: opens the form.
+    BeatNew,
+    /// A button of the selected (or read) heartbeat.
+    BeatAction(heartbeats::BeatAction),
+    /// A part of the New heartbeat form.
+    HeartbeatForm(heartbeat_form::FormHit),
     /// The open Folders modal (clicks inside it don't close it).
     FolderMenu,
     /// A row of the Folders modal.
@@ -1150,6 +1157,7 @@ impl App {
             || match &self.mode {
                 AppMode::Folders(d) => d.busy,
                 AppMode::Renaming(d) => d.busy,
+                AppMode::NewHeartbeat(d) => d.busy,
                 AppMode::FeedReply(d) => d.busy,
                 AppMode::DaemonRestart(d) => d.restarting,
                 AppMode::Upgrade(d) => d.checking || d.installing,
@@ -1273,6 +1281,8 @@ impl App {
             AppEvent::Resources { generation, result } => self.on_resources(generation, result),
             AppEvent::Heartbeats { generation, result } => self.on_heartbeats(generation, result),
             AppEvent::HeartbeatDone { result } => self.on_heartbeat_done(result),
+            AppEvent::HeartbeatMade { setup, result } => self.on_heartbeat_made(setup, result),
+            AppEvent::HeartbeatRenamed { id, result } => self.on_heartbeat_renamed(id, result),
             AppEvent::SignIn(result) => self.on_sign_in(result),
             AppEvent::Devices(result) => self.on_devices(result),
             AppEvent::DevicePairing(result) => self.on_device_pairing(result),

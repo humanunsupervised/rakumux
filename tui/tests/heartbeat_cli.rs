@@ -22,7 +22,7 @@ struct World {
 
 impl Drop for World {
     fn drop(&mut self) {
-        let _ = self.rakumux(&["daemon", "stop"]);
+        let _ = self.rakumux(&["daemon", "stop", "--yes"]);
     }
 }
 

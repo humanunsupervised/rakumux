@@ -133,6 +133,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             &mut menu_hits,
         ),
         AppMode::Renaming(dialog) => draw_rename_dialog(f, dialog, modal_area),
+        AppMode::NewHeartbeat(form) => crate::components::heartbeat_form::draw_heartbeat_form(
+            f,
+            app,
+            form,
+            modal_area,
+            &mut menu_hits,
+        ),
         AppMode::FeedReply(dialog) => draw_feed_reply_dialog(f, dialog, modal_area),
         AppMode::Confirm(dialog) => draw_confirm_dialog(f, dialog, modal_area),
         AppMode::DaemonRestart(dialog) => draw_daemon_restart_dialog(f, dialog, modal_area),
@@ -2053,13 +2060,14 @@ mod tests {
             return;
         }
         use crate::app::types::{
-            ConfirmAction, ConfirmDialog, DaemonRestartDialog, RenameDialog, UpgradeDialog,
+            ConfirmAction, ConfirmDialog, DaemonRestartDialog, RenameDialog, RenameTarget,
+            UpgradeDialog,
         };
         use crate::app::TextInput;
         let id = session_core::ids::SessionId::from_string("A");
         h.app.mode = match which {
             "rename" => AppMode::Renaming(RenameDialog {
-                session_id: id,
+                target: RenameTarget::Session(id),
                 current_name: "api".into(),
                 input: TextInput::new("api"),
                 error_message: None,
@@ -3544,9 +3552,15 @@ mod tests {
         h.press(KeyCode::Char('d')).await;
         assert!(enables(&h).contains(&"heartbeat_delete HB2".to_string()));
 
-        // n: an empty heartbeat, and a session running its command whose
-        // agent is asked (typed, not sent) to fill it in.
+        // n: the form; Ask agent makes an empty heartbeat, and a session
+        // running its command whose agent is asked (typed, not sent) to fill
+        // it in.
         h.press(KeyCode::Char('n')).await;
+        assert!(matches!(h.app.mode, AppMode::NewHeartbeat(_)));
+        assert!(h.fake.creates().is_empty());
+        h.press(KeyCode::Up).await;
+        h.press(KeyCode::Enter).await;
+        assert!(matches!(h.app.mode, AppMode::Normal));
         assert!(enables(&h).contains(&"heartbeat_create Heartbeat".to_string()));
         let setup = h.fake.creates().last().cloned().unwrap();
         assert_eq!(setup.startup_cmds, ["claude --permission-mode acceptEdits"]);
@@ -3558,5 +3572,202 @@ mod tests {
             first.text
         );
         assert_eq!(h.app.focus, Focus::Session);
+    }
+
+    /// Click the first place `text` is drawn at, on a `width` × `height`
+    /// screen.
+    fn click_text(h: &mut Harness, width: u16, height: u16, text: &str) {
+        let screen = render(&mut h.app, width, height);
+        let (row, column) = screen
+            .lines()
+            .enumerate()
+            .find_map(|(y, line)| {
+                line.find(text)
+                    .map(|at| (y as u16, crate::layout::str_width(&line[..at]) as u16))
+            })
+            .unwrap_or_else(|| panic!("{text:?} isn't on screen:\n{screen}"));
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            h.app.handle_mouse(MouseEvent {
+                kind,
+                column,
+                row,
+                modifiers: KeyModifiers::NONE,
+            });
+        }
+        h.app.process_pending();
+    }
+
+    #[tokio::test]
+    async fn a_new_heartbeat_is_made_in_the_form_then_renamed_and_deleted() {
+        let mut h = harness(vec![view("A", "fix-login", 20)]);
+        h.press(KeyCode::Char('B')).await;
+        // None yet: the one row, selected, makes one (Enter).
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("+ New heartbeat"), "{screen}");
+        h.press(KeyCode::Enter).await;
+        let screen = render(&mut h.app, 160, 48);
+        for text in [
+            "New heartbeat",
+            "Name",
+            "Task",
+            "Every",
+            "Daily",
+            "‹ claude ›",
+            "Create",
+            "Ask agent",
+        ] {
+            assert!(screen.contains(text), "{text}: {screen}");
+        }
+        // Named, a task of two lines, daily at 18:30, run by codex.
+        h.type_text("nightly").await;
+        h.press(KeyCode::Enter).await;
+        h.type_text("Run the tests.").await;
+        h.ctrl('j').await;
+        h.type_text("Fix what fails.").await;
+        h.press(KeyCode::Tab).await;
+        h.press(KeyCode::Right).await;
+        h.press(KeyCode::Tab).await;
+        h.ctrl('u').await;
+        h.type_text("6pm").await;
+        h.press(KeyCode::Tab).await;
+        h.press(KeyCode::Tab).await;
+        h.press(KeyCode::Right).await;
+        h.press(KeyCode::Tab).await;
+        // A time it can't read: said, and the keys are on it.
+        h.press(KeyCode::Enter).await;
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("Write the time as HH:MM"), "{screen}");
+        assert!(screen.contains("‹ codex ›"), "{screen}");
+        assert!(h.fake.state.lock().unwrap().heartbeats.is_empty());
+        h.ctrl('u').await;
+        h.type_text("18:30").await;
+        // A failure keeps what was written.
+        h.fake.fail_next(
+            "heartbeat_create",
+            ApiError::new(
+                ErrorCode::InvalidArgument,
+                "a heartbeat named nightly exists",
+            ),
+        );
+        click_text(&mut h, 160, 48, " Create ");
+        let screen = render(&mut h.app, 160, 48);
+        assert!(
+            screen.contains("A heartbeat named nightly exists"),
+            "{screen}"
+        );
+        click_text(&mut h, 160, 48, " Create ");
+        assert!(matches!(h.app.mode, AppMode::Normal));
+        let made = h.fake.state.lock().unwrap().heartbeats[0].clone();
+        assert_eq!(made.name, "nightly");
+        assert_eq!(made.prompt, "Run the tests.\nFix what fails.");
+        assert_eq!(made.schedule.as_ref().unwrap().to_string(), "daily 18:30");
+        assert_eq!(made.agent.as_deref(), Some("codex"));
+        assert_eq!(made.scope, scope());
+        assert!(made.enabled);
+        // Beats shows it whole, with its buttons.
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("● nightly"), "{screen}");
+        assert!(screen.contains("Fix what fails."), "{screen}");
+        assert!(
+            screen.contains("r run  p pause  c rename  d delete"),
+            "{screen}"
+        );
+
+        // c renames it; an empty name isn't one.
+        h.press(KeyCode::Char('c')).await;
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("Rename heartbeat"), "{screen}");
+        h.ctrl('u').await;
+        h.press(KeyCode::Enter).await;
+        let screen = render(&mut h.app, 160, 48);
+        assert!(
+            screen.contains("Heartbeat name cannot be empty"),
+            "{screen}"
+        );
+        h.type_text("evening").await;
+        h.press(KeyCode::Enter).await;
+        assert!(matches!(h.app.mode, AppMode::Normal));
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("● evening"), "{screen}");
+        assert!(h
+            .fake
+            .calls()
+            .contains(&format!("heartbeat_update {} evening", made.id)));
+
+        // In the list: its buttons under it, the new row after it. Down and
+        // Enter open the form; Esc leaves it.
+        h.press(KeyCode::Esc).await;
+        let screen = render(&mut h.app, 160, 48);
+        assert!(
+            screen.contains("r run  p pause  c rename  d delete"),
+            "{screen}"
+        );
+        h.press(KeyCode::Char('j')).await;
+        let screen = render(&mut h.app, 160, 48);
+        assert!(!screen.contains("c rename"), "{screen}");
+        // Nothing to rename or delete on that row.
+        h.press(KeyCode::Char('c')).await;
+        h.press(KeyCode::Char('d')).await;
+        assert!(matches!(h.app.mode, AppMode::Normal));
+        h.press(KeyCode::Enter).await;
+        assert!(matches!(h.app.mode, AppMode::NewHeartbeat(_)));
+        h.press(KeyCode::Esc).await;
+        assert!(matches!(h.app.mode, AppMode::Normal));
+
+        // Clicks: the row selects it, a click renames, two delete it.
+        click_text(&mut h, 160, 48, "● evening");
+        click_text(&mut h, 160, 48, "c rename");
+        assert!(matches!(h.app.mode, AppMode::Renaming(_)));
+        h.press(KeyCode::Esc).await;
+        click_text(&mut h, 160, 48, "d delete");
+        assert_eq!(h.fake.state.lock().unwrap().heartbeats.len(), 1);
+        click_text(&mut h, 160, 48, "d again deletes");
+        assert!(h.fake.state.lock().unwrap().heartbeats.is_empty());
+        let screen = render(&mut h.app, 160, 48);
+        assert!(!screen.contains("● evening"), "{screen}");
+        click_text(&mut h, 160, 48, "+ New heartbeat");
+        assert!(matches!(h.app.mode, AppMode::NewHeartbeat(_)));
+    }
+
+    #[tokio::test]
+    async fn the_heartbeat_form_fits_phones_and_takes_taps() {
+        for (width, height) in PHONES {
+            let mut h = harness(vec![view("A", "fix-login", 20)]);
+            render(&mut h.app, width, height);
+            h.press(KeyCode::Char('B')).await;
+            click_text(&mut h, width, height, "+ New heartbeat");
+            click_text(&mut h, width, height, "Task");
+            h.app
+                .handle_paste("Update the dependencies, run the tests and fix what fails.\nThen say what changed.");
+            click_text(&mut h, width, height, "Days");
+            click_text(&mut h, width, height, "fri");
+            let screen = render(&mut h.app, width, height);
+            for text in [
+                "Name",
+                "Folder",
+                "Agent",
+                "Create",
+                "Ask agent",
+                "Esc cancel",
+            ] {
+                assert!(
+                    screen.contains(text),
+                    "{text} at {width}x{height}: {screen}"
+                );
+            }
+            click_text(&mut h, width, height, " Create ");
+            let made = h.fake.state.lock().unwrap().heartbeats[0].clone();
+            assert!(made.prompt.ends_with("\nThen say what changed."));
+            assert_eq!(
+                made.schedule.as_ref().unwrap().to_string(),
+                "mon,tue,wed,thu 09:00"
+            );
+            let screen = render(&mut h.app, width, height);
+            assert!(screen.contains("● Heartbeat"), "{screen}");
+            assert!(screen.contains("c rename"), "{screen}");
+        }
     }
 }

@@ -24,6 +24,7 @@ pub async fn handle_dialog_key(app: &mut App, key: KeyEvent) -> AppResult {
         AppMode::History(_) => super::history::handle_history_key(app, key),
         AppMode::Workspaces(_) => super::workspaces::handle_workspaces_key(app, key),
         AppMode::Renaming(_) => handle_rename_key(app, key),
+        AppMode::NewHeartbeat(_) => app.heartbeat_form_key(key),
         AppMode::FeedReply(_) => handle_feed_reply_key(app, key),
         AppMode::Confirm(_) => handle_confirm_key(app, key),
         AppMode::DaemonRestart(_) => return handle_daemon_restart_key(app, key),
@@ -128,6 +129,7 @@ fn dialog_busy(mode: &AppMode) -> bool {
     match mode {
         AppMode::Folders(d) => d.busy,
         AppMode::Renaming(d) => d.busy,
+        AppMode::NewHeartbeat(d) => d.busy,
         AppMode::FeedReply(d) => d.busy,
         AppMode::DaemonRestart(d) => d.restarting,
         AppMode::Upgrade(d) => d.installing,

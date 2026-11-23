@@ -1,6 +1,9 @@
-//! Single-line text field shared by every dialog: insertion, deletion,
-//! cursor and word movement with the usual readline keys. Unicode-safe: the
-//! cursor always sits on a char boundary.
+//! Text field shared by every dialog: insertion, deletion, cursor and word
+//! movement with the usual readline keys. One line, or several
+//! ([`TextInput::multiline`]), word-wrapped to the columns it's drawn in.
+//! Unicode-safe: the cursor always sits on a char boundary.
+
+use std::ops::Range;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -9,6 +12,8 @@ pub struct TextInput {
     value: String,
     /// Byte index into `value`, always on a char boundary.
     cursor: usize,
+    /// Keeps the newlines typed ([`Self::newline`]) and pasted.
+    multiline: bool,
 }
 
 impl TextInput {
@@ -16,7 +21,19 @@ impl TextInput {
     pub fn new(value: impl Into<String>) -> Self {
         let value = value.into();
         let cursor = value.len();
-        Self { value, cursor }
+        Self {
+            value,
+            cursor,
+            multiline: false,
+        }
+    }
+
+    /// An empty field of several lines.
+    pub fn multiline() -> Self {
+        Self {
+            multiline: true,
+            ..Self::default()
+        }
     }
 
     pub fn value(&self) -> &str {
@@ -34,13 +51,119 @@ impl TextInput {
 
     /// Replace the content; the cursor moves to the end.
     pub fn set(&mut self, value: impl Into<String>) {
-        *self = Self::new(value);
+        *self = Self {
+            multiline: self.multiline,
+            ..Self::new(value)
+        };
     }
 
     pub fn insert_str(&mut self, text: &str) {
-        let clean: String = text.chars().filter(|c| !c.is_control()).collect();
+        let clean: String = match self.multiline {
+            true => text
+                .replace("\r\n", "\n")
+                .replace('\r', "\n")
+                .replace('\t', "    "),
+            false => text.to_owned(),
+        }
+        .chars()
+        .filter(|c| !c.is_control() || (self.multiline && *c == '\n'))
+        .collect();
         self.value.insert_str(self.cursor, &clean);
         self.cursor += clean.len();
+    }
+
+    /// A new line at the cursor, in a field of several.
+    pub fn newline(&mut self) {
+        if self.multiline {
+            self.insert_str("\n");
+        }
+    }
+
+    /// The rows the text takes word-wrapped to `cols` columns (at least
+    /// one), as ranges of it, newlines left out.
+    pub fn rows(&self, cols: usize) -> Vec<Range<usize>> {
+        let cols = cols.max(1);
+        let mut rows = Vec::new();
+        let mut line_start = 0;
+        for line in self.value.split('\n') {
+            let mut start = line_start;
+            // Where the row may break: just after its last space.
+            let mut space = None;
+            let mut used = 0;
+            for (at, c) in line.char_indices() {
+                let at = line_start + at;
+                let width = char_width(c);
+                if used + width > cols && at > start {
+                    // A space that doesn't fit hangs off the row's end.
+                    if c == ' ' {
+                        space = Some(at + 1);
+                        continue;
+                    }
+                    let end = space.take().unwrap_or(at);
+                    rows.push(start..end);
+                    start = end;
+                    used = self.value[start..at].chars().map(char_width).sum();
+                }
+                used += width;
+                if c == ' ' {
+                    space = Some(at + 1);
+                }
+            }
+            let end = line_start + line.len();
+            rows.push(start..end);
+            line_start = end + 1;
+        }
+        rows
+    }
+
+    /// The cursor's row of [`Self::rows`] and its column there.
+    pub fn cursor_at(&self, cols: usize) -> (usize, usize) {
+        let rows = self.rows(cols);
+        let row = rows
+            .iter()
+            .rposition(|row| row.start <= self.cursor)
+            .unwrap_or(0);
+        let column = self.value[rows[row].start..self.cursor]
+            .chars()
+            .map(char_width)
+            .sum::<usize>();
+        (row, column.min(cols.saturating_sub(1)))
+    }
+
+    /// Move the cursor `delta` rows (wrapped to `cols`), keeping its column;
+    /// `false` when there's no such row.
+    pub fn move_rows(&mut self, delta: isize, cols: usize) -> bool {
+        let rows = self.rows(cols);
+        let (row, column) = self.cursor_at(cols);
+        let Some(target) = row
+            .checked_add_signed(delta)
+            .and_then(|row| rows.get(row))
+            .cloned()
+        else {
+            return false;
+        };
+        let mut used = 0;
+        let mut cursor = target.start;
+        for (at, c) in self.value[target.clone()].char_indices() {
+            if used >= column {
+                break;
+            }
+            used += char_width(c);
+            cursor = target.start + at + c.len_utf8();
+        }
+        // The end of a wrapped row is the next one's start: stay on it.
+        if cursor == target.end
+            && rows
+                .iter()
+                .any(|row| row.start == cursor && !row.is_empty())
+        {
+            cursor = self.value[..cursor]
+                .char_indices()
+                .next_back()
+                .map_or(cursor, |(at, _)| at.max(target.start));
+        }
+        self.cursor = cursor;
+        true
     }
 
     /// Apply an editing key. Returns `true` when the key was an editing key
@@ -156,6 +279,10 @@ impl TextInput {
     }
 }
 
+fn char_width(c: char) -> usize {
+    crate::layout::str_width(c.encode_utf8(&mut [0; 4]))
+}
+
 fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
@@ -217,5 +344,39 @@ mod tests {
         let mut input = TextInput::default();
         input.insert_str("a\nb\tc");
         assert_eq!(input.value(), "abc");
+    }
+    #[test]
+    fn a_multiline_field_keeps_newlines_wraps_words_and_moves_by_row() {
+        let mut input = TextInput::multiline();
+        input.insert_str("run the tests\r\nthen\tpush");
+        assert_eq!(input.value(), "run the tests\nthen    push");
+        input.set("run the tests\nthen push");
+        let text = |input: &TextInput, cols| -> Vec<String> {
+            input
+                .rows(cols)
+                .into_iter()
+                .map(|row| input.value()[row].to_string())
+                .collect()
+        };
+        assert_eq!(text(&input, 8), ["run the ", "tests", "then ", "push"]);
+        assert_eq!(text(&input, 80), ["run the tests", "then push"]);
+        // Longer than the columns: cut where it must be.
+        let long = TextInput::new("abcdefgh");
+        assert_eq!(text(&long, 3), ["abc", "def", "gh"]);
+        assert_eq!(text(&TextInput::default(), 3), [""]);
+        assert_eq!(input.cursor_at(8), (3, 4));
+        assert!(input.move_rows(-1, 8));
+        assert_eq!(input.cursor_at(8), (2, 4));
+        assert!(input.move_rows(-1, 8));
+        assert_eq!(input.cursor_at(8), (1, 4));
+        assert!(input.move_rows(-1, 8));
+        assert_eq!(input.cursor_at(8), (0, 4));
+        assert!(!input.move_rows(-1, 8));
+        input.newline();
+        assert_eq!(input.value(), "run \nthe tests\nthen push");
+        // One line: a newline is nothing, as ever.
+        let mut single = TextInput::new("x");
+        single.newline();
+        assert_eq!(single.value(), "x");
     }
 }

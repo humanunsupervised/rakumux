@@ -818,6 +818,7 @@ tui/
                              # terminal shows it: control characters as `?`; every TUI frame
                              # (`ui::draw`) and each value the CLI prints as text (not `--json`)
     updater.rs, version.rs, theme.rs, icons.rs (plain / emoji / Nerd Font marks)
+  tests/heartbeat_tui.rs     # Beats in the real TUI, in a session of another daemon
   tests/mid_turn_replies.rs  # replies typed into Claude Code at work, end to end: real daemon and
                              # account service, a local rakumux.com (mid_turn/fake_cloud.rs, HTTPS
                              # through RAKUMUX_CLOUD_CA), a stand-in Claude Code (mid_turn/claude.sh);
@@ -2065,7 +2066,7 @@ sessions, every tab and the session tab bar with them; the others wait aside
 (`every_session`), so a session another client moves elsewhere leaves the list as it would on
 deletion. The view is saved (`sessions.workspace`: absent for All, where a first start begins,
 `unassigned`, or a workspace's id), and a saved workspace that's gone shows All. New sessions
-(`n`, Beats' `n`) start in the workspace shown (in none under All and Unassigned). `M` (Settings →
+(`n`, a heartbeat's `Ask agent`) start in the workspace shown (in none under All and Unassigned). `M` (Settings →
 Move to workspace) opens the same modal for the selected session, without All (`Move <name>
 to`, `+ New workspace`): Enter moves it (`session_workspace`). Going into a session another view
 hides (the feed, a restore) shows All. A daemon without `workspaces` gets "restart it (S)", and
@@ -2107,12 +2108,27 @@ with `SessionApi::heartbeats` off the UI thread every 2 s while the tab is on sc
 sends no heartbeat events), two lines each: a mark (`?` waiting for approval, orange; `●` on;
 `○` paused or empty), the name and when it runs next (`in 25m`, `approve?`, `paused`, `empty`),
 then its schedule, folder and last run; those waiting for approval first, then by folder and
-name. With the drawer's keys: `↑`/`↓` (`j`/`k`) select; `Enter` shows one whole (how it runs,
-its command and prompt in full, then its runs, newest first: `↑`/`↓` pick one, `Enter` goes into
-it); `e` from the list shows it whole first, and there approves or enables it, so nothing an agent
-wrote runs unread; `p` pauses; `r` runs it now; `d` twice deletes it (its runs stay); `n` makes an
-empty heartbeat in the current folder and a session there running its command (the agent last
-run in the folder, its flags kept) whose first input, typed once the agent's prompt shows and not
+name. Under the selected one its buttons (`BeatAction`: `r run`, `p pause` or `e enable`/`approve`,
+`c rename`, `d delete`; short of room rename and delete stay), each a click target, and under
+them all `+ New heartbeat`, a row to select like them (`BeatsView::on_new`; the only one when
+there are none). With the drawer's keys: `↑`/`↓` (`j`/`k`) select; `Enter` shows one whole (its
+buttons, how it runs, its command and prompt in full, then its runs, newest first: `↑`/`↓` pick
+one, `Enter` goes into it); `e` from the list shows it whole first, and there approves or enables
+it, so nothing an agent wrote runs unread (one waiting for approval has no `r run` button); `p`
+pauses; `r` runs it now; `c` renames it (the rename dialog, `RenameTarget::Heartbeat`; a rename
+doesn't pause it); `d` twice (or two clicks) deletes it (its runs stay). `n`, `Enter` on
+`+ New heartbeat` or one click on it opens the **New heartbeat form** (`AppMode::NewHeartbeat`,
+`app/heartbeat_form.rs`, `components/heartbeat_form.rs`): Name (the generated one when empty),
+Task (several lines: `Alt-Enter` or `Ctrl-J` starts one, a paste keeps its own), Runs (`Every` an
+interval, 1h; `Daily` at a time; `Days`, Monday to Friday until ticked otherwise, at a time),
+Folder (the current one; any the daemon knows) and Agent (those used most recently first, in the
+folder, then anywhere; the daemon picks its command, with the flags it was last started with
+there). `Tab`, `Enter` and `↑`/`↓` go through them, `←`/`→` choose, `Space` ticks a day, `Esc`
+closes (a click off it doesn't, so nothing written is lost). `Create` needs the task and a
+schedule, makes it enabled (the user wrote it) and shows it whole; what's wrong, the daemon's
+refusal too, is said in the form. `Ask agent` makes it paused, with the task and schedule when
+a task was written, and a session in its folder running its command (the agent's, its flags
+kept) whose first input, typed once the agent's prompt shows and not
 sent, asks the agent to ask the user what to run and how often and save both with
 `"$RAKUMUX_BIN" heartbeat update hb_… --prompt … --every …` (or `update_heartbeat`), then goes
 into it (`heartbeats::setup_prompt`); `Esc` goes back, then gives the list the keys. A click

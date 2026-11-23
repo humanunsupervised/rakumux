@@ -10,6 +10,7 @@ pub mod feed;
 pub mod folder_picker;
 pub mod footer;
 pub mod format;
+pub mod heartbeat_form;
 pub mod heartbeats;
 pub mod history;
 pub mod markdown;

@@ -75,9 +75,26 @@ pub enum SpriteState {
     },
 }
 
+/// What a rename renames.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RenameTarget {
+    Session(SessionId),
+    Heartbeat(session_core::ids::HeartbeatId),
+}
+
+impl RenameTarget {
+    /// What it is, as the dialog says it.
+    pub fn noun(&self) -> &'static str {
+        match self {
+            RenameTarget::Session(_) => "session",
+            RenameTarget::Heartbeat(_) => "heartbeat",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RenameDialog {
-    pub session_id: SessionId,
+    pub target: RenameTarget,
     pub current_name: String,
     pub input: TextInput,
     pub error_message: Option<String>,
@@ -709,6 +726,8 @@ pub enum AppMode {
     /// The workspaces modal (`m`, `M`).
     Workspaces(super::workspaces::WorkspacePicker),
     Renaming(RenameDialog),
+    /// A new heartbeat (Beats' `n` and `+ New heartbeat`).
+    NewHeartbeat(super::heartbeat_form::HeartbeatForm),
     /// Writing back to a feed entry.
     FeedReply(FeedReplyDialog),
     Confirm(ConfirmDialog),

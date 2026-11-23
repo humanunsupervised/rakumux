@@ -7,24 +7,67 @@
 //! selected heartbeat whole (its prompt, command and runs; there `↑`/`↓` pick
 //! a run and `Enter` goes into it), `e` approves or enables (from the list it
 //! first shows the heartbeat whole, so its prompt and command are read before
-//! they run), `p` pauses, `r` runs it now, `d` twice deletes it, `n` makes an
-//! empty one and opens a session whose agent is asked to fill it in, `Esc`
-//! goes back. `B` (or Settings) shows the tab.
+//! they run), `p` pauses, `r` runs it now, `c` changes its name, `d` twice
+//! deletes it, `n` (or Enter or a click on `+ New heartbeat`, the list's last
+//! row) opens the New heartbeat form (`heartbeat_form.rs`), `Esc` goes back.
+//! The selected heartbeat shows these as buttons ([`BeatAction`]). `B` (or
+//! Settings) shows the tab.
 
 use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use session_core::api::{ApiError, CreateSession, ErrorCode, FirstInput};
-use session_core::heartbeat::{Heartbeat, HeartbeatSpec};
+use session_core::api::{ApiError, ErrorCode};
+use session_core::heartbeat::Heartbeat;
 use session_core::ids::{HeartbeatId, SessionId};
-use session_core::model::{ScopeRoot, SessionView};
+use session_core::model::SessionView;
 
 use super::drawer::DrawerTab;
 use super::runtime::AppEvent;
-use super::{env_snapshot, App};
+use super::types::{AppMode, RenameDialog, RenameTarget};
+use super::{App, TextInput};
 
 /// How often the tab reads the heartbeats while it's on screen.
 const EVERY: Duration = Duration::from_secs(2);
+
+/// A button of the selected (or read) heartbeat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BeatAction {
+    Run,
+    /// Approve or enable it, or (from the list) show it whole first.
+    Enable,
+    Pause,
+    Rename,
+    Delete,
+}
+
+impl BeatAction {
+    /// `heartbeat`'s buttons, in order.
+    pub fn of(heartbeat: &Heartbeat) -> Vec<BeatAction> {
+        let mut actions = Vec::new();
+        if heartbeat.is_complete() && !heartbeat.awaiting_approval {
+            actions.push(BeatAction::Run);
+        }
+        if heartbeat.enabled {
+            actions.push(BeatAction::Pause);
+        } else if heartbeat.is_complete() {
+            actions.push(BeatAction::Enable);
+        }
+        actions.extend([BeatAction::Rename, BeatAction::Delete]);
+        actions
+    }
+
+    /// Its key and what the button says.
+    pub fn label(self, heartbeat: &Heartbeat) -> (&'static str, &'static str) {
+        match self {
+            BeatAction::Run => ("r", "run"),
+            BeatAction::Enable if heartbeat.awaiting_approval => ("e", "approve"),
+            BeatAction::Enable => ("e", "enable"),
+            BeatAction::Pause => ("p", "pause"),
+            BeatAction::Rename => ("c", "rename"),
+            BeatAction::Delete => ("d", "delete"),
+        }
+    }
+}
 
 /// What the Beats tab keeps for this window.
 #[derive(Debug, Default)]
@@ -33,6 +76,8 @@ pub struct BeatsView {
     pub heartbeats: Vec<Heartbeat>,
     /// The selected heartbeat.
     pub selected: Option<HeartbeatId>,
+    /// `+ New heartbeat` is selected, under them.
+    pub on_new: bool,
     /// The heartbeat read whole, with the run selected there.
     pub reading: Option<HeartbeatId>,
     pub run: usize,
@@ -74,8 +119,24 @@ impl BeatsView {
         }
     }
 
-    /// The selected heartbeat's index.
+    /// Show `id` whole, selected.
+    pub(super) fn show(&mut self, id: &HeartbeatId) {
+        self.selected = Some(id.clone());
+        self.on_new = false;
+        self.reading = Some(id.clone());
+        self.run = 0;
+    }
+
+    /// `+ New heartbeat` is selected (there's nothing else without any).
+    pub fn new_selected(&self) -> bool {
+        self.on_new || self.heartbeats.is_empty()
+    }
+
+    /// The selected heartbeat's index; `+ New heartbeat`'s after them all.
     pub fn selected_index(&self) -> usize {
+        if self.new_selected() {
+            return self.heartbeats.len();
+        }
         self.selected
             .as_ref()
             .and_then(|id| self.heartbeats.iter().position(|h| &h.id == id))
@@ -99,16 +160,23 @@ impl BeatsView {
     }
 }
 
-/// The task an empty heartbeat's setup session types for its agent (not
-/// sent: the user adds to it or presses Enter): fill heartbeat `handle` in.
+/// What a heartbeat's setup session types for its agent (not sent: the user
+/// adds to it or presses Enter): fill `heartbeat` in.
 pub fn setup_prompt(heartbeat: &Heartbeat) -> String {
     let handle = heartbeat.handle();
+    let todo = match heartbeat.prompt.trim().is_empty() {
+        true => "It's empty: ask me what task it should run and how often".to_string(),
+        false => format!(
+            "Read it with `\"$RAKUMUX_BIN\" heartbeat show {handle}` and ask me what to change \
+             about its task and how often it runs"
+        ),
+    };
     format!(
         "Rakumux heartbeat {handle} (\"{}\") runs a task in this folder on a schedule, each run a \
-         new session whose agent gets the task. It's empty: ask me what task it should run and \
-         how often, then save both with `\"$RAKUMUX_BIN\" heartbeat update {handle} --prompt \
-         '<the task, self-contained>' --every 30m` (or --daily HH:MM, or --days mon,fri --at \
-         HH:MM), or Rakumux's update_heartbeat tool.",
+         new session whose agent gets the task. {todo}, then save both with \
+         `\"$RAKUMUX_BIN\" heartbeat update {handle} --prompt '<the task, self-contained>' \
+         --every 30m` (or --daily HH:MM, or --days mon,fri --at HH:MM), or Rakumux's \
+         update_heartbeat tool.",
         heartbeat.name.replace(['"', '\''], "")
     )
 }
@@ -162,7 +230,7 @@ impl App {
     }
 
     /// Read again at once (after a change this window made).
-    fn reread_heartbeats(&mut self) {
+    pub(super) fn reread_heartbeats(&mut self) {
         self.beats.due = None;
         if !self.beats.busy && self.beats_shown() {
             self.read_heartbeats(Instant::now());
@@ -190,6 +258,46 @@ impl App {
             }
             Err(error) => view.error = Some(error.message),
         }
+    }
+
+    /// A heartbeat this window made or changed, as the daemon answered it:
+    /// listed so at once (a reading under way may not have it).
+    pub(super) fn beats_take_changed(&mut self, heartbeat: &Heartbeat) {
+        let view = &mut self.beats;
+        let mut heartbeats = std::mem::take(&mut view.heartbeats);
+        heartbeats.retain(|known| known.id != heartbeat.id);
+        heartbeats.push(heartbeat.clone());
+        view.take(heartbeats);
+        view.generation += 1;
+        view.busy = false;
+        view.due = None;
+    }
+
+    /// A rename came back: the dialog closes, or says why not.
+    pub(super) fn on_heartbeat_renamed(
+        &mut self,
+        id: HeartbeatId,
+        result: Result<Heartbeat, ApiError>,
+    ) {
+        let target = RenameTarget::Heartbeat(id);
+        let in_dialog = matches!(&self.mode, AppMode::Renaming(d) if d.target == target && d.busy);
+        match result {
+            Ok(heartbeat) => {
+                if in_dialog {
+                    self.mode = AppMode::Normal;
+                }
+                self.set_status(format!("Renamed to {}", heartbeat.name));
+                self.beats_take_changed(&heartbeat);
+            }
+            Err(error) => match &mut self.mode {
+                AppMode::Renaming(dialog) if in_dialog => {
+                    dialog.busy = false;
+                    dialog.error_message = Some(error.to_string());
+                }
+                _ => self.set_status(format!("Rename failed: {error}")),
+            },
+        }
+        self.reread_heartbeats();
     }
 
     /// A change this window asked for came back: say so and read again.
@@ -232,11 +340,10 @@ impl App {
             KeyCode::Char('p') => self.beats_set_enabled(false),
             KeyCode::Char('r') => self.beats_run(),
             KeyCode::Char('n') => self.new_heartbeat(),
+            KeyCode::Char('c') => self.beats_rename(),
             KeyCode::Char('d') => self.beats_delete(deleting),
             // Keys that act on the list's session do nothing here.
-            KeyCode::Char(
-                'J' | 'K' | 'x' | 'z' | 'c' | '/' | '{' | '}' | 'w' | 'W' | 'y' | 's',
-            ) => {}
+            KeyCode::Char('J' | 'K' | 'x' | 'z' | '/' | '{' | '}' | 'w' | 'W' | 'y' | 's') => {}
             _ => return false,
         }
         true
@@ -251,22 +358,24 @@ impl App {
             return;
         }
         let count = self.beats.heartbeats.len();
-        if count == 0 {
-            return;
-        }
         let index = self
             .beats
             .selected_index()
             .saturating_add_signed(delta)
-            .min(count - 1);
-        self.beats.selected = Some(self.beats.heartbeats[index].id.clone());
+            .min(count);
+        self.beats.on_new = index == count;
+        if let Some(heartbeat) = self.beats.heartbeats.get(index) {
+            self.beats.selected = Some(heartbeat.id.clone());
+        }
     }
 
-    /// Enter: read the selected heartbeat whole; reading one, go into its
-    /// selected run.
+    /// Enter: read the selected heartbeat whole (or make a new one); reading
+    /// one, go into its selected run.
     pub fn beats_enter(&mut self) {
         let Some(id) = self.beats.reading.clone() else {
-            if let Some(heartbeat) = self.beats.selected() {
+            if self.beats.new_selected() {
+                self.new_heartbeat();
+            } else if let Some(heartbeat) = self.beats.selected() {
                 self.beats.reading = Some(heartbeat.id.clone());
                 self.beats.run = 0;
             }
@@ -348,6 +457,33 @@ impl App {
         });
     }
 
+    /// `c`: change its name, in the rename dialog.
+    pub fn beats_rename(&mut self) {
+        let Some(heartbeat) = self.beats_target() else {
+            return;
+        };
+        self.mode = AppMode::Renaming(RenameDialog {
+            target: RenameTarget::Heartbeat(heartbeat.id),
+            current_name: heartbeat.name.clone(),
+            input: TextInput::new(heartbeat.name),
+            error_message: None,
+            busy: false,
+        });
+    }
+
+    /// A click on one of the selected (or read) heartbeat's buttons.
+    pub fn click_beat_action(&mut self, action: BeatAction) {
+        let deleting = self.beats.deleting.take();
+        self.show_drawer_tab(DrawerTab::Beats);
+        match action {
+            BeatAction::Run => self.beats_run(),
+            BeatAction::Enable => self.beats_enable(),
+            BeatAction::Pause => self.beats_set_enabled(false),
+            BeatAction::Rename => self.beats_rename(),
+            BeatAction::Delete => self.beats_delete(deleting),
+        }
+    }
+
     /// `d`: the first asks, a second (next key) deletes it.
     fn beats_delete(&mut self, armed: Option<HeartbeatId>) {
         let Some(heartbeat) = self.beats_target() else {
@@ -355,7 +491,7 @@ impl App {
         };
         if armed.as_ref() != Some(&heartbeat.id) {
             self.set_status(format!(
-                "Delete heartbeat {}? d again deletes it (its runs stay).",
+                "Delete heartbeat {}? Again deletes it (its runs stay).",
                 heartbeat.name
             ));
             self.beats.deleting = Some(heartbeat.id);
@@ -372,57 +508,6 @@ impl App {
                 .heartbeat_delete(&heartbeat.id)
                 .map(|()| format!("Deleted heartbeat {name}")),
         });
-    }
-
-    /// `n`: an empty heartbeat in the current folder, and a session there
-    /// running its command (the agent last run in the folder, with its
-    /// flags), whose agent is asked, once its prompt shows, to fill it in:
-    /// typed, not sent. The new session is entered as `n` in the list does.
-    pub fn new_heartbeat(&mut self) {
-        if self.creating_session {
-            return;
-        }
-        let Some(api) = self.api() else {
-            self.set_status("Not connected to the daemon.");
-            return;
-        };
-        let folder: ScopeRoot = self.current_folder();
-        let env = env_snapshot();
-        let (cols, rows) = self.terminal_size();
-        let workspace = self.new_session_workspace();
-        self.creating_session = true;
-        self.drawer_focused = false;
-        self.set_status("Making a heartbeat...");
-        self.exec.job(move || {
-            let heartbeat = match api.heartbeat_create(HeartbeatSpec {
-                scope: Some(folder.clone()),
-                ..Default::default()
-            }) {
-                Ok(heartbeat) => heartbeat,
-                Err(error) => return AppEvent::Created { result: Err(error) },
-            };
-            let request = CreateSession {
-                scope: Some(folder.clone()),
-                name: None,
-                cwd: Some(folder.path().to_path_buf()),
-                argv: None,
-                startup_cmds: vec![heartbeat.command.clone()],
-                env,
-                cols,
-                rows,
-                machine: None,
-                prefill: None,
-                first_input: Some(FirstInput {
-                    text: setup_prompt(&heartbeat),
-                    submit: false,
-                }),
-                workspace,
-            };
-            AppEvent::Created {
-                result: api.create(request),
-            }
-        });
-        self.beats.due = None;
     }
 
     /// The session the footer names while Beats has the keys: the selected
@@ -445,9 +530,11 @@ impl App {
                 None => self.beats.selected_index() == index,
             };
         self.show_drawer_tab(DrawerTab::Beats);
+        self.beats.deleting = None;
         match self.beats.reading.clone() {
             Some(_) => self.beats.run = index,
             None => {
+                self.beats.on_new = false;
                 if let Some(heartbeat) = self.beats.heartbeats.get(index) {
                     self.beats.selected = Some(heartbeat.id.clone());
                 }
@@ -463,7 +550,7 @@ impl App {
 mod tests {
     use super::*;
     use session_core::heartbeat::Schedule;
-    use session_core::model::Creator;
+    use session_core::model::{Creator, ScopeRoot};
 
     fn heartbeat(name: &str, waiting: bool) -> Heartbeat {
         Heartbeat {
@@ -504,10 +591,59 @@ mod tests {
     }
 
     #[test]
+    fn new_heartbeat_is_the_row_after_the_last() {
+        let mut view = BeatsView::default();
+        assert!(view.new_selected(), "nothing else to select");
+        view.take(vec![heartbeat("a", false)]);
+        assert!(!view.new_selected());
+        view.on_new = true;
+        assert_eq!(view.selected_index(), 1);
+        assert!(view.selected().is_none());
+        // It stays selected as the heartbeats are read again.
+        view.take(vec![heartbeat("a", false), heartbeat("b", false)]);
+        assert_eq!(view.selected_index(), 2);
+    }
+
+    #[test]
+    fn a_heartbeats_buttons_are_what_it_can_do() {
+        let on = heartbeat("a", false);
+        assert_eq!(
+            BeatAction::of(&on),
+            [
+                BeatAction::Run,
+                BeatAction::Pause,
+                BeatAction::Rename,
+                BeatAction::Delete
+            ]
+        );
+        // One waiting for approval can't be run unread from its row.
+        let waiting = heartbeat("b", true);
+        assert_eq!(
+            BeatAction::of(&waiting),
+            [BeatAction::Enable, BeatAction::Rename, BeatAction::Delete]
+        );
+        assert_eq!(BeatAction::Enable.label(&waiting), ("e", "approve"));
+        let mut empty = heartbeat("c", false);
+        empty.enabled = false;
+        empty.prompt.clear();
+        assert_eq!(
+            BeatAction::of(&empty),
+            [BeatAction::Rename, BeatAction::Delete]
+        );
+    }
+
+    #[test]
     fn the_setup_prompt_is_one_line_naming_the_heartbeat() {
         let mut empty = heartbeat("Heartbeat \"2\"", false);
         empty.id = HeartbeatId::from_string("01ABC");
+        empty.prompt.clear();
         let text = setup_prompt(&empty);
+        assert!(text.contains("It's empty"), "{text}");
+        let mut begun = empty.clone();
+        begun.prompt = "Run the tests.\nFix them.".into();
+        let begun = setup_prompt(&begun);
+        assert!(begun.contains("heartbeat show hb_01ABC"), "{begun}");
+        assert!(!begun.chars().any(char::is_control), "{begun}");
         assert!(!text.chars().any(char::is_control), "{text}");
         assert!(text.contains("hb_01ABC (\"Heartbeat 2\")"), "{text}");
         assert!(

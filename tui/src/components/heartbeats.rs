@@ -1,6 +1,7 @@
 //! The drawer's Beats tab (`app/heartbeats.rs`): the heartbeats, two lines
 //! each (a mark, the name and when it runs next; its schedule, folder and
-//! last run), those waiting for approval first; or one heartbeat whole: how
+//! last run), those waiting for approval first, the selected one's buttons
+//! under it, then `+ New heartbeat`; or one heartbeat whole: its buttons, how
 //! it runs, its command and prompt in full (read before `e` approves it),
 //! and its runs, newest first, to go into.
 
@@ -13,6 +14,7 @@ use ratatui::{
 };
 use session_core::heartbeat::{Heartbeat, RunOutcome};
 
+use crate::app::heartbeats::BeatAction;
 use crate::app::{App, Hit};
 use crate::components::dialogs::{error_line, text_rows};
 use crate::components::format::{now_secs, relative_time, status_glyph, truncate};
@@ -99,30 +101,43 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) 
     let p = theme::palette();
     let view = &app.beats;
     let width = usize::from(area.width);
-    if view.heartbeats.is_empty() {
-        f.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled("No heartbeats · ", Style::default().fg(p.text_muted)),
-                Span::styled(
-                    "n",
-                    Style::default()
-                        .fg(p.text_bright)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(" new", Style::default().fg(p.text_muted)),
-            ])),
-            area,
-        );
-        return;
-    }
     let now = now_secs();
     let selected = view.selected_index();
     let focused = app.beats_has_keys();
-    // Two lines a heartbeat and a blank one: as many as fit, the selected
-    // one among them.
+    // Two lines a heartbeat and a third (the selected one's buttons, blank
+    // otherwise): as many as fit, the selected one among them, over the row
+    // that makes a new one.
     let per = 3usize;
-    let fit = (usize::from(area.height) / per).max(1);
-    let first = selected.saturating_sub(fit.saturating_sub(1));
+    let list = Rect {
+        height: area.height.saturating_sub(1),
+        ..area
+    };
+    let fit = (usize::from(list.height) / per).max(1);
+    let first = selected
+        .min(view.heartbeats.len().saturating_sub(1))
+        .saturating_sub(fit.saturating_sub(1));
+    let listed = view.heartbeats.len().saturating_sub(first).min(fit);
+    let new_row = Rect {
+        y: list.y + ((listed * per) as u16).min(list.height),
+        height: 1,
+        ..area
+    };
+    let new_chosen = view.new_selected();
+    let mut new_line = Paragraph::new(Span::styled(
+        "+ New heartbeat",
+        Style::default()
+            .fg(if new_chosen {
+                p.text_bright
+            } else {
+                p.accent_green
+            })
+            .add_modifier(Modifier::BOLD),
+    ));
+    if new_chosen {
+        new_line = new_line.style(Style::default().bg(p.selection));
+    }
+    f.render_widget(new_line, new_row);
+    hits.push((new_row, Hit::BeatNew));
     for (offset, (index, heartbeat)) in view
         .heartbeats
         .iter()
@@ -131,10 +146,10 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) 
         .take(fit)
         .enumerate()
     {
-        let y = area.y + (offset * per) as u16;
+        let y = list.y + (offset * per) as u16;
         let cell = Rect {
             y,
-            height: 2.min(area.bottom().saturating_sub(y)),
+            height: 2.min(list.bottom().saturating_sub(y)),
             ..area
         };
         let chosen = index == selected;
@@ -174,7 +189,90 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) 
         }
         f.render_widget(paragraph, cell);
         hits.push((cell, Hit::BeatRow(index)));
+        if chosen && y + 2 < list.bottom() {
+            let cell = Rect {
+                x: area.x + 2,
+                y: y + 2,
+                width: area.width.saturating_sub(2),
+                height: 1,
+            };
+            let mut actions = BeatAction::of(heartbeat);
+            // Short of room, those Enter shows with the heartbeat go first.
+            while actions.len() > 2 && actions_width(app, heartbeat, &actions) > cell.width {
+                actions.remove(0);
+            }
+            draw_actions(f, app, heartbeat, &actions, cell, hits);
+        }
     }
+}
+
+/// What a button says: its key and word, or what a second `d` does.
+fn action_text(app: &App, heartbeat: &Heartbeat, action: BeatAction) -> (&'static str, String) {
+    let (key, word) = action.label(heartbeat);
+    let armed = action == BeatAction::Delete && app.beats.deleting.as_ref() == Some(&heartbeat.id);
+    (key, if armed { "again deletes" } else { word }.to_string())
+}
+
+/// Columns of `actions` side by side.
+fn actions_width(app: &App, heartbeat: &Heartbeat, actions: &[BeatAction]) -> u16 {
+    let width: usize = actions
+        .iter()
+        .map(|action| {
+            let (key, word) = action_text(app, heartbeat, *action);
+            str_width(key) + 1 + str_width(&word) + 2
+        })
+        .sum();
+    width.saturating_sub(2) as u16
+}
+
+/// `heartbeat`'s buttons from the top left of `area`, wrapped, each a click
+/// target; the rows they took.
+fn draw_actions(
+    f: &mut Frame,
+    app: &App,
+    heartbeat: &Heartbeat,
+    actions: &[BeatAction],
+    area: Rect,
+    hits: &mut Vec<(Rect, Hit)>,
+) -> u16 {
+    let p = theme::palette();
+    let (mut x, mut y) = (area.x, area.y);
+    for action in actions {
+        let (key, word) = action_text(app, heartbeat, *action);
+        let width = (str_width(key) + 1 + str_width(&word)) as u16;
+        if x > area.x && x + width > area.right() {
+            x = area.x;
+            y += 1;
+        }
+        if y >= area.bottom() {
+            break;
+        }
+        let cell = Rect {
+            x,
+            y,
+            width: width.min(area.right().saturating_sub(x)),
+            height: 1,
+        };
+        let armed = word == "again deletes";
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(
+                    key,
+                    Style::default()
+                        .fg(p.accent_primary)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!(" {word}"),
+                    Style::default().fg(if armed { p.accent_pink } else { p.text_muted }),
+                ),
+            ])),
+            cell,
+        );
+        hits.push((cell, Hit::BeatAction(*action)));
+        x += width + 2;
+    }
+    y - area.y + 1
 }
 
 fn draw_whole(
@@ -199,17 +297,34 @@ fn draw_whole(
             Span::styled(printable(&value).into_owned(), plain),
         ])
     };
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled(format!("{glyph} "), glyph_style),
-            Span::styled(
-                truncate(&printable(&heartbeat.name), width.saturating_sub(2)),
-                bold,
-            ),
+    f.render_widget(
+        Paragraph::new(vec![
+            Line::from(vec![
+                Span::styled(format!("{glyph} "), glyph_style),
+                Span::styled(
+                    truncate(&printable(&heartbeat.name), width.saturating_sub(2)),
+                    bold,
+                ),
+            ]),
+            Line::from(Span::styled(heartbeat.handle(), quiet)),
         ]),
-        Line::from(Span::styled(heartbeat.handle(), quiet)),
-        Line::default(),
-    ];
+        Rect {
+            height: 2.min(area.height),
+            ..area
+        },
+    );
+    let buttons = Rect {
+        y: area.y + 2,
+        height: area.height.saturating_sub(2),
+        ..area
+    };
+    let used = draw_actions(f, app, heartbeat, &BeatAction::of(heartbeat), buttons, hits);
+    let area = Rect {
+        y: (buttons.y + used + 1).min(area.bottom()),
+        height: buttons.height.saturating_sub(used + 1),
+        ..area
+    };
+    let mut lines = Vec::new();
     if heartbeat.awaiting_approval {
         lines.push(Line::from(vec![
             Span::styled(
