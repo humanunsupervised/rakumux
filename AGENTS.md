@@ -1468,7 +1468,20 @@ demand) → `SessionApi::list(ScopeRoot::resolve(cwd))` → text or JSON on stdo
    `attached` + stream. `subscribe` → `Control::subscribe` → `EventEnvelope` frames.
 4. Per terminal: reader thread → actor (responding emulator; query replies go back through the
    writer thread) → fan-out to attachments; `HostEvent`s → control thread → `detect::detect`,
-   lifecycle, events, scrollback persistence.
+   lifecycle, events, scrollback persistence. The control thread (`control/host_events.rs`)
+   ticks every 250 ms however many events keep coming (the git poll, due heartbeats, first
+   inputs, quiet sessions' replies and places), and of the events waiting, a terminal's output
+   event is passed over when a later one of that terminal waits too (one look at the latest
+   screen does for both; every other event is applied, in order). Handling one event or tick
+   for 50 ms or more is logged (`control: slow …`).
+5. `session_wait` waits on its own session only: woken when that session's view is refreshed
+   (and every 250 ms), never by another session's output; it reads the view kept in memory, not
+   the registry, and an output wait reads the screen without the state lock.
+6. `tui/crates/ptyd/tests/runtime_load.rs` (ignored; `--ignored --nocapture`) measures a busy
+   machine through the real binary: 30 sessions, 10 stand-in agents growing 8 MB conversation
+   logs, 4 stand-in Codex sessions, 10 waiting callers; it prints how late events are handled,
+   how long `session_get`/`session_list` take and the daemon's CPU. `RAKUMUX_LOAD_PTYD` runs
+   another build to compare.
 
 ### An agent inside a session
 

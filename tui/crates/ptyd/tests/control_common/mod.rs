@@ -41,6 +41,8 @@ pub struct FakeTerminal {
     /// For each checked submit whose Enter came due ([`FakeHost::enter_due`]),
     /// whether its check let the Enter go.
     pub enters: Vec<bool>,
+    /// How many times its screen was read (`TerminalHost::read`).
+    pub reads: usize,
 }
 
 #[derive(Default)]
@@ -337,6 +339,7 @@ impl TerminalHost for FakeHost {
                 persisted: false,
                 typing: false,
                 enters: Vec::new(),
+                reads: 0,
             },
         );
         Ok(info)
@@ -368,12 +371,13 @@ impl TerminalHost for FakeHost {
         _lines: Option<u32>,
         _format: TextFormat,
     ) -> Result<ReadResult, HostError> {
-        let state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
         let terminal = state
             .terminals
-            .get(&id)
+            .get_mut(&id)
             .filter(|t| !t.forgotten)
             .ok_or(HostError::NotFound)?;
+        terminal.reads += 1;
         Ok(ReadResult {
             text: terminal.screen.clone(),
             rows: terminal.info.rows,

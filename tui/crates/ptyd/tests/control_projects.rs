@@ -13,7 +13,7 @@ use session_core::ids::SessionId;
 use session_core::model::{GitInfo, ProjectView, ScopeRoot, SessionStatus, SessionView};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 fn projects(h: &Harness, caller: &ptyd::control_api::Caller) -> Vec<ProjectView> {
     match h.handle(caller, Request::ProjectList) {
@@ -749,6 +749,49 @@ fn pinning_persists_and_publishes_an_update() {
     assert!(methods.contains(&("allowed".into(), Some("pin".into()))));
     assert!(methods.contains(&("allowed".into(), Some("unpin".into()))));
     assert!(methods.iter().any(|(decision, _)| decision == "denied"));
+}
+
+#[test]
+fn the_git_poll_keeps_its_pace_while_other_sessions_print_all_the_time() {
+    // The daemon's periodic work (the git poll here; also due heartbeats, first inputs, replies
+    // of quiet sessions) runs on its tick, which a steady stream of other sessions' output must
+    // not hold off.
+    let h = Harness::new();
+    let repo = h.scope.path().to_path_buf();
+    git_repo(&repo, "main");
+    let s = h.create(Some("s"));
+    let busy = h.create(Some("busy"));
+    assert_eq!(s.git, branch("main", &repo, None, "project"));
+    let printing = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let printer = {
+        let (printing, host, id) = (printing.clone(), h.host.clone(), busy.id.clone());
+        std::thread::spawn(move || {
+            let mut n = 0;
+            while printing.load(std::sync::atomic::Ordering::SeqCst) {
+                n += 1;
+                host.show(&id, &format!("line {n}"));
+                std::thread::sleep(Duration::from_millis(40));
+            }
+        })
+    };
+    std::thread::sleep(Duration::from_millis(300));
+    set_head(&repo.join(".git"), "feature");
+    let seen = (|| {
+        let deadline = Instant::now() + Duration::from_secs(6);
+        while Instant::now() < deadline {
+            if h.get(&s.id).git == branch("feature", &repo, None, "project") {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        false
+    })();
+    printing.store(false, std::sync::atomic::Ordering::SeqCst);
+    printer.join().unwrap();
+    assert!(
+        seen,
+        "the branch change went unnoticed while another session printed"
+    );
 }
 
 #[test]

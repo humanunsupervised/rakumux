@@ -4,6 +4,7 @@ mod control_common;
 
 use control_common::*;
 use ptyd::control_api::{Caller, Control};
+use ptyd::host::HostEvent;
 use session_core::api::{
     AttachRequest, ErrorCode, EventEnvelope, EventKind, ReadRequest, ReadSource, Report, Request,
     Response, Role, SessionEvent, SubscribeRequest, TextFormat, WaitRequest, WaitResult, WaitUntil,
@@ -122,6 +123,102 @@ fn wait_for_output_matches_or_times_out() {
         }),
     ));
     assert_eq!(err.code, ErrorCode::InvalidArgument);
+}
+
+#[test]
+fn a_wait_is_not_woken_by_other_sessions_output() {
+    // A caller waits on one session's output while another session prints all the time: the
+    // waiting caller looks at its own session's screen on its own pace, not at every line the
+    // other one prints.
+    let h = Harness::new();
+    let watched = h.create(Some("watched"));
+    let busy = h.create(Some("busy"));
+    let host = h.host.clone();
+    let busy_id = busy.id.clone();
+    let printing = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let printer = {
+        let printing = printing.clone();
+        std::thread::spawn(move || {
+            let mut n = 0;
+            while printing.load(std::sync::atomic::Ordering::SeqCst) {
+                n += 1;
+                host.show(&busy_id, &format!("line {n}"));
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            n
+        })
+    };
+    let terminal = h.host.terminal_of(&watched.id);
+    let before = h.host.terminal(terminal).reads;
+    let result = wait(
+        &h,
+        &h.user,
+        &watched.id,
+        WaitUntil::Output,
+        Some("never"),
+        1000,
+    );
+    printing.store(false, std::sync::atomic::Ordering::SeqCst);
+    let printed = printer.join().unwrap();
+    assert!(!result.matched, "{result:?}");
+    let reads = h.host.terminal(terminal).reads - before;
+    // Its 250 ms poll: about 5 looks in a second, whatever the other session printed.
+    assert!(
+        printed > 100,
+        "the busy session printed only {printed} times"
+    );
+    assert!(
+        reads <= 8,
+        "{reads} reads of the watched screen while {printed} lines went by"
+    );
+
+    // Its own session's output still wakes it at once.
+    let host = h.host.clone();
+    let id = watched.id.clone();
+    let writer = later(Duration::from_millis(100), move || host.show(&id, "ready"));
+    let started = Instant::now();
+    let result = wait(
+        &h,
+        &h.user,
+        &watched.id,
+        WaitUntil::Output,
+        Some("ready"),
+        5000,
+    );
+    writer.join().unwrap();
+    assert!(result.matched, "{result:?}");
+    assert!(
+        started.elapsed() < Duration::from_millis(1000),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn a_burst_of_one_sessions_output_is_looked_at_once_not_per_event() {
+    // A session's output events that wait together are looked at once, on the latest screen.
+    let h = Harness::new();
+    let s = h.create(Some("burst"));
+    let terminal = h.host.terminal_of(&s.id);
+    h.host.show(&s.id, "$ make");
+    eventually("the first look", || {
+        (h.host.terminal(terminal).reads > 0).then_some(())
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    let before = h.host.terminal(terminal).reads;
+    for _ in 0..500 {
+        h.host.emit(HostEvent::Output {
+            id: terminal,
+            session_id: s.id.clone(),
+        });
+    }
+    std::thread::sleep(Duration::from_millis(500));
+    let reads = h.host.terminal(terminal).reads - before;
+    eprintln!("{reads} looks for 500 output events");
+    assert!(
+        reads < 100,
+        "{reads} looks at the screen for 500 output events"
+    );
 }
 
 #[test]

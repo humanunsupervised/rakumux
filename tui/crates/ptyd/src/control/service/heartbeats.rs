@@ -423,7 +423,6 @@ impl Inner {
             state.runs.remove(&session);
             self.refresh(state, &session);
         }
-        self.changed.notify_all();
         Ok(())
     }
 
@@ -706,7 +705,6 @@ impl Inner {
         self.refresh(state, &view.id);
         let view = state.views.get(&view.id).cloned().unwrap_or(view);
         self.trim_runs(state, id);
-        self.changed.notify_all();
         Ok((view, run))
     }
 

@@ -231,6 +231,15 @@ struct State {
     workspaces: Vec<session_core::workspace::Workspace>,
     /// The workspace each session is in (`SessionView::workspace`).
     session_workspaces: HashMap<SessionId, session_core::ids::WorkspaceId>,
+    /// Sessions callers are waiting on (`session_wait`): each wakes only when its own session
+    /// changes, never for another's output.
+    waits: HashMap<SessionId, Waiting>,
+}
+
+/// The callers waiting on one session, and what wakes them.
+struct Waiting {
+    wake: Arc<Condvar>,
+    callers: usize,
 }
 
 struct Binding {
@@ -281,6 +290,28 @@ impl State {
     }
 }
 
+/// What a `session_wait` looks at.
+struct SeenByWait {
+    status: SessionStatus,
+    lifecycle: Lifecycle,
+    reported: Option<Reported>,
+    terminal: Option<TerminalId>,
+}
+
+/// The callers waiting on session `id` look again (once the state lock is let go).
+fn wake_waits(state: &State, id: &SessionId) {
+    if let Some(waiting) = state.waits.get(id) {
+        waiting.wake.notify_all();
+    }
+}
+
+/// Every waiting caller looks again (the daemon is stopping).
+fn wake_every_wait(state: &State) {
+    for waiting in state.waits.values() {
+        waiting.wake.notify_all();
+    }
+}
+
 /// Status of a record combined with the host's view of its terminal.
 struct Runtime {
     status: SessionStatus,
@@ -297,7 +328,6 @@ pub(super) struct Inner {
     store: ScrollbackStore,
     detector: Detector,
     state: Mutex<State>,
-    changed: Condvar,
     events: EventBus,
     pub(super) stop: Arc<AtomicBool>,
     /// The user stopped the daemon: nothing is revived on the next start.
@@ -358,8 +388,8 @@ impl Inner {
                 runs,
                 workspaces,
                 session_workspaces,
+                waits: HashMap::new(),
             }),
-            changed: Condvar::new(),
             events: EventBus::default(),
             stop: Arc::new(AtomicBool::new(false)),
             stopped_by_user: AtomicBool::new(false),
@@ -836,8 +866,8 @@ impl Inner {
                 crate::log_warn!("control: registry checkpoint: {error}");
             }
         }
+        wake_every_wait(&state);
         drop(state);
-        self.changed.notify_all();
         self.events.close_all();
     }
 
@@ -964,7 +994,6 @@ impl Inner {
             );
             sessions.push(view);
         }
-        self.changed.notify_all();
         Ok(sessions)
     }
 
@@ -1143,7 +1172,6 @@ impl Inner {
         if let Some(parent) = &record.parent_id {
             self.refresh(state, parent);
         }
-        self.changed.notify_all();
         Ok(view)
     }
 
@@ -1251,7 +1279,6 @@ impl Inner {
             other => other.into(),
         })?;
         self.refresh(state, &record.id);
-        self.changed.notify_all();
         Ok(())
     }
 
@@ -1352,6 +1379,7 @@ impl Inner {
         state.recent_creates.remove(&record.id);
         state.bindings.remove(&record.id);
         state.views.remove(&record.id);
+        wake_waits(state, &record.id);
         state.git.remove(&record.id);
         state.places.remove(&record.id);
         state.last_messages.remove(&record.id);
@@ -1361,7 +1389,6 @@ impl Inner {
         for orphan in orphans {
             self.refresh(state, &orphan);
         }
-        self.changed.notify_all();
         Ok(())
     }
 
@@ -1438,7 +1465,6 @@ impl Inner {
                 session: view.clone(),
             },
         );
-        self.changed.notify_all();
         Ok(view)
     }
 
@@ -1476,7 +1502,6 @@ impl Inner {
             }
             self.refresh(&mut state, id);
         }
-        self.changed.notify_all();
     }
 
     pub(super) fn purge_history(&self) {
@@ -1607,7 +1632,6 @@ impl Inner {
         self.start_terminal(state, record, argv, base_env, cols, rows, start)?;
         registry(&state.registry)?.mark_revived(&record.id, used.then(now_ms))?;
         self.refresh(state, &record.id);
-        self.changed.notify_all();
         Ok(())
     }
 
@@ -1791,7 +1815,6 @@ impl Inner {
             );
         }
         self.refresh(state, &record.id);
-        self.changed.notify_all();
         Ok(())
     }
 
@@ -1847,41 +1870,57 @@ impl Inner {
         let mut state = self.lock();
         self.target(&state, caller, Op::Wait, &request.id)?;
         let start_seq = state.report_seq.get(&request.id).copied().unwrap_or(0);
-        loop {
+        let wake = {
+            let waiting = state
+                .waits
+                .entry(request.id.clone())
+                .or_insert_with(|| Waiting {
+                    wake: Arc::new(Condvar::new()),
+                    callers: 0,
+                });
+            waiting.callers += 1;
+            waiting.wake.clone()
+        };
+        let outcome = loop {
             if self.stopping() {
-                return Err(shutting_down());
+                break Err(shutting_down());
             }
-            let record = registry(&state.registry)?
-                .get(&request.id)?
-                .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "the session was deleted"))?;
-            let runtime = self.runtime(&state, &record);
-            let lifecycle = self.lifecycle(&state, &record.id, runtime.status);
-            let screen = match (request.until, runtime.terminal) {
-                (WaitUntil::Output, Some(terminal)) => self
-                    .host
-                    .read(terminal, ReadSource::Visible, None, TextFormat::Text)
-                    .ok()
-                    .map(|r| r.text),
+            let seen = match self.seen_by_wait(&state, &request.id) {
+                Ok(seen) => seen,
+                Err(error) => break Err(error),
+            };
+            // The screen is read without the state lock: it's the terminal's to give.
+            let screen = match (request.until, seen.terminal) {
+                (WaitUntil::Output, Some(terminal)) => {
+                    drop(state);
+                    let text = self
+                        .host
+                        .read(terminal, ReadSource::Visible, None, TextFormat::Text)
+                        .ok()
+                        .map(|r| r.text);
+                    state = self.lock();
+                    text
+                }
                 _ => None,
             };
             let observed = Observed {
-                status: runtime.status,
-                lifecycle,
+                status: seen.status,
+                lifecycle: seen.lifecycle,
                 report_seq: state.report_seq.get(&request.id).copied().unwrap_or(0),
                 screen: screen.as_deref(),
             };
             let finish = |matched: bool, reason: String| {
                 Ok(Response::Wait(WaitResult {
                     matched,
-                    status: runtime.status,
-                    lifecycle,
-                    reported: record.reported.clone(),
+                    status: seen.status,
+                    lifecycle: seen.lifecycle,
+                    reported: seen.reported.clone(),
                     reason,
                 }))
             };
             match waits::evaluate(request.until, pattern, start_seq, &observed) {
-                Outcome::Matched(reason) => return finish(true, reason),
-                Outcome::Impossible(reason) => return finish(false, reason),
+                Outcome::Matched(reason) => break finish(true, reason),
+                Outcome::Impossible(reason) => break finish(false, reason),
                 Outcome::Pending => {}
             }
             let now = Instant::now();
@@ -1893,15 +1932,59 @@ impl Inner {
                     ),
                     _ => format!("timeout after {} ms", request.timeout_ms),
                 };
-                return finish(false, reason);
+                break finish(false, reason);
             }
             let slice = (deadline - now).min(waits::POLL);
-            state = self
-                .changed
+            state = wake
                 .wait_timeout(state, slice)
                 .unwrap_or_else(PoisonError::into_inner)
                 .0;
+        };
+        if let Some(waiting) = state.waits.get_mut(&request.id) {
+            waiting.callers = waiting.callers.saturating_sub(1);
+            if waiting.callers == 0 {
+                state.waits.remove(&request.id);
+            }
         }
+        outcome
+    }
+
+    /// What a wait looks at for session `id`: from the view last published for it (its status
+    /// read again from the terminal), with no registry read, or from its record when it has no
+    /// view yet.
+    fn seen_by_wait(&self, state: &State, id: &SessionId) -> Result<SeenByWait, ApiError> {
+        let Some(view) = state.views.get(id) else {
+            let record = registry(&state.registry)?
+                .get(id)?
+                .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "the session was deleted"))?;
+            let runtime = self.runtime(state, &record);
+            return Ok(SeenByWait {
+                status: runtime.status,
+                lifecycle: self.lifecycle(state, id, runtime.status),
+                reported: record.reported,
+                terminal: runtime.terminal,
+            });
+        };
+        let live = state.live.get(id).and_then(|live| {
+            let info = self.host.info(live.terminal)?;
+            let status = match info.state {
+                TerminalState::Running => SessionStatus::Live,
+                TerminalState::Exited { .. } | TerminalState::Failed { .. } => {
+                    SessionStatus::Exited
+                }
+            };
+            Some((status, live.terminal))
+        });
+        let (status, terminal) = match live {
+            Some((status, terminal)) => (status, Some(terminal)),
+            None => (view.status, None),
+        };
+        Ok(SeenByWait {
+            status,
+            lifecycle: self.lifecycle(state, id, status),
+            reported: view.reported.clone(),
+            terminal,
+        })
     }
 
     fn send(&self, caller: &Caller, request: SendRequest) -> Result<Response, ApiError> {
@@ -2422,7 +2505,6 @@ impl Inner {
                 state.git.remove(&id);
                 self.refresh(&mut state, &id);
             }
-            self.changed.notify_all();
             Ok(())
         });
         self.audit_outcome(
@@ -2617,7 +2699,6 @@ impl Inner {
                     live.tracker.on_program_status(&status, self.now());
                 }
                 self.refresh(&mut state, &session_id);
-                self.changed.notify_all();
             }
             HostEvent::Bell { .. } => {}
         }
@@ -2668,9 +2749,6 @@ impl Inner {
             .collect();
         for id in &changed {
             self.refresh(&mut state, id);
-        }
-        if !changed.is_empty() {
-            self.changed.notify_all();
         }
         let due = {
             let inner = &mut *state;
@@ -2808,7 +2886,6 @@ impl Inner {
             self.publish(&scope, session_id, SessionEvent::Activity);
         }
         self.refresh(&mut state, session_id);
-        self.changed.notify_all();
     }
 
     /// Read the running agent's conversation log for its latest line, at
@@ -3247,7 +3324,6 @@ impl Inner {
         self.publish(&scope, session_id, SessionEvent::Exited { code });
         self.refresh(&mut state, session_id);
         self.save_running(&state);
-        self.changed.notify_all();
     }
 
     /// The prompt with numbered options the terminal's screen shows, while
@@ -3402,7 +3478,6 @@ impl Inner {
             live.tracker.on_touch(self.now());
         }
         self.refresh(state, id);
-        self.changed.notify_all();
     }
 
     fn runtime(&self, state: &State, record: &SessionRecord) -> Runtime {
@@ -3581,6 +3656,9 @@ impl Inner {
     /// Rebuild a session's view and publish `Updated` (and `Lifecycle`) if it
     /// changed since the last publication.
     fn refresh(&self, state: &mut State, id: &SessionId) {
+        // Whatever changed, the callers waiting on this session look again (once the lock is
+        // let go).
+        wake_waits(state, id);
         let lookup = registry(&state.registry).and_then(|r| {
             let record = r.get(id)?;
             let children = r.children(id)?;
