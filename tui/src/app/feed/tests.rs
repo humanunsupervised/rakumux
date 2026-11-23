@@ -271,8 +271,99 @@ fn here_and_elsewhere(account: &FakeAccount) {
     ));
 }
 
+/// Started with the Inbox open at start, on a screen `width` × 48.
+fn inbox_at_start(width: u16, layout: SessionLayout) -> (Harness, Arc<FakeAccount>) {
+    let fake = FakeApi::new(vec![view("A", "api", 20), view("B", "docs", 10)]);
+    let dir = tempfile::tempdir().unwrap();
+    let account = Arc::new(FakeAccount::with_feed());
+    let mut options = options(&fake, scope(), &dir);
+    options.account = account.clone();
+    options.settings.sessions.layout = layout;
+    options.settings.sessions.inbox_at_start = true;
+    let mut h = start(options, fake, dir);
+    h.app.resize(width, 48);
+    (h, account)
+}
+
 #[tokio::test]
-async fn nothing_shows_the_feed_by_itself() {
+async fn a_start_opens_the_inbox_beside_the_session_where_it_docks() {
+    let (mut h, account) = inbox_at_start(160, SessionLayout::Sidebar);
+    assert!(h.app.feed_shown());
+    assert!(h.app.screen().feed_divider.is_some(), "docked");
+    assert!(h.app.screen().detail.is_some());
+    // The list has the keys: what they do is as before.
+    assert!(!h.app.drawer_has_keys());
+    h.press(KeyCode::Right).await;
+    assert_eq!(h.app.list.grouping(), Grouping::Repo);
+    h.press(KeyCode::Left).await;
+    // In session mode it stays beside the session.
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    assert!(h.app.feed_shown());
+    h.rakumux().await;
+    // Read as shown while the window is used; left alone, rakumux.com isn't
+    // read for it more often than for a hidden one.
+    tick(&mut h, Duration::from_secs(5));
+    assert_eq!(account.feed_shown().last(), Some(&true));
+    tick(&mut h, Duration::from_secs(20 * 60));
+    assert_eq!(account.feed_shown().last(), Some(&false));
+    // f gives it the keys, then hides it; used by the user, it's read as
+    // shown however long the window was left.
+    h.press(KeyCode::Char('f')).await;
+    assert!(h.app.feed_has_keys());
+    tick(&mut h, Duration::from_secs(40 * 60));
+    assert_eq!(account.feed_shown().last(), Some(&true));
+    h.press(KeyCode::Char('f')).await;
+    assert!(!h.app.drawer_open());
+    assert!(h.app.screen().feed.is_none());
+
+    // Where it wouldn't dock it takes no other pane's place: a narrow
+    // window, a phone, the Tabs layout. A window that widens docks it.
+    for width in [40, 90, 110] {
+        let (mut h, _) = inbox_at_start(width, SessionLayout::Sidebar);
+        assert!(h.app.screen().feed.is_none(), "{width}");
+        assert!(!h.app.drawer_tab_shown());
+        h.app.resize(160, 48);
+        assert!(h.app.feed_shown(), "{width}");
+        h.app.resize(width, 48);
+        assert!(h.app.screen().feed.is_none(), "{width}");
+        // f still shows it there.
+        h.press(KeyCode::Char('f')).await;
+        assert!(h.app.feed_has_keys() && h.app.feed_shown(), "{width}");
+    }
+    let (h, _) = inbox_at_start(160, SessionLayout::Tabs);
+    assert!(h.app.screen().feed.is_none());
+    assert!(!h.app.drawer_tab_shown());
+}
+
+#[tokio::test]
+async fn inbox_open_at_start_turns_off_in_settings_and_is_saved_only_off() {
+    use crate::app::types::SettingsItem;
+    assert!(crate::app::Settings::default().sessions.inbox_at_start);
+    let (mut h, _) = inbox_at_start(160, SessionLayout::Sidebar);
+    let row = SettingsItem::InboxAtStart.index();
+    let general = &h.app.modal_context(false).general[row];
+    assert_eq!(general.label, "Inbox open at start");
+    assert_eq!(general.value, "[On] Off");
+    h.press(KeyCode::Char(',')).await;
+    for _ in 0..row {
+        h.press(KeyCode::Down).await;
+    }
+    h.press(KeyCode::Enter).await;
+    let path = h.home.path().join("config.json");
+    let saved = || crate::app::Settings::load_from(&path).unwrap();
+    assert!(!saved().sessions.inbox_at_start);
+    // This window's stays until it's hidden; the next start opens none.
+    assert!(h.app.feed_shown());
+    h.press(KeyCode::Enter).await;
+    assert!(saved().sessions.inbox_at_start);
+    assert!(!std::fs::read_to_string(&path)
+        .unwrap()
+        .contains("inbox_at_start"));
+}
+
+#[tokio::test]
+async fn nothing_shows_a_hidden_feed_by_itself() {
     for layout in SessionLayout::ALL {
         let (mut h, account) = feed_harness(FakeAccount::with_feed(), layout);
         assert_eq!(h.app.list.grouping(), Grouping::Status);

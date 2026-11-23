@@ -117,8 +117,8 @@ new-session flow, and code boundaries.
   `components::feed::turn_lines` (`›` prompts, quiet reasoning, `●` tool calls with the first
   lines of their output). `components/feed.rs::draw_feed` draws it under the drawer's band
   (`‹` back while reading) over the cards or the reply.
-- `drawer.rs`: the drawer, `DrawerTab` Feed or Rtop. `drawer_open` (shown; this window's, hidden
-  at every start, nothing opens it by itself), `drawer_focused` (it has Rakumux mode's keys:
+- `drawer.rs`: the drawer, `DrawerTab` Feed or Rtop. `drawer_open` (shown; this window's, opened
+  by every start on the Inbox where it docks: `drawer_at_start` until it's used, `FeedShown::Docked`), `drawer_focused` (it has Rakumux mode's keys:
   `drawer_has_keys`; `drawer_lost_keys` when session mode or the terminal panel takes them) and
   `drawer_tab` go to the layout as `PaneSizes::feed` (`layout::FeedShown`), and `Screen::feed`
   says where it is: docked on the right (Master detail; `Screen::feed_divider`,

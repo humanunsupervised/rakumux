@@ -1,7 +1,7 @@
-//! Beats end to end: the real TUI in a real terminal (a session of one
-//! daemon), with a daemon of its own in a temp home. A heartbeat is made in
-//! the New heartbeat form, renamed and deleted from the list, and the CLI
-//! sees each.
+//! The real TUI in a real terminal (a session of one daemon), with a daemon
+//! of its own in a temp home. A heartbeat is made in Beats' New heartbeat
+//! form, renamed and deleted from the list, and the CLI sees each; a start
+//! opens the Inbox, and Help is searched.
 #![cfg(target_os = "linux")]
 
 use serde_json::Value;
@@ -162,9 +162,8 @@ impl Screen {
     }
 }
 
-#[test]
-fn a_heartbeat_is_made_renamed_and_deleted_in_the_real_tui() {
-    let world = World::new();
+/// The TUI, started in a 160 × 48 terminal.
+fn start_tui(world: &World) -> Screen {
     world.ok("outer", &["daemon", "start"]);
     let api: Arc<dyn SessionApi> = Arc::new(
         Client::connect(ClientConfig {
@@ -207,10 +206,43 @@ fn a_heartbeat_is_made_renamed_and_deleted_in_the_real_tui() {
             workspace: None,
         })
         .unwrap();
-    let screen = Screen {
+    Screen {
         api,
         id: session.id,
-    };
+    }
+}
+
+#[test]
+fn a_start_opens_the_inbox_and_help_is_searched_in_the_real_tui() {
+    let world = World::new();
+    let screen = start_tui(&world);
+    // The Inbox beside the session, the list keeping the keys.
+    screen.shows("≡ Inbox   ♥ Beats   ▥ rtop");
+    screen.shows("+ New session");
+    screen.send("?", &[]);
+    screen.shows("/ to search help");
+    screen.send("/", &[]);
+    screen.shows("Type to search help");
+    screen.send("after", &[]);
+    let found = screen.until("what help says", |text| {
+        text.contains("⌕ after█") && text.contains("Esc end search")
+    });
+    assert!(found.to_lowercase().matches("after").count() > 2, "{found}");
+    assert!(!found.contains("1 Overview"), "{found}");
+    screen.keys(&["esc"]);
+    screen.shows("1 Overview");
+    screen.keys(&["esc"]);
+    screen.until("help closed", |text| !text.contains("1 Overview"));
+    // f gives the Inbox the keys, f again hides it.
+    screen.send("f", &[]);
+    screen.send("f", &[]);
+    screen.until("it hidden", |text| !text.contains("♥ Beats"));
+}
+
+#[test]
+fn a_heartbeat_is_made_renamed_and_deleted_in_the_real_tui() {
+    let world = World::new();
+    let screen = start_tui(&world);
 
     // Beats, empty: the row that makes one, and its form.
     screen.shows("+ New session");

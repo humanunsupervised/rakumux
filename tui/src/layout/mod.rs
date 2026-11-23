@@ -200,6 +200,9 @@ pub enum FeedShown {
     /// Not on screen anywhere.
     #[default]
     Hidden,
+    /// Shown where it docks, hidden where it would take another pane's
+    /// place; the list has the keys.
+    Docked,
     /// Shown; the list (or tab bar) has the keys.
     Shown,
     /// Shown with Rakumux mode's keys.
@@ -430,6 +433,7 @@ pub fn split_with(
     }
     let mut areas = split_sessions(area, layout, focus, without);
     match layout {
+        _ if sizes.feed == FeedShown::Docked => {}
         // The tab bar stays; the selected Feed tab fills the rest.
         SessionLayout::Tabs if focused => {
             areas.feed = Some(areas.detail);

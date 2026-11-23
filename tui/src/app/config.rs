@@ -60,7 +60,7 @@ pub struct Settings {
 
 /// The `"sessions"` section. The TUI reads `rakumux_key` (and the older
 /// `prefix_key`), `cycle_keys`, `cycle_keys_in_session`, `welcome_seen`,
-/// `phone_offer_seen`, `tips`, `auto_update`, `icons`, `sidebar_width`,
+/// `phone_offer_seen`, `tips`, `inbox_at_start`, `auto_update`, `icons`, `sidebar_width`,
 /// `stacked_list_percent`, `feed_width`, `session_order`, `section_order`
 /// and `terminal_panel`;
 /// other keys in the section (daemon tuning such as `scrollback_rows`) are kept as they are
@@ -96,6 +96,10 @@ pub struct SessionsConfig {
     /// when turned off.
     #[serde(skip_serializing_if = "is_true")]
     pub tips: bool,
+    /// Every start opens the Inbox beside the session, where it docks; saved
+    /// only when turned off.
+    #[serde(skip_serializing_if = "is_true")]
+    pub inbox_at_start: bool,
     /// New releases install by themselves (binary installs; npm, Homebrew
     /// and source builds are told), then the UI reloads once idle. On by
     /// default; only `false` is written. Settings → Update automatically.
@@ -192,6 +196,7 @@ impl Default for SessionsConfig {
             welcome_seen: false,
             phone_offer_seen: false,
             tips: true,
+            inbox_at_start: true,
             auto_update: true,
             layout: SessionLayout::default(),
             icons: Icons::default(),

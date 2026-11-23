@@ -1,6 +1,9 @@
 //! The drawer: what shows beside the sessions on the right, with three
 //! tabs, the Feed (`feed/`), Beats (`heartbeats.rs`) and rtop (`rtop.rs`).
-//! Every start hides it; `f` shows it on the Feed, `B` on Beats, `t` on rtop (or
+//! Every start opens it on the Inbox where it docks, beside the session,
+//! without the keys (`sessions.inbox_at_start`, Settings → Inbox open at
+//! start; `App::drawer_at_start` until it's used: it takes no other pane's
+//! place meanwhile); `f` shows it on the Feed, `B` on Beats, `t` on rtop (or
 //! Settings for either). Master detail docks
 //! it as a pane on the right, a draggable line left of it, and the
 //! session's pane narrows (the session on screen takes the new size, as a
@@ -75,6 +78,7 @@ impl App {
     pub(in crate::app) fn drawer_layout(&self) -> FeedShown {
         match (self.drawer_open, self.drawer_focused) {
             (false, _) => FeedShown::Hidden,
+            (true, _) if self.drawer_at_start => FeedShown::Docked,
             (true, false) => FeedShown::Shown,
             (true, true) => FeedShown::Focused,
         }
@@ -88,7 +92,10 @@ impl App {
     /// The Tabs layout's tab bar has the drawer's tab (phones show no tab
     /// bar in Rakumux mode; the drawer fills the screen there).
     pub fn drawer_tab_shown(&self) -> bool {
-        self.drawer_open && self.session_layout() == SessionLayout::Tabs && !self.phone()
+        self.drawer_open
+            && !self.drawer_at_start
+            && self.session_layout() == SessionLayout::Tabs
+            && !self.phone()
     }
 
     /// `*`, `f` or `t` (or Settings, or the footer's Feed button): show the
@@ -131,6 +138,7 @@ impl App {
             self.enter_rakumux_mode();
         }
         self.drawer_focused = true;
+        self.drawer_at_start = false;
         self.pending_key = None;
         self.drawer_moved();
     }
@@ -141,6 +149,7 @@ impl App {
             return;
         }
         self.drawer_open = false;
+        self.drawer_at_start = false;
         self.drawer_focused = false;
         self.feed.reading = false;
         self.feed_divider = DividerState::default();

@@ -413,6 +413,8 @@ pub enum SettingsItem {
     Icons,
     /// A tip in the footer, one a day.
     Tips,
+    /// The Inbox opens at every start, where it docks.
+    InboxAtStart,
     /// Option/Alt+↑/↓ also switch sessions inside a session.
     CycleInSessions,
     /// New releases install by themselves; the UI reloads once idle.
@@ -444,12 +446,13 @@ pub enum SettingsItem {
 
 impl SettingsItem {
     /// In Settings' order: signing in first, then the rest.
-    pub const ALL: [SettingsItem; 16] = [
+    pub const ALL: [SettingsItem; 17] = [
         SettingsItem::Account,
         SettingsItem::Devices,
         SettingsItem::Layout,
         SettingsItem::Icons,
         SettingsItem::Tips,
+        SettingsItem::InboxAtStart,
         SettingsItem::CycleInSessions,
         SettingsItem::AutoUpdate,
         SettingsItem::Update,
@@ -466,7 +469,10 @@ impl SettingsItem {
     /// The heading Settings lists it under.
     pub fn section(self) -> &'static str {
         match self {
-            SettingsItem::Layout | SettingsItem::Icons | SettingsItem::Tips => "Appearance",
+            SettingsItem::Layout
+            | SettingsItem::Icons
+            | SettingsItem::Tips
+            | SettingsItem::InboxAtStart => "Appearance",
             SettingsItem::CycleInSessions => "Keyboard",
             SettingsItem::AutoUpdate
             | SettingsItem::Update

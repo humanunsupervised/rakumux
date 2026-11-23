@@ -254,6 +254,12 @@ fn open_item(app: &mut App, item: SettingsItem) {
             let state = if on { "on" } else { "off" };
             save_config(app, format!("Tips in the footer: {state}"));
         }
+        SettingsItem::InboxAtStart => {
+            let on = !app.settings.sessions.inbox_at_start;
+            app.settings.sessions.inbox_at_start = on;
+            let state = if on { "on" } else { "off" };
+            save_config(app, format!("Inbox open at start: {state}"));
+        }
         SettingsItem::TerminalPlacement => {
             // Applies live and stays in the modal, as the layout does.
             let next = app.settings.sessions.terminal_panel.other();

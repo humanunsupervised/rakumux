@@ -1383,7 +1383,8 @@ accidents; they don't stop a hostile process running as the same user.
 - **Config** (`tui/src/app/config.rs`): `Config {anthropic_api_key, openai_api_key,
   ai_primary_provider, openai_model}` plus `sessions {rakumux_key ("ctrl+\\"; an older
   `prefix_key` other than "ctrl+b" still counts), cycle_keys (["alt+up", "alt+down"]),
-  cycle_keys_in_session (false), tips (true: a tip in the footer; saved only when false),
+  cycle_keys_in_session (false), tips (true: a tip in the footer; saved only when false), inbox_at_start (true: every start
+  opens the Inbox where it docks; saved only when false),
   icons ("plain" | "emoji" | "nerd":
   the folder and branch marks), welcome_seen (false: the welcome tour shows on startup until
   its "Don't show this on startup" box is ticked), phone_offer_seen (false: "Use Rakumux from your
@@ -1638,8 +1639,8 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
   under it and opens them again.
 - **Drawer** (`app/drawer.rs`): what shows beside the sessions, with three tabs, the
   **Inbox**, **Beats** (heartbeats) and **rtop**: a pane on the right in Master detail, a tab in Tabs, the screen on a phone.
-  It takes Rakumux mode's keys from the list while focused. Hidden at every start; never opens
-  by itself.
+  It takes Rakumux mode's keys from the list while focused. Every start opens it on the Inbox
+  where it docks, without the keys (`sessions.inbox_at_start`).
 - **Inbox** (`app/feed`, `f`; the feed in code, contracts and on the wire): what agents said,
   across sessions and machines: the drawer's Inbox tab.
 - **Pin**: a user mark that lists a session in the list's Pinned tab (and shows `★` before its
@@ -1788,8 +1789,12 @@ those shown (`layout::render_tabs_from`, `App::tab_first`), and the ends say how
 **The drawer** (`app/drawer.rs`, `components/drawer.rs`) holds three tabs, the feed (`f`, the
 footer's Inbox button, or Settings; `app/feed/pane.rs`), Beats (`B`, or Settings; below) and rtop
 (`t`, or Settings; below), named on its band (`≡ Inbox   ♥ Beats   ▥ rtop`, as tall as the list's tabs: the active one bold and underlined,
-in the accent while the drawer has the keys; a click on a name shows that tab with the keys). It
-is hidden at every start and never opens by itself; the shown/hidden state and its tab are this
+in the accent while the drawer has the keys; a click on a name shows that tab with the keys). Every
+start opens it on the Inbox, without the keys, where Master detail docks it
+(`sessions.inbox_at_start`, Settings → Inbox open at start; `App::drawer_at_start`,
+`FeedShown::Docked`): until it's used it takes no other pane's place, so a narrow window, a phone
+and Tabs show it only once asked, and a window left unused 5 minutes reads it as `background`.
+Nothing else opens it by itself; the shown/hidden state and its tab are this
 window's, never saved. Only the tab on screen works: the feed and the heartbeats are read every
 2 s and rtop samples only while their tab shows. Master
 detail docks it on the right (`layout::split_with`, `Screen::feed`): list | session | a
@@ -2189,7 +2194,7 @@ Settings is one scrolling page without tabs (`help::ModalTab::Settings`) under a
 typing narrows it to the settings and actions whose section or name has every word typed
 (`Backspace` deletes, `Esc` clears, then closes; `Space` changes the selected row while nothing
 is typed), and the dialog keeps its size meanwhile. The settings come first (Account, where you
-sign in and pair devices, then Appearance (Layout, Icons, Tips in the footer), Keyboard and App, whose Update
+sign in and pair devices, then Appearance (Layout, Icons, Tips in the footer, Inbox open at start), Keyboard and App, whose Update
 automatically turns automatic updates on and off and whose Session history opens the session
 history modal, greyed out with a note to restart the server (S) against a daemon without
 `session.history`), then under a `Keys`
@@ -2199,7 +2204,10 @@ it), so the rows never shift; the wheel moves the selection. A setting that can'
 now is greyed out. Labels sit on the left and values and keys are
 pinned to the right. It's sized from its rows: centred, its widest row plus 20 columns (48–100),
 capped by screen width with a side margin, and as tall as its rows, up to 80% of the screen's
-height, scrolling only as far as the selected row needs. Help retains its wider reading area
+height, scrolling only as far as the selected row needs. Help's search field is over its tabs: `/` searches (`help::find`: every tab but
+the license, every action with its keys and note, every setting with its note; every word typed,
+those matching by name first, the words marked) and keys type until `Esc` ends it; `?`, `q`, `t`,
+the digits and `j`/`k` do what they do in Help only while it isn't searched. Help retains its wider reading area
 and tabs. Settings and the account dialog keep two columns of padding inside their border and a
 row above and below (`components::dialogs::padding`: no columns on a phone, no rows under 20
 rows). Dialogs stay above the one-row footer so the mode bar remains visible on short screens.

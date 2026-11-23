@@ -771,6 +771,22 @@ async fn option_arrows_in_sessions_is_a_general_setting() {
 }
 
 #[tokio::test]
+async fn help_is_searched_with_slash_and_esc_goes_back_to_it() {
+    let mut h = harness(vec![view("A", "a", 30)]);
+    h.press(KeyCode::Char('?')).await;
+    h.press(KeyCode::Char('/')).await;
+    h.type_text("after q").await;
+    let AppMode::Modal { state, .. } = &h.app.mode else {
+        panic!("Help closed");
+    };
+    assert_eq!(state.query, "after q");
+    h.press(KeyCode::Esc).await;
+    assert_eq!(settings_tab(&h), Some(ModalTab::Overview));
+    h.press(KeyCode::Char('q')).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+}
+
+#[tokio::test]
 async fn tips_in_the_footer_turn_off_in_settings_and_are_saved_only_off() {
     let mut h = harness(vec![view("A", "a", 30)]);
     h.app.settings.sessions.tips = true;

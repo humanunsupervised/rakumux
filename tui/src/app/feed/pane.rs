@@ -30,6 +30,9 @@ const FEED_EVERY: Duration = Duration::from_secs(2);
 /// How often otherwise, while the account's feed is on: to count
 /// what's new.
 pub(in crate::app) const FEED_HIDDEN_EVERY: Duration = Duration::from_secs(10);
+/// The inbox a start opened counts as watched while its window was used this
+/// recently: one left open alone doesn't have rakumux.com read for it.
+const WATCHED_AFTER_USE: Duration = Duration::from_secs(5 * 60);
 /// Rows of a card and the row after it, for paging through them.
 const CARD_ROWS: isize = 11;
 
@@ -213,7 +216,8 @@ impl App {
     }
 
     /// Ask for the changes since what's held; the service reads the cloud
-    /// more often only while the feed is on screen.
+    /// more often only while the feed is on screen (and, one a start opened,
+    /// its window in use).
     fn read_feed(&mut self, now: Instant) {
         let shown = self.feed_shown();
         let every = if shown { FEED_EVERY } else { FEED_HIDDEN_EVERY };
@@ -221,10 +225,11 @@ impl App {
         self.feed.busy = true;
         let generation = self.feed.request_generation;
         let (after, held) = self.feed.cursor();
+        let watched = shown && (!self.drawer_at_start || self.used_within(WATCHED_AFTER_USE, now));
         let access = self.account_access.clone();
         self.exec.job(move || AppEvent::Feed {
             generation,
-            result: access.feed(after, held, shown),
+            result: access.feed(after, held, watched),
         });
     }
 

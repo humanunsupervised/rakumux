@@ -592,7 +592,8 @@ impl KeyAction {
                  list (again: back); Enter reads a reply whole, again goes into \
                  its session when it runs here; r writes back to it; Esc gives the list the \
                  keys back. The footer's Inbox button counts the replies that came since you \
-                 last looked. Needs your Rakumux account (Settings → Account)."
+                 last looked. Every start opens it where the window has room (Settings → Inbox open \
+                 at start). Needs your Rakumux account (Settings → Account)."
                 .into(),
             KeyAction::NextFolder | KeyAction::PreviousFolder => {
                 "With several folders shown: the first session under the next or previous \
@@ -762,8 +763,11 @@ pub struct ModalState {
     top: Cell<u16>,
     /// The selected Settings row's note shows in a popover (`→`).
     pub note_open: bool,
-    /// Typed in Settings' search field: only the rows it matches show.
+    /// Typed in the search field: only what it matches shows (Settings'
+    /// rows; in Help what any tab, action or setting says of it).
     pub query: String,
+    /// Help: `/` was pressed, so keys type in the search field.
+    pub searching: bool,
     /// The settings' [`search_text`], in order (the actions' is known here).
     settings: Vec<String>,
 }
@@ -800,6 +804,7 @@ impl ModalState {
             top: Cell::new(0),
             note_open: false,
             query: String::new(),
+            searching: false,
             settings,
         }
     }
@@ -904,7 +909,8 @@ impl ModalState {
     /// `Enter` (and `Space` while nothing is typed) changes the setting or
     /// runs the action, `→` shows the row's note in a popover that `←` or
     /// `Esc` closes, as does moving or `Enter`, and `Esc` closes. In Help
-    /// `Esc`/`q` and `?` close, and
+    /// `/` searches (then typing narrows, `Esc` ends it), `Esc`/`q` and `?`
+    /// close, and
     /// `Tab`/`→` and `Shift-Tab`/`←` switch tabs, number keys jump to a tab,
     /// and `↑`/`↓`, `PgUp`/`PgDn`, `Home`/`End` scroll (`j`/`k`/`g`/`G`
     /// too). Keys with Ctrl or Alt held are ignored.
@@ -947,7 +953,11 @@ impl ModalState {
             }
             return ModalAction::Handled;
         }
+        if self.searching {
+            return self.handle_help_search(key, page);
+        }
         match key.code {
+            KeyCode::Char('/') => self.searching = true,
             KeyCode::Down | KeyCode::Char('j') => self.scroll_by(1),
             KeyCode::Up | KeyCode::Char('k') => self.scroll_by(-1),
             KeyCode::PageDown | KeyCode::Char(' ') => self.scroll_by(page),
@@ -957,6 +967,45 @@ impl ModalState {
             _ => return self.handle_common_key(key),
         }
         ModalAction::Handled
+    }
+
+    /// Keys while searching Help: typing narrows, `Esc` (or `Backspace` with
+    /// nothing typed) ends the search, and the keys that scroll still do.
+    fn handle_help_search(&mut self, key: &KeyEvent, page: i32) -> ModalAction {
+        match key.code {
+            KeyCode::Esc => {
+                self.query.clear();
+                self.help_searched();
+                self.searching = false;
+            }
+            KeyCode::Backspace => match self.query.pop() {
+                Some(_) => self.help_searched(),
+                None => self.searching = false,
+            },
+            KeyCode::Char(c) => {
+                self.query.push(c);
+                self.help_searched();
+            }
+            KeyCode::Down => self.scroll_by(1),
+            KeyCode::Up => self.scroll_by(-1),
+            KeyCode::PageDown => self.scroll_by(page),
+            KeyCode::PageUp => self.scroll_by(-page),
+            KeyCode::Home => self.scroll = 0,
+            KeyCode::End => self.scroll = self.max_scroll.get(),
+            _ => {}
+        }
+        ModalAction::Handled
+    }
+
+    /// Help's search changed: what it finds shows from the top.
+    fn help_searched(&mut self) {
+        self.scroll = 0;
+        self.max_scroll.set(u16::MAX);
+    }
+
+    /// Help shows what its search finds rather than a tab.
+    fn shows_results(&self) -> bool {
+        self.searching && !self.query.trim().is_empty()
     }
 
     /// `Enter` in Settings: change the selected setting or run the action,
@@ -1119,21 +1168,53 @@ fn draw_body(f: &mut Frame, body: Rect, lines: Vec<Line<'static>>, scroll: u16, 
     }
 }
 
-/// Help: a tab strip, a rule, the tab's text and the keys.
+/// Help: the search field, a tab strip, a rule, the tab's text and the keys;
+/// while searching, what was found instead of the tab.
 fn render_help(f: &mut Frame, area: Rect, state: &ModalState, ctx: &ModalContext) {
     let Some(inner) = draw_frame(f, modal_area(area), Modal::Help, ctx) else {
         return;
     };
     let palette = theme::palette();
-    let tabs_row = Rect { height: 1, ..inner };
-    let items = tab_items(state.tab, tabs_row.width);
-    layout::render_tabs(tabs_row, f.buffer_mut(), &items, state.tab.index());
+    // The search field, while the screen has a row for it or it's typed in.
+    let search_height = u16::from(inner.height >= 8 || (state.searching && inner.height >= 2));
+    if search_height == 1 {
+        let hint = match state.searching {
+            true => "Type to search help",
+            false => "/ to search help",
+        };
+        draw_search(
+            f,
+            Rect { height: 1, ..inner },
+            &state.query,
+            hint,
+            state.searching,
+        );
+    }
+    let results = state.shows_results();
+    let tabs_row = Rect {
+        y: inner.y + search_height,
+        height: 1,
+        ..inner
+    };
+    let inner = Rect {
+        y: tabs_row.y,
+        height: inner.height - search_height,
+        ..inner
+    };
+    if inner.height == 0 {
+        return;
+    }
+    let strip_height = u16::from(!results);
+    if !results {
+        let items = tab_items(state.tab, tabs_row.width);
+        layout::render_tabs(tabs_row, f.buffer_mut(), &items, state.tab.index());
+    }
     if inner.height < 2 {
         return;
     }
 
     let rule = Rect {
-        y: inner.y + 1,
+        y: inner.y + strip_height,
         height: 1,
         ..inner
     };
@@ -1144,13 +1225,16 @@ fn render_help(f: &mut Frame, area: Rect, state: &ModalState, ctx: &ModalContext
     );
     let footer_height = u16::from(inner.height >= 4);
     let body = Rect {
-        y: inner.y + 2,
-        height: inner.height - 2 - footer_height,
+        y: rule.y + 1,
+        height: inner.height - 1 - strip_height - footer_height,
         ..inner
     };
 
     let text_width = usize::from(body.width.saturating_sub(BODY_MARGIN)).max(1);
-    let lines = body_lines(state.tab, ctx, text_width);
+    let lines = match results {
+        true => found_lines(&state.query, ctx, text_width),
+        false => body_lines(state.tab, ctx, text_width),
+    };
     let total = u16::try_from(lines.len()).unwrap_or(u16::MAX);
     let max_scroll = total.saturating_sub(body.height);
     state.max_scroll.set(max_scroll);
@@ -1171,22 +1255,27 @@ fn render_help(f: &mut Frame, area: Rect, state: &ModalState, ctx: &ModalContext
         } else {
             String::new()
         };
-        draw_footer(
-            f,
-            footer,
+        let hints: [&[(&str, &str)]; 3] = if state.searching {
+            [
+                &[("↑↓ PgUp PgDn", "scroll"), ("Esc", "end search")],
+                &[("↑↓", "scroll"), ("Esc", "end search")],
+                &[("Esc", "end search")],
+            ]
+        } else {
             [
                 &[
+                    ("/", "search"),
                     ("Tab ←→", "switch"),
                     ("↑↓ PgUp PgDn", "scroll"),
                     (&jump, "jump"),
                     ("t", "tour"),
                     ("Esc", "close"),
                 ],
-                &[("←→", "tabs"), ("↑↓", "scroll"), ("Esc", "close")],
+                &[("/", "search"), ("←→", "tabs"), ("Esc", "close")],
                 &[("←→", "tabs"), ("Esc", "close")],
-            ],
-            &position,
-        );
+            ]
+        };
+        draw_footer(f, footer, hints, &position);
     }
 }
 
@@ -1226,7 +1315,13 @@ fn render_settings(f: &mut Frame, area: Rect, state: &ModalState, ctx: &ModalCon
     let footer_height = u16::from(inner.height >= 4);
     // The search field, and a blank line under it when there's room.
     let search_height = 1 + u16::from(inner.height >= 6);
-    draw_search(f, Rect { height: 1, ..inner }, &state.query);
+    draw_search(
+        f,
+        Rect { height: 1, ..inner },
+        &state.query,
+        "Type to search settings and keys",
+        true,
+    );
     let inner = Rect {
         y: inner.y + search_height.min(inner.height),
         height: inner.height.saturating_sub(search_height),
@@ -1309,18 +1404,18 @@ fn render_settings(f: &mut Frame, area: Rect, state: &ModalState, ctx: &ModalCon
     }
 }
 
-/// Settings' search field on `row`: what's typed and a cursor, or a hint.
-fn draw_search(f: &mut Frame, row: Rect, query: &str) {
+/// The search field on `row`: what's typed and a cursor, or `hint` (the
+/// cursor before it while `typing` goes there).
+fn draw_search(f: &mut Frame, row: Rect, query: &str, hint: &str, typing: bool) {
     let palette = theme::palette();
     let mark = Span::styled(" ⌕ ", Style::default().fg(palette.accent_primary));
     let text = if query.is_empty() {
+        let quiet = Style::default().fg(palette.text_muted);
+        let cursor = if typing { "█ " } else { "" };
         vec![
             mark,
-            Span::styled("█", Style::default().fg(palette.text_muted)),
-            Span::styled(
-                " Type to search settings and keys",
-                Style::default().fg(palette.text_muted),
-            ),
+            Span::styled(cursor, quiet),
+            Span::styled(hint.to_string(), quiet),
         ]
     } else {
         // The end of a long query, so the cursor stays in view.
@@ -1953,6 +2048,10 @@ fn modal_keys(doc: &mut Doc) {
         row("Tab, ←, →", "Help: switch tab"),
         row("1-9", "Help: jump to a tab"),
         row(
+            "/",
+            "Help: search every tab, action and setting (Esc ends it)",
+        ),
+        row(
             "↑, ↓",
             "Settings: choose a setting or an action. Help: scroll",
         ),
@@ -2499,59 +2598,203 @@ fn body_lines(tab: ModalTab, ctx: &ModalContext, width: usize) -> Vec<Line<'stat
     let width = width.max(1);
     let mut lines: Vec<Line<'static>> = Vec::new();
     for item in content(tab, ctx).0 {
-        match item {
-            Item::Heading(text) => {
-                if !lines.is_empty() {
-                    lines.push(Line::default());
+        if matches!(item, Item::Heading(_)) && !lines.is_empty() {
+            lines.push(Line::default());
+        }
+        lines.extend(item_lines(item, width, &styles));
+    }
+    lines
+}
+
+/// `item` wrapped to `width` columns.
+fn item_lines(item: Item, width: usize, styles: &Styles) -> Vec<Line<'static>> {
+    match item {
+        Item::Heading(text) => wrap(&plain_words(&text, styles.heading), width, Vec::new(), 0),
+        Item::Text(text) => {
+            let words = words(&text, styles.text, styles.key);
+            wrap(&words, width, Vec::new(), 0)
+        }
+        Item::Note(text) => {
+            let words = words(&text, styles.note, styles.key);
+            wrap(&words, width, Vec::new(), 0)
+        }
+        Item::Strong(text) => {
+            let words = words(&text, styles.strong, styles.key);
+            wrap(&words, width, Vec::new(), 0)
+        }
+        Item::List(marker, text) => {
+            let lead = format!("  {marker} ");
+            let indent = str_width(&lead);
+            let first = vec![Span::styled(lead, styles.marker)];
+            let words = words(&text, styles.text, styles.key);
+            wrap(&words, width, first, indent)
+        }
+        Item::Keys(rows) => key_table(&rows, width, styles),
+        Item::Command(command, description) => {
+            let first = vec![Span::raw("  ")];
+            let mut lines = wrap(&plain_words(&command, styles.command), width, first, 6);
+            let first = vec![Span::raw("    ")];
+            let words = words(&description, styles.text, styles.key);
+            lines.extend(wrap(&words, width, first, 4));
+            lines
+        }
+    }
+}
+
+/// What Help's search found under one heading.
+struct Found {
+    title: String,
+    items: Vec<Item>,
+    /// The heading itself matches: listed before those that only say it.
+    titled: bool,
+}
+
+/// Everything Help says of `query` (every word of it, ignoring case): the
+/// actions and settings whose name, keys or note match, and the parts of
+/// each tab that do, a heading's whole section when the heading does. Those
+/// matching by name come first. The license isn't searched.
+fn find(query: &str, ctx: &ModalContext) -> Vec<Found> {
+    let names = KeyNames::new(ctx);
+    let plain = |text: &str| text.replace('`', "").replace(LITERAL_BACKTICK, "`");
+    let says = |text: &str| matches_query(&plain(text).to_lowercase(), query);
+    let mut found = Vec::new();
+    for action in KeyAction::ALL {
+        let (label, keys, note) = (action.label(), action.keys(&names), action.note(&names));
+        if says(&format!("{} {label} {keys} {note}", action.section())) {
+            let mut items = vec![Item::Keys(vec![row(keys, label)])];
+            items.extend((!note.is_empty()).then_some(Item::Text(note)));
+            found.push(Found {
+                title: action.section().to_string(),
+                items,
+                titled: says(label),
+            });
+        }
+    }
+    for setting in &ctx.general {
+        if says(&format!(
+            "{} {} {}",
+            setting.section, setting.label, setting.note
+        )) {
+            let mut items = vec![Item::Strong(esc(&setting.label))];
+            items.extend((!setting.note.is_empty()).then(|| Item::Text(setting.note.clone())));
+            found.push(Found {
+                title: format!("Settings › {}", setting.section),
+                items,
+                titled: says(&setting.label),
+            });
+        }
+    }
+    for tab in Modal::Help.tabs() {
+        if *tab == ModalTab::License {
+            continue;
+        }
+        let mut heading = String::new();
+        for item in content(*tab, ctx).0 {
+            let titled = !heading.is_empty() && says(&heading);
+            let kept = match item {
+                Item::Heading(text) => {
+                    heading = text;
+                    continue;
                 }
-                let words = plain_words(&text, styles.heading);
-                lines.extend(wrap(&words, width, Vec::new(), 0));
-            }
-            Item::Text(text) => lines.extend(wrap(
-                &words(&text, styles.text, styles.key),
-                width,
-                Vec::new(),
-                0,
-            )),
-            Item::Note(text) => lines.extend(wrap(
-                &words(&text, styles.note, styles.key),
-                width,
-                Vec::new(),
-                0,
-            )),
-            Item::Strong(text) => lines.extend(wrap(
-                &words(&text, styles.strong, styles.key),
-                width,
-                Vec::new(),
-                0,
-            )),
-            Item::List(marker, text) => {
-                let lead = format!("  {marker} ");
-                let indent = str_width(&lead);
-                let first = vec![Span::styled(lead, styles.marker)];
-                lines.extend(wrap(
-                    &words(&text, styles.text, styles.key),
-                    width,
-                    first,
-                    indent,
-                ));
-            }
-            Item::Keys(rows) => lines.extend(key_table(&rows, width, &styles)),
-            Item::Command(command, description) => {
-                let first = vec![Span::raw("  ")];
-                lines.extend(wrap(
-                    &plain_words(&command, styles.command),
-                    width,
-                    first,
-                    6,
-                ));
-                let first = vec![Span::raw("    ")];
-                let words = words(&description, styles.text, styles.key);
-                lines.extend(wrap(&words, width, first, 4));
+                Item::Keys(rows) => {
+                    let rows: Vec<(String, String)> = rows
+                        .into_iter()
+                        .filter(|(keys, text)| says(&format!("{heading} {keys} {text}")))
+                        .collect();
+                    (!rows.is_empty()).then_some(Item::Keys(rows))
+                }
+                Item::Command(command, text) => says(&format!("{heading} {command} {text}"))
+                    .then_some(Item::Command(command, text)),
+                Item::Text(ref text)
+                | Item::Note(ref text)
+                | Item::Strong(ref text)
+                | Item::List(_, ref text) => says(&format!("{heading} {text}")).then_some(item),
+            };
+            let Some(item) = kept else { continue };
+            let title = match heading.is_empty() {
+                true => tab.label().to_string(),
+                false => format!("{} › {heading}", tab.label()),
+            };
+            match found.last_mut() {
+                Some(last) if last.title == title => last.items.push(item),
+                _ => found.push(Found {
+                    title,
+                    items: vec![item],
+                    titled,
+                }),
             }
         }
     }
-    lines
+    found.sort_by_key(|found| !found.titled);
+    found
+}
+
+/// What [`find`] found, wrapped to `width` columns, the words searched for
+/// marked; or that nothing matches.
+fn found_lines(query: &str, ctx: &ModalContext, width: usize) -> Vec<Line<'static>> {
+    let styles = Styles::from_theme();
+    let width = width.max(1);
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut title = String::new();
+    for found in find(query, ctx) {
+        if !lines.is_empty() {
+            lines.push(Line::default());
+        }
+        if found.title != title {
+            title = found.title;
+            lines.extend(item_lines(Item::Heading(title.clone()), width, &styles));
+        }
+        for item in found.items {
+            lines.extend(item_lines(item, width, &styles));
+        }
+    }
+    if lines.is_empty() {
+        let none = format!("Nothing in help matches \"{}\"", esc(query.trim()));
+        return item_lines(Item::Note(none), width, &styles);
+    }
+    let words: Vec<String> = query
+        .to_lowercase()
+        .split_whitespace()
+        .map(Into::into)
+        .collect();
+    lines.into_iter().map(|line| marked(line, &words)).collect()
+}
+
+/// `line` with every occurrence of `words` (lowercase) standing out.
+fn marked(line: Line<'static>, words: &[String]) -> Line<'static> {
+    let palette = theme::palette();
+    let mut spans = Vec::new();
+    for span in line.spans {
+        let text = span.content.to_string();
+        let lower = text.to_ascii_lowercase();
+        let mut at = 0;
+        while at < text.len() {
+            // The first occurrence from here, the longest of those.
+            let next = words
+                .iter()
+                .filter_map(|word| {
+                    lower[at..]
+                        .find(word.as_str())
+                        .map(|i| (at + i, word.len()))
+                })
+                .min_by_key(|(start, len)| (*start, std::cmp::Reverse(*len)));
+            let Some((start, len)) = next else { break };
+            if start > at {
+                spans.push(Span::styled(text[at..start].to_string(), span.style));
+            }
+            spans.push(Span::styled(
+                text[start..start + len].to_string(),
+                span.style
+                    .fg(palette.accent_gold)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            at = start + len;
+        }
+        if at < text.len() || text.is_empty() {
+            spans.push(Span::styled(text[at..].to_string(), span.style));
+        }
+    }
+    Line::from(spans)
 }
 
 /// The Settings page's lines.
@@ -3468,6 +3711,94 @@ mod tests {
     }
 
     #[test]
+    fn slash_searches_every_tab_action_and_setting_of_help() {
+        let context = ctx("Ctrl-\\");
+        let mut state = state(ModalTab::Overview);
+        let text = buffer_text(&draw(100, 30, &state, &context));
+        assert!(text.contains("⌕ / to search help"), "{text}");
+        // Until `/` the keys are Help's own; then they type, `q`, `t`, `?`
+        // and digits too.
+        assert_eq!(
+            state.handle_key(&press(KeyCode::Char('/'))),
+            ModalAction::Handled
+        );
+        let text = buffer_text(&draw(100, 30, &state, &context));
+        assert!(text.contains("⌕ █ Type to search help"), "{text}");
+        assert!(text.contains("Agents & CLI"), "the tab still shows: {text}");
+        for c in "qt?1".chars() {
+            assert_eq!(
+                state.handle_key(&press(KeyCode::Char(c))),
+                ModalAction::Handled
+            );
+        }
+        assert_eq!(state.query, "qt?1");
+        let text = buffer_text(&draw(100, 30, &state, &context));
+        assert!(text.contains("Nothing in help matches \"qt?1\""), "{text}");
+        for _ in 0..4 {
+            state.handle_key(&press(KeyCode::Backspace));
+        }
+        for c in "Heartbeat".chars() {
+            state.handle_key(&press(KeyCode::Char(c)));
+        }
+        // How it works, from the action's note; no tab strip.
+        let text = buffer_text(&draw(100, 40, &state, &context));
+        assert!(text.contains("⌕ Heartbeat█"), "{text}");
+        assert!(text.contains("tasks Rakumux runs on a clock"), "{text}");
+        assert!(!text.contains("Agents & CLI"), "{text}");
+        assert!(text.contains("Esc end search"), "{text}");
+        // Esc ends the search, then closes.
+        assert_eq!(state.handle_key(&press(KeyCode::Esc)), ModalAction::Handled);
+        assert!(state.query.is_empty() && !state.searching);
+        let text = buffer_text(&draw(100, 30, &state, &context));
+        assert!(text.contains("Agents & CLI"), "{text}");
+        assert_eq!(state.handle_key(&press(KeyCode::Esc)), ModalAction::Close);
+    }
+
+    #[test]
+    fn help_finds_what_says_every_word_names_first_and_marks_them() {
+        let context = ctx("Ctrl-\\");
+        // "after" is in prose here and there, whatever its case.
+        let after = find("AFTER", &context);
+        assert!(after.len() > 3, "{}", after.len());
+        let lines = found_lines("after", &context, 80);
+        let gold = theme::palette().accent_gold;
+        let marks = lines
+            .iter()
+            .flat_map(|line| &line.spans)
+            .filter(|span| span.style.fg == Some(gold) && span.content.to_lowercase() == "after")
+            .count();
+        assert!(marks >= after.len(), "{marks}");
+        // Names before notes that mention it.
+        let rename = find("rename", &context);
+        assert!(rename[0].titled);
+        let first_note = rename.iter().position(|found| !found.titled);
+        assert!(first_note.is_none_or(|at| rename[at..].iter().all(|found| !found.titled)));
+        // Every word, in any order.
+        assert!(!find("session new", &context).is_empty());
+        assert!(find("session zzz", &context).is_empty());
+        // A setting, with what it does.
+        let label = &context.general[0].label;
+        let text: String = found_lines(label, &context, 80)
+            .iter()
+            .map(|line| line_text(line) + "\n")
+            .collect();
+        assert!(text.contains("Settings › "), "{text}");
+        // Nothing wider than its room, the license not searched.
+        for width in [20, 37, 60, 125] {
+            for query in ["session", "a", "é", "key enter"] {
+                for line in found_lines(query, &context, width) {
+                    assert!(
+                        line.width() <= width,
+                        "{query} {width}: {}",
+                        line_text(&line)
+                    );
+                }
+            }
+        }
+        assert!(find("WARRANTIES OR CONDITIONS", &context).is_empty());
+    }
+
+    #[test]
     fn scrolling_before_and_after_render() {
         let mut state = state(ModalTab::Overview);
         state.handle_key(&press(KeyCode::Up));
@@ -3636,7 +3967,8 @@ mod tests {
         let text = buffer_text(&help);
         assert!(text.lines().next().unwrap().contains("Help"), "{text}");
         assert!(text.contains("What Rakumux is"), "{text}");
-        let strip = text.lines().nth(1).unwrap();
+        // Under the search field.
+        let strip = text.lines().nth(2).unwrap();
         for label in [
             "1 Overview",
             "2 Sessions",

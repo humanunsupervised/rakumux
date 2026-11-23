@@ -372,8 +372,12 @@ pub struct App {
     pub feed: feed::FeedStore,
     /// The drawer (`app/drawer.rs`) is shown (`f`, `t`): a pane on the
     /// right, a tab, or the screen on a phone. This window only, never
-    /// saved: every start hides it.
+    /// saved: every start opens it where it docks
+    /// (`sessions.inbox_at_start`).
     drawer_open: bool,
+    /// It opened with the start and wasn't used since: it shows only where
+    /// it docks, taking no other pane's place.
+    drawer_at_start: bool,
     /// The drawer has Rakumux mode's keys (its pane focused, its tab
     /// selected) rather than the list. Session mode clears it.
     drawer_focused: bool,
@@ -500,6 +504,7 @@ impl App {
                 KeyBinding::default()
             });
         let cycle_keys = parse_cycle_keys(&options.settings, &mut warnings);
+        let inbox_at_start = options.settings.sessions.inbox_at_start;
         let mut list = SessionList::new(options.scope.clone());
         list.set_clock(wall_clock());
         list.set_session_order(&options.settings.sessions.session_order);
@@ -546,7 +551,8 @@ impl App {
             titles_refreshing: HashSet::new(),
             title_asks: HashSet::new(),
             feed: feed::FeedStore::new(rakumux_sensagent::feed::machine_name()),
-            drawer_open: false,
+            drawer_open: inbox_at_start,
+            drawer_at_start: inbox_at_start,
             drawer_focused: false,
             drawer_tab: drawer::DrawerTab::Feed,
             rtop: rtop::RtopView::default(),
@@ -982,6 +988,22 @@ impl App {
                     note: "A key and what it does, at the right of the footer in Rakumux mode: \
                            a different one each day, the next one on a click. It shows only \
                            where the footer has room to spare."
+                        .into(),
+                    disabled: false,
+                };
+            }
+            SettingsItem::InboxAtStart => {
+                let value = if self.settings.sessions.inbox_at_start {
+                    "[On] Off"
+                } else {
+                    "On [Off]"
+                };
+                return SettingRow {
+                    section: item.section(),
+                    label: "Inbox open at start".into(),
+                    value: value.into(),
+                    note: "Every start opens the Inbox on the right, beside the session, where \
+                           the window is wide enough for both. f focuses it and hides it."
                         .into(),
                     disabled: false,
                 };
