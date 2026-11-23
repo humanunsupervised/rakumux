@@ -162,9 +162,10 @@ fn a_wait_is_not_woken_by_other_sessions_output() {
     let printed = printer.join().unwrap();
     assert!(!result.matched, "{result:?}");
     let reads = h.host.terminal(terminal).reads - before;
-    // Its 250 ms poll: about 5 looks in a second, whatever the other session printed.
+    // Its 250 ms poll: about 5 looks in a second, whatever the other session printed (at least
+    // 30 lines: a 2 ms sleep takes 10 ms and more on some machines, macOS runners among them).
     assert!(
-        printed > 100,
+        printed > 30,
         "the busy session printed only {printed} times"
     );
     assert!(
