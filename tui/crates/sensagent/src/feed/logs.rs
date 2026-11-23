@@ -315,7 +315,7 @@ impl LogSync {
     }
 
     fn back_off(&mut self, after: Option<Duration>, now: Duration) {
-        self.retry_at = now + after.unwrap_or(self.retry).max(self.retry);
+        self.retry_at = now + crate::jitter::later(after.unwrap_or(self.retry).max(self.retry));
         self.retry = (self.retry * 2).min(RETRY_MAX);
     }
 

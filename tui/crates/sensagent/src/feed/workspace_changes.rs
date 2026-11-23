@@ -401,7 +401,7 @@ impl WorkspaceChangeSync {
                     _ => self.retry,
                 };
                 self.retry = self.retry.saturating_mul(2).min(RETRY_MAX);
-                self.retry_at = now + wait;
+                self.retry_at = now + crate::jitter::later(wait);
             }
         }
     }

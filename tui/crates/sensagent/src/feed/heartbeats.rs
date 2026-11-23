@@ -361,7 +361,7 @@ impl HeartbeatSync {
                     _ => self.retry,
                 };
                 self.retry = self.retry.saturating_mul(2).min(RETRY_MAX);
-                self.retry_at = now + wait.min(Duration::from_secs(86_400));
+                self.retry_at = now + crate::jitter::later(wait.min(Duration::from_secs(86_400)));
             }
         }
     }

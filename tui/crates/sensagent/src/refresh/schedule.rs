@@ -266,7 +266,9 @@ impl RefreshScheduler {
         match outcome {
             Outcome::Failed(RefreshFailure::Unauthorized) => self.unauthorized = true,
             Outcome::RateLimited(after) => {
-                let until = now.saturating_add(after.unwrap_or_default().max(ERROR_BACKOFF));
+                let until = now.saturating_add(crate::jitter::later(
+                    after.unwrap_or_default().max(ERROR_BACKOFF),
+                ));
                 self.paused_until = Some(self.paused_until.map_or(until, |at| at.max(until)));
             }
             _ => {}
@@ -309,7 +311,7 @@ impl RefreshScheduler {
                 let backoff = ERROR_BACKOFF
                     .saturating_mul(1 << doublings)
                     .min(MAX_ERROR_BACKOFF);
-                timing.retry_at = Some(now.saturating_add(backoff));
+                timing.retry_at = Some(now.saturating_add(crate::jitter::later(backoff)));
             }
             Outcome::Failed(failure) => timing.failure = Some(failure),
             Outcome::RateLimited(_) => timing.failure = Some(RefreshFailure::RateLimited),

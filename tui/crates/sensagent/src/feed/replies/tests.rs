@@ -3269,3 +3269,20 @@ fn without_a_daemon_that_picks_no_pick_is_asked_for_or_given() {
         replies.request_done(true, read_messages(vec![]), at);
     }
 }
+
+#[test]
+fn reads_after_a_failure_wait_their_backoff_or_up_to_half_again_never_less() {
+    // Every machine's read fails together while rakumux.com deploys: their retries spread out.
+    crate::jitter::testing::spread(0.5, || {
+        let now = Duration::from_secs(100);
+        let mut backoff = Backoff::new(now);
+        backoff.failed(FeedFailure::Unavailable(None), now);
+        let wait = RETRY_MIN.mul_f64(1.25);
+        assert!(!backoff.ready(now + wait - Duration::from_millis(1)));
+        assert!(backoff.ready(now + wait));
+        // A Retry-After holds: only ever later.
+        backoff.failed(FeedFailure::RateLimited(Some(Duration::from_secs(10))), now);
+        assert!(!backoff.ready(now + Duration::from_secs(10)));
+        assert!(backoff.ready(now + Duration::from_millis(12_500)));
+    });
+}

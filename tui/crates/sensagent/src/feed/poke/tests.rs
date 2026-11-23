@@ -234,3 +234,42 @@ fn a_running_worker_pokes() {
         [PokeEvent::Connected, PokeEvent::Poked, PokeEvent::Closed]
     );
 }
+
+#[test]
+fn machines_dropped_together_reconnect_spread_over_ten_seconds() {
+    // A deploy closes every machine's connection in the same second: each waits its backoff and
+    // a random part of ten seconds more, so they don't all come back in the next one.
+    for (point, after) in [(0.0, RETRY_MIN), (0.5, RETRY_MIN + Duration::from_secs(5))] {
+        crate::jitter::testing::spread(point, || {
+            let mut pokes = PokeSync::new();
+            pokes.set_enabled(true, NOW);
+            assert!(pokes.next_request(NOW));
+            pokes.token_done(true, Ok(token("wss://realtime.example/v1/connect")), NOW);
+            pokes.connected();
+            pokes.closed(NOW);
+            assert!(!pokes.next_request(NOW + after - Duration::from_millis(1)));
+            assert!(pokes.next_request(NOW + after));
+        });
+    }
+}
+
+#[test]
+fn a_failed_token_request_waits_its_backoff_or_up_to_half_again_never_less() {
+    crate::jitter::testing::spread(0.5, || {
+        let mut pokes = PokeSync::new();
+        pokes.set_enabled(true, NOW);
+        assert!(pokes.next_request(NOW));
+        pokes.token_done(true, Err(FeedFailure::Unavailable(None)), NOW);
+        let wait = RETRY_MIN.mul_f64(1.25);
+        assert!(!pokes.next_request(NOW + wait - Duration::from_millis(1)));
+        assert!(pokes.next_request(NOW + wait));
+        // A wait rakumux.com names is never cut short.
+        pokes.token_done(
+            true,
+            Err(FeedFailure::RateLimited(Some(Duration::from_secs(40)))),
+            NOW,
+        );
+        assert!(!pokes.next_request(NOW + Duration::from_secs(40)));
+        assert!(pokes.next_request(NOW + Duration::from_secs(50)));
+    });
+}

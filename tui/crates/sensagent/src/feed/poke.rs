@@ -29,8 +29,13 @@ const NOT_OFFERED_WAIT: Duration = Duration::from_secs(30 * 60);
 const PING_EVERY: Duration = Duration::from_secs(30);
 /// A connection that says nothing this long is gone.
 const SILENT_FOR: Duration = Duration::from_secs(90);
-/// Connected this long, the connection is made again with a new token.
-const MAX_AGE: Duration = Duration::from_secs(12 * 60 * 60);
+/// Connected this long (a random point between the two, so connections made together don't
+/// end together), the connection is made again with a new token.
+const MAX_AGE_LEAST: Duration = Duration::from_secs(11 * 60 * 60);
+const MAX_AGE_MOST: Duration = Duration::from_secs(13 * 60 * 60);
+/// After a connection closes, connecting again waits the backoff and up to this much more: a
+/// deploy of rakumux.com closes every machine's connection at once.
+const RECONNECT_SPREAD: Duration = Duration::from_secs(10);
 /// Connecting, the TLS and WebSocket handshakes included, takes at most this.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// How often the connection's thread looks up from its socket (to stop, ping
@@ -138,12 +143,14 @@ impl PokeSync {
                 None
             }
             Err(FeedFailure::RateLimited(Some(delay)) | FeedFailure::Unavailable(Some(delay))) => {
-                self.state = State::Waiting(now + delay.clamp(self.retry, NOT_OFFERED_WAIT));
+                self.state = State::Waiting(
+                    now + crate::jitter::later(delay.clamp(self.retry, NOT_OFFERED_WAIT)),
+                );
                 self.retry = self.retry.saturating_mul(2).min(RETRY_MAX);
                 None
             }
             Err(_) => {
-                self.state = State::Waiting(now + self.retry);
+                self.state = State::Waiting(now + crate::jitter::later(self.retry));
                 self.retry = self.retry.saturating_mul(2).min(RETRY_MAX);
                 None
             }
@@ -162,7 +169,8 @@ impl PokeSync {
 
     /// The running connection closed: connect again after the backoff.
     pub fn closed(&mut self, now: Duration) {
-        self.state = State::Waiting(now + self.retry);
+        let wait = crate::jitter::within(self.retry, self.retry + RECONNECT_SPREAD);
+        self.state = State::Waiting(now + wait);
         self.retry = self.retry.saturating_mul(2).min(RETRY_MAX);
     }
 }
@@ -283,10 +291,11 @@ pub(crate) fn listen(
         return;
     }
     let opened = Instant::now();
+    let max_age = crate::jitter::within(MAX_AGE_LEAST, MAX_AGE_MOST);
     let (mut heard, mut pinged) = (Instant::now(), Instant::now());
     let mut listening = true;
     while listening && !stop.load(Ordering::SeqCst) {
-        if opened.elapsed() >= MAX_AGE || heard.elapsed() >= SILENT_FOR {
+        if opened.elapsed() >= max_age || heard.elapsed() >= SILENT_FOR {
             break;
         }
         if pinged.elapsed() >= PING_EVERY {

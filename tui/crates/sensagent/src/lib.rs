@@ -10,6 +10,7 @@ pub mod cloud;
 pub mod dispatch;
 pub mod enrolment;
 pub mod feed;
+pub(crate) mod jitter;
 pub mod owner;
 pub mod refresh;
 pub mod service;

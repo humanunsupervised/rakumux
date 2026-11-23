@@ -355,7 +355,7 @@ impl Backoff {
             _ => self.wait,
         };
         self.wait = self.wait.saturating_mul(2).min(RETRY_MAX);
-        self.at = now + wait;
+        self.at = now + crate::jitter::later(wait);
     }
 }
 

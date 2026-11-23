@@ -403,7 +403,7 @@ impl FeedSync {
             _ => self.retry,
         };
         self.retry = self.retry.saturating_mul(2).min(RETRY_MAX);
-        self.retry_at = now + wait.min(LONGEST_WAIT);
+        self.retry_at = now + crate::jitter::later(wait.min(LONGEST_WAIT));
     }
 }
 

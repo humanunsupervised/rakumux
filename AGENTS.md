@@ -230,7 +230,10 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    the same way and revokes its sign-in on a thread of its own (`signed_out_by_account`), so a
    copy of its refresh token elsewhere stops working too. An enrolled machine's credential is
    never sent to Clerk; `rakumux sprite disconnect` revokes it. A client that finds a service from an older release
-   asks it to stop (`Shutdown`) and starts its own; a newer one is used as it is. Overrides for development: `RAKUMUX_CLERK_ISSUER`,
+   asks it to stop (`Shutdown`) and starts its own; a newer one is used as it is. Every wait before
+   retrying a request to rakumux.com (a backoff, a `Retry-After`) is spread at random up to half
+   again, never shortened (`jitter.rs`), so machines that failed together (a deploy) don't retry
+   together. Overrides for development: `RAKUMUX_CLERK_ISSUER`,
    `RAKUMUX_CLERK_CLIENT_ID`, `RAKUMUX_CLERK_DEVICE_PAGE`, `RAKUMUX_CLOUD_ORIGIN`, and
    `RAKUMUX_CLOUD_CA` (a PEM file of certificates trusted for that origin besides the public
    roots, for a local rakumux.com; ignored for rakumux.com and its subdomains).
@@ -283,8 +286,9 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    **pokes**, `feed/poke.rs`: `GET /api/v1/feed/realtime` gives a `wss://` URL and a token for
    this machine, a thread of its own (`rakumux-status-poke`) holds the WebSocket (rustls,
    tungstenite; the token as its bearer, a `ping` every 30 s, gone when silent 90 s, made again
-   after 12 h or when closed, backing off 1 s to a minute; a cloud answering 404 offers none and
-   is asked again in half an hour), and a `poke` makes `ReplySync` read at once) and types each
+   after 11–13 h (a random point) or when closed, backing off 1 s to a minute and up to 10 s
+   more at random after a close; a cloud answering 404 offers none and is asked again in half an
+   hour), and a `poke` makes `ReplySync` read at once) and types each
    pending one addressed to
    this machine into the entry's session with `session_submit` (a bracketed paste, then
    Enter; the same for Claude Code, Codex, OpenCode, Pi, GitHub Copilot, Cursor, Grok Build,
