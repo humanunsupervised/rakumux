@@ -542,7 +542,10 @@ fn connect_feed(
         &format!("set -e; mkdir -p '{dir}'; chmod 700 '{dir}'"),
     )?;
     if code != 0 {
-        return Err(format!("preparing the inbox there: {}", first_line(&output)));
+        return Err(format!(
+            "preparing the inbox there: {}",
+            first_line(&output)
+        ));
     }
     sprites.write_file(
         name,

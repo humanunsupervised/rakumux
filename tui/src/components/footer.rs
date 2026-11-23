@@ -887,10 +887,7 @@ mod tests {
             row(&[(0, session), (21, label), (36, ALL_BUTTONS)])
         );
         let phone = " f ≡ Inbox   ? Help  ";
-        assert_eq!(
-            line(&h, 45),
-            row(&[(0, " ● api"), (9, label), (24, phone)])
-        );
+        assert_eq!(line(&h, 45), row(&[(0, " ● api"), (9, label), (24, phone)]));
         assert_eq!(line(&h, 40), row(&[(4, label), (19, phone)]));
         // Session mode: the label in the centre, the Rakumux key alone on
         // the right.
