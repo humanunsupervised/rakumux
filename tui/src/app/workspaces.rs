@@ -683,7 +683,7 @@ mod tests {
         assert_eq!(shown(&h), ["A", "B", "C"]);
         let line = footer(&mut h, 160);
         assert!(
-            line.starts_with("  ⊞   All 3   Launch 1   Unassigned 2  "),
+            line.starts_with(" workspaces  ⊞   All 3   Launch 1   Unassigned 2  "),
             "{line:?}"
         );
         assert!(!line.contains("session:"), "{line:?}");
@@ -691,7 +691,10 @@ mod tests {
         h.press(KeyCode::Enter).await;
         assert_eq!(h.app.focus, Focus::Session);
         let line = footer(&mut h, 160);
-        assert!(line.starts_with("  ⊞   All 3   Launch 1 "), "{line:?}");
+        assert!(
+            line.starts_with(" workspaces  ⊞   All 3   Launch 1 "),
+            "{line:?}"
+        );
         assert!(line.contains("SESSION MODE"), "{line:?}");
         h.rakumux().await;
         click(&mut h, Hit::WorkspaceTab(1));

@@ -55,6 +55,12 @@ use crate::theme;
 /// Columns a message keeps before buttons make way for it.
 const MIN_MESSAGE: usize = 30;
 
+/// What the workspace tabs are, before them, while there's room.
+const TABS_LABEL: &str = "workspaces";
+/// How much the label's ink on the orange bar is faded from the bar's colour
+/// towards dark: lighter than everything else there.
+const LABEL_INK: f32 = 0.6;
+
 /// Columns a workspace's name gets on its tab.
 const WORKSPACE_NAME_COLS: usize = 16;
 /// Columns between two buttons.
@@ -203,6 +209,40 @@ fn fit_tabs(
         targets.push((x, chip(&more), Hit::FooterKey(FooterKey::Workspace)));
         spans.push(Span::styled(format!(" {more} "), button));
     }
+    (spans, targets)
+}
+
+/// `tabs` (from [`fit_tabs`]) after [`TABS_LABEL`], a quiet word that opens
+/// the modal as `⊞` does, when it fits in `room` beside them all; else
+/// `tabs` as they are.
+fn label_tabs(
+    tabs: (Vec<Span<'static>>, Vec<(usize, usize, Hit)>),
+    all: usize,
+    room: usize,
+    focus: Focus,
+) -> (Vec<Span<'static>>, Vec<(usize, usize, Hit)>) {
+    let (mut spans, mut targets) = tabs;
+    let shift = str_width(TABS_LABEL) + GAP;
+    if spans.is_empty() || spans_width(&spans) < all || all + shift > room {
+        return (spans, targets);
+    }
+    let p = theme::palette();
+    let style = match focus {
+        Focus::List => Style::default()
+            .fg(p.faded(p.accent_orange, LABEL_INK).unwrap_or(p.background))
+            .bg(p.accent_orange),
+        Focus::Session | Focus::Terminal => Style::default().fg(p.neutral_gray),
+    };
+    spans.insert(0, Span::raw(" ".repeat(GAP)));
+    spans.insert(0, Span::styled(TABS_LABEL, style));
+    for (x, _, _) in &mut targets {
+        *x += shift;
+    }
+    targets.push((
+        0,
+        str_width(TABS_LABEL),
+        Hit::FooterKey(FooterKey::Workspace),
+    ));
     (spans, targets)
 }
 
@@ -621,12 +661,11 @@ fn footer_on(app: &App, width: usize, day: i32) -> (Line<'static>, Vec<FooterTar
     let mut tab_targets = Vec::new();
     let mut left = match (&tabs, named_session(app)) {
         (Some(tabs), _) => {
-            let (spans, targets) = fit_tabs(
-                tabs,
-                app.icons().workspace(),
-                room.saturating_sub(taken),
-                app.focus,
-            );
+            let icon = app.icons().workspace();
+            let room = room.saturating_sub(taken);
+            let all = spans_width(&fit_tabs(tabs, icon, usize::MAX, app.focus).0);
+            let fitted = fit_tabs(tabs, icon, room, app.focus);
+            let (spans, targets) = label_tabs(fitted, all, room, app.focus);
             tab_targets = targets;
             spans
         }
@@ -1548,6 +1587,24 @@ mod tests {
                 .all(|span| span.style.bg.is_none()));
             // A tap anywhere on a button, its padding too, hits it.
             assert_eq!(targets[2], (12, 10, Hit::WorkspaceTab(1)));
+            // The label before them, lighter than the tabs, while they and
+            // it fit; what was there moves along.
+            let all = spans_width(&spans);
+            let labelled = |room| label_tabs(fit_tabs(&tabs, "⊞", room, focus), all, room, focus);
+            let (spans, targets) = labelled(all + 11);
+            assert_eq!(
+                text(&Line::from(spans.clone())),
+                "workspaces  ⊞   All 3   Launch 1   Unassigned 2 "
+            );
+            assert!(!spans[0].style.add_modifier.contains(Modifier::BOLD));
+            assert_eq!(targets[2], (23, 10, Hit::WorkspaceTab(1)));
+            let (spans, _) = labelled(all + 10);
+            assert_eq!(
+                text(&Line::from(spans)),
+                " ⊞   All 3   Launch 1   Unassigned 2 "
+            );
+            let (spans, _) = labelled(all - 1);
+            assert!(!text(&Line::from(spans)).contains("workspaces"));
         }
     }
 }

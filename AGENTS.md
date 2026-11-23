@@ -2049,8 +2049,9 @@ hides adds that folder to the filter. Other folders, commands and startup comman
 Tabs.
 
 **Workspaces.** With a daemon that has `workspaces`, the footer's left holds the workspace tabs
-in place of the session's name (`components/footer.rs::fit_tabs`): `⊞` (the workspaces modal),
-then `All N` (every session), each workspace's `Name N` and `Unassigned N` (the sessions in none),
+in place of the session's name (`components/footer.rs::fit_tabs`): a light `workspaces` label
+(`label_tabs`: only while every tab, button, message and the version fit beside it; a click opens
+the modal), `⊞` (the workspaces modal), then `All N` (every session), each workspace's `Name N` and `Unassigned N` (the sessions in none),
 N each one's sessions, each a button (`tab_styles`: the footer buttons' chip, a column apart; the
 one shown lit, dark on the orange bar, in the accent on the blue one); a click switches
 (`Hit::WorkspaceTab`).
