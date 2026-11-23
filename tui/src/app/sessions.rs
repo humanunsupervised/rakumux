@@ -19,9 +19,10 @@ use session_core::ids::SessionId;
 use session_core::model::{Lifecycle, SessionStatus, SessionView};
 
 use super::detail::{classify_output, Attachment, DetailView, OutputAction};
-use super::drawer::DrawerTab;
+use super::drawer::Panel;
 use super::folders::{self, SyncResult};
 use super::grouping::{Grouping, Section, StatusGroup};
+use super::left::LeftTab;
 use super::runtime::{cancel_flag, AppEvent};
 use super::screen::Screen;
 use super::session_list::{ListChange, ListRow, Selection, ShownAs};
@@ -1273,12 +1274,19 @@ impl App {
                 .map(|(_, hit)| *hit);
             // A click beside the drawer gives the list the keys back; the
             // footer's buttons leave them where they are.
-            if !inside(screen.feed) && !inside(screen.footer) && hit != Some(Hit::DrawerBarTab) {
+            if !inside(screen.feed)
+                && !inside(screen.footer)
+                && hit != Some(Hit::PanelTab(Panel::Rtop))
+            {
                 self.unfocus_drawer();
             }
             if let Some(index) = layout::tab_at(&self.tab_hits, event.column, event.row) {
                 let id = self.list.tab_order().get(index).map(|s| s.id.clone());
                 if let Some(id) = id {
+                    // The Inbox or Beats in the session's place makes way.
+                    if screen.panel.is_some() {
+                        self.show_sessions_tab();
+                    }
                     let from_panel = self.focus == Focus::Terminal;
                     if from_panel {
                         self.demote_terminal_panel();
@@ -1413,21 +1421,34 @@ impl App {
                     return;
                 }
                 Some(Hit::FeedReply) => {
-                    self.show_drawer_tab(DrawerTab::Feed);
+                    self.show_left_tab(LeftTab::Inbox);
                     self.open_feed_reply();
                     return;
                 }
                 Some(Hit::FeedBack) => {
-                    self.show_drawer_tab(DrawerTab::Feed);
+                    self.show_left_tab(LeftTab::Inbox);
                     self.feed.reading = false;
                     return;
                 }
-                Some(Hit::DrawerTab(tab)) => {
-                    // The Feed's name while a reply is read: back to the cards.
-                    if tab == DrawerTab::Feed && self.drawer_tab() == DrawerTab::Feed {
-                        self.feed.reading = false;
+                Some(Hit::PanelTab(panel)) => {
+                    match panel {
+                        Panel::Feed => self.click_left_tab(LeftTab::Inbox),
+                        Panel::Beats => self.click_left_tab(LeftTab::Beats),
+                        Panel::Rtop => self.focus_drawer(),
                     }
-                    self.show_drawer_tab(tab);
+                    return;
+                }
+                Some(Hit::LeftTab(tab)) => {
+                    self.click_left_tab(tab);
+                    return;
+                }
+                Some(Hit::LeftPane) => {
+                    self.show_left_tab(self.left_tab());
+                    return;
+                }
+                Some(Hit::BeatBack) => {
+                    self.show_left_tab(LeftTab::Beats);
+                    self.beats.reading = None;
                     return;
                 }
                 Some(Hit::RtopRow(index)) => {
@@ -1439,7 +1460,7 @@ impl App {
                     return;
                 }
                 Some(Hit::BeatNew) => {
-                    self.show_drawer_tab(DrawerTab::Beats);
+                    self.show_left_tab(LeftTab::Beats);
                     self.new_heartbeat();
                     return;
                 }
@@ -1447,7 +1468,7 @@ impl App {
                     self.click_beat_action(action);
                     return;
                 }
-                Some(Hit::Drawer | Hit::DrawerBarTab) => {
+                Some(Hit::Drawer) => {
                     self.focus_drawer();
                     return;
                 }
@@ -1461,7 +1482,7 @@ impl App {
                     // Rakumux mode (the drawer's own Esc while it has the keys).
                     match self.focus {
                         Focus::Session | Focus::Terminal => self.enter_rakumux_mode(),
-                        Focus::List if self.drawer_has_keys() => self.drawer_back(),
+                        Focus::List if self.panel_has_keys() => self.panel_back(),
                         Focus::List => self.return_to_session(),
                     }
                     return;
@@ -1510,17 +1531,21 @@ impl App {
         if inside(screen.terminal_panel) {
             self.terminal_panel_mouse(event);
         } else if inside(screen.feed) {
+            match event.kind {
+                MouseEventKind::ScrollUp => self.rtop_move(-1),
+                MouseEventKind::ScrollDown => self.rtop_move(1),
+                _ => {}
+            }
+        } else if inside(self.left_pane()) && self.left_tab() != LeftTab::Sessions {
             // The wheel scrolls the reply under it, else goes through the
-            // cards, or rtop's rows.
+            // cards, or the heartbeats.
             let step = match event.kind {
                 MouseEventKind::ScrollUp => -1,
                 MouseEventKind::ScrollDown => 1,
                 _ => return,
             };
-            match self.drawer_tab() {
-                DrawerTab::Rtop => return self.rtop_move(step),
-                DrawerTab::Beats => return self.beats_move(step),
-                DrawerTab::Feed => {}
+            if self.left_tab() == LeftTab::Beats {
+                return self.beats_move(step);
             }
             let on_reply = match self.feed_columns() {
                 Some((_, _, reply)) => inside(Some(reply)),

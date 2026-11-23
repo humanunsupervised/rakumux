@@ -13,6 +13,7 @@ pub mod format;
 pub mod heartbeat_form;
 pub mod heartbeats;
 pub mod history;
+pub mod left;
 pub mod markdown;
 pub mod phone_access;
 pub mod rtop;

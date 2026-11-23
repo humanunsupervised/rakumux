@@ -467,7 +467,7 @@ mod escape_wait_tests {
             h.app.handle_terminal_event(event).await;
         }
         assert!(!h.app.feed_has_keys(), "the list has the keys back");
-        assert!(h.app.feed_shown(), "the inbox stays beside the session");
+        assert!(!h.app.feed_shown(), "the sessions are back");
         // The list's own Esc (back to a session) is as quick there.
         assert_eq!(escape_wait(&h.app, Link::Remote), ESCAPE_TIME_BRIEF);
     }

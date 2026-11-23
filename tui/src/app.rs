@@ -42,6 +42,7 @@ pub mod heartbeat_form;
 pub mod heartbeats;
 mod history;
 mod keys;
+pub mod left;
 mod list_tabs;
 mod new_session;
 pub mod path_complete;
@@ -208,16 +209,22 @@ pub enum Hit {
     FeedBack,
     /// Anywhere else on the drawer: focuses it.
     Drawer,
-    /// A tab on the drawer's band: shows it, with the keys.
-    DrawerTab(drawer::DrawerTab),
-    /// The Tabs layout's tab for the drawer: selects it.
-    DrawerBarTab,
+    /// A panel's tab in the Tabs layout's bar, or rtop's name on its band:
+    /// shows it, with the keys.
+    PanelTab(drawer::Panel),
+    /// A tab at the bottom of the left column: shows it, with the keys.
+    LeftTab(left::LeftTab),
+    /// Anywhere else on the left column while it shows the Inbox or Beats:
+    /// gives it the keys.
+    LeftPane,
     /// A row of rtop (its index): selects it, or goes into its session as
     /// Enter does when it's selected already (at once on a phone).
     RtopRow(usize),
     /// A row of the Beats tab (a heartbeat, or reading one, a run): selects
     /// it, or does what Enter does when it's selected already.
     BeatRow(usize),
+    /// The `‹` over a heartbeat read whole: back to the list.
+    BeatBack,
     /// Beats' `+ New heartbeat`: opens the form.
     BeatNew,
     /// A button of the selected (or read) heartbeat.
@@ -370,19 +377,16 @@ pub struct App {
     title_asks: HashSet<SessionId>,
     /// The agent feed (`app/feed`).
     pub feed: feed::FeedStore,
-    /// The drawer (`app/drawer.rs`) is shown (`f`, `t`): a pane on the
+    /// The left column's tab (`app/left.rs`): the sessions, the Inbox or
+    /// Beats. This window only: every start shows the sessions.
+    left_tab: left::LeftTab,
+    /// The drawer (`app/drawer.rs`), rtop, is shown (`t`): a pane on the
     /// right, a tab, or the screen on a phone. This window only, never
-    /// saved: every start opens it where it docks
-    /// (`sessions.inbox_at_start`).
+    /// saved: every start hides it.
     drawer_open: bool,
-    /// It opened with the start and wasn't used since: it shows only where
-    /// it docks, taking no other pane's place.
-    drawer_at_start: bool,
     /// The drawer has Rakumux mode's keys (its pane focused, its tab
-    /// selected) rather than the list. Session mode clears it.
+    /// selected) rather than the left column. Session mode clears it.
     drawer_focused: bool,
-    /// The drawer's tab: the Feed, Beats or rtop.
-    drawer_tab: drawer::DrawerTab,
     /// The Beats tab (`app/heartbeats.rs`): the heartbeats as last read.
     pub beats: heartbeats::BeatsView,
     /// Beats was on screen when last checked.
@@ -434,7 +438,7 @@ pub struct App {
     /// The list/detail divider: hovered or being dragged.
     pub divider: DividerState,
     /// Master detail's list is hidden beside the session (`b`, the list's
-    /// Hide list button; the rail left of it brings it back). This window
+    /// `«`; the rail left of it brings it back). This window
     /// only, never saved.
     list_hidden: bool,
     /// A session being dragged to another place in the list.
@@ -504,7 +508,6 @@ impl App {
                 KeyBinding::default()
             });
         let cycle_keys = parse_cycle_keys(&options.settings, &mut warnings);
-        let inbox_at_start = options.settings.sessions.inbox_at_start;
         let mut list = SessionList::new(options.scope.clone());
         list.set_clock(wall_clock());
         list.set_session_order(&options.settings.sessions.session_order);
@@ -551,10 +554,9 @@ impl App {
             titles_refreshing: HashSet::new(),
             title_asks: HashSet::new(),
             feed: feed::FeedStore::new(rakumux_sensagent::feed::machine_name()),
-            drawer_open: inbox_at_start,
-            drawer_at_start: inbox_at_start,
+            left_tab: left::LeftTab::Sessions,
+            drawer_open: false,
             drawer_focused: false,
-            drawer_tab: drawer::DrawerTab::Feed,
             rtop: rtop::RtopView::default(),
             rtop_on_screen: false,
             beats: heartbeats::BeatsView::default(),
@@ -760,6 +762,7 @@ impl App {
             list_cols: self.settings.sessions.sidebar_width,
             list_percent: self.settings.sessions.stacked_list_percent,
             list_hidden: self.list_hidden,
+            left_panel: self.left_tab != left::LeftTab::Sessions,
             feed: self.drawer_layout(),
             feed_cols: self.settings.sessions.feed_width,
             panel_beside: self.terminal_panel.open
@@ -781,7 +784,7 @@ impl App {
         screen.rail.is_some() || (screen.divider.is_some() && !screen.stacked)
     }
 
-    /// `b`, the list's Hide list button and the rail: hide Master detail's
+    /// `b`, the `«` right of the column's tabs and the rail: hide Master detail's
     /// list so the session gets its columns, or show it again. The session
     /// on screen takes the new pane size, as a dragged divider gives it.
     pub fn toggle_list(&mut self) {
@@ -992,22 +995,6 @@ impl App {
                     disabled: false,
                 };
             }
-            SettingsItem::InboxAtStart => {
-                let value = if self.settings.sessions.inbox_at_start {
-                    "[On] Off"
-                } else {
-                    "On [Off]"
-                };
-                return SettingRow {
-                    section: item.section(),
-                    label: "Inbox open at start".into(),
-                    value: value.into(),
-                    note: "Every start opens the Inbox on the right, beside the session, where \
-                           the window is wide enough for both. f focuses it and hides it."
-                        .into(),
-                    disabled: false,
-                };
-            }
             SettingsItem::AutoUpdate => {
                 let value = if self.settings.sessions.auto_update {
                     "[On] Off"
@@ -1096,7 +1083,7 @@ impl App {
             SettingsItem::Rtop => (
                 "rtop",
                 "CPU, memory, network · t".into(),
-                "What this machine, this window, the Rakumux server and every running session's processes use now: CPU, memory and network traffic, about every second, in the drawer on the right beside the Inbox. Nothing is recorded.",
+                "What this machine, this window, the Rakumux server and every running session's processes use now: CPU, memory and network traffic, about every second, in the drawer on the right. Nothing is recorded.",
             ),
             SettingsItem::SessionHistory => {
                 let available = self.has_session_history();

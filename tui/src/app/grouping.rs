@@ -5,7 +5,7 @@
 //! per agent or program). One tab is active at a time: it decides the
 //! section headers and the only filter that applies. Each tab keeps its own
 //! filter while another one is active; none is saved. (The feed and rtop
-//! aren't among them: they're the drawer's, `drawer.rs`.)
+//! aren't among them: they have their own, `Pinned`.)
 //!
 //! Everything here is derived from a `SessionView` alone; nothing draws.
 

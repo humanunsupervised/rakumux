@@ -42,7 +42,7 @@ use super::grouping::{
 };
 use super::text_input::TextInput;
 
-/// The key `sessions.section_order` keeps the drawer's Pinned tab's order under,
+/// The key `sessions.section_order` keeps the Pinned tab's order under,
 /// next to the apps' and statuses' (which are `app:…` and `status:…`).
 pub const PINNED_ORDER: &str = "pinned";
 

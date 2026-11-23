@@ -510,6 +510,7 @@ impl App {
 
     /// Show `view`'s sessions, and keep it for the next start.
     pub fn show_view(&mut self, view: WorkspaceView) {
+        self.show_sessions_tab();
         let changed = self.list.workspace_view() != &view;
         self.list.set_workspace_view(view.clone());
         self.save_view();

@@ -1,11 +1,13 @@
 //! The real TUI in a real terminal (a session of one daemon), with a daemon
 //! of its own in a temp home. A heartbeat is made in Beats' New heartbeat
-//! form, renamed and deleted from the list, and the CLI sees each; a start
-//! opens the Inbox, and Help is searched.
+//! form, renamed and deleted from the list, and the CLI sees each; the left
+//! column's tabs switch what it shows, and Help is searched.
 #![cfg(target_os = "linux")]
 
 use serde_json::Value;
-use session_core::api::{CreateSession, ReadRequest, ReadSource, SendRequest, TextFormat};
+use session_core::api::{
+    AttachRequest, CreateSession, ReadRequest, ReadSource, Role, SendRequest, TextFormat,
+};
 use session_core::client::{AuthMode, Client, ClientConfig, SessionApi};
 use session_core::ids::SessionId;
 use session_core::model::ScopeRoot;
@@ -145,6 +147,23 @@ impl Screen {
         self.keys(keys);
     }
 
+    /// Click at `column`, `row` (from 1), as a terminal reports it.
+    fn click(&self, column: u16, row: u16) {
+        let stream = self
+            .api
+            .attach(AttachRequest {
+                id: self.id.clone(),
+                role: Role::Controller,
+                cols: 160,
+                rows: 48,
+            })
+            .unwrap();
+        let click = format!("\u{1b}[<0;{column};{row}M\u{1b}[<0;{column};{row}m");
+        stream.sender().input(click.into_bytes()).unwrap();
+        // Delivered before the stream closes.
+        std::thread::sleep(Duration::from_millis(300));
+    }
+
     fn request(&self, text: Option<&str>, keys: &[&str]) {
         self.api
             .send(SendRequest {
@@ -213,12 +232,32 @@ fn start_tui(world: &World) -> Screen {
 }
 
 #[test]
-fn a_start_opens_the_inbox_and_help_is_searched_in_the_real_tui() {
+fn the_left_columns_tabs_switch_and_help_is_searched_in_the_real_tui() {
     let world = World::new();
     let screen = start_tui(&world);
-    // The Inbox beside the session, the list keeping the keys.
-    screen.shows("≡ Inbox   ♥ Beats   ▥ rtop");
+    // A start shows the sessions, over the column's tabs.
     screen.shows("+ New session");
+    let shown = screen.shows("❯ Sessions   ≡ Inbox   ♥ Beats");
+    assert!(shown.contains("◔ Status"), "{shown}");
+    // f: the Inbox in their place; Esc: the sessions.
+    screen.send("f", &[]);
+    let inbox = screen.shows("Sign in to see your inbox");
+    assert!(!inbox.contains("◔ Status"), "{inbox}");
+    screen.keys(&["esc"]);
+    screen.until("the sessions", |text| {
+        text.contains("◔ Status") && !text.contains("Sign in to see")
+    });
+    // A click on a tab at the bottom shows it (SGR mouse: press, release).
+    for (column, what) in [(27, "+ New heartbeat"), (5, "+ New session")] {
+        screen.click(column, 46);
+        screen.shows(what);
+    }
+    // rtop is the drawer's, on the right, beside it.
+    screen.send("t", &[]);
+    let both = screen.shows("▥ rtop");
+    assert!(both.contains("❯ Sessions   ≡ Inbox   ♥ Beats"), "{both}");
+    screen.send("t", &[]);
+    screen.until("rtop hidden", |text| !text.contains("▥ rtop"));
     screen.send("?", &[]);
     screen.shows("/ to search help");
     screen.send("/", &[]);
@@ -233,10 +272,6 @@ fn a_start_opens_the_inbox_and_help_is_searched_in_the_real_tui() {
     screen.shows("1 Overview");
     screen.keys(&["esc"]);
     screen.until("help closed", |text| !text.contains("1 Overview"));
-    // f gives the Inbox the keys, f again hides it.
-    screen.send("f", &[]);
-    screen.send("f", &[]);
-    screen.until("it hidden", |text| !text.contains("♥ Beats"));
 }
 
 #[test]

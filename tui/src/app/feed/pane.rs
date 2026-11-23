@@ -1,5 +1,5 @@
-//! The feed on screen: the drawer's Feed tab (`app/drawer.rs` says where
-//! the drawer goes and who has its keys). In the pane, Enter reads the
+//! The feed on screen: the left column's Inbox (`app/left.rs` says where
+//! that is and who has the keys). In the pane, Enter reads the
 //! selected card's reply whole in the cards' place (Esc back), and Enter
 //! there goes into its session when it runs here; the Feed tab of the Tabs
 //! layout, wide enough, shows the cards and the selected reply side by side,
@@ -19,7 +19,8 @@ use ratatui::layout::Rect;
 use session_core::ids::SessionId;
 
 use super::Card;
-use crate::app::drawer::DrawerTab;
+use crate::app::drawer::Panel;
+use crate::app::left::LeftTab;
 use crate::app::runtime::AppEvent;
 use crate::app::types::AccountStatus;
 use crate::app::{App, DividerState};
@@ -30,31 +31,29 @@ const FEED_EVERY: Duration = Duration::from_secs(2);
 /// How often otherwise, while the account's feed is on: to count
 /// what's new.
 pub(in crate::app) const FEED_HIDDEN_EVERY: Duration = Duration::from_secs(10);
-/// The inbox a start opened counts as watched while its window was used this
-/// recently: one left open alone doesn't have rakumux.com read for it.
-const WATCHED_AFTER_USE: Duration = Duration::from_secs(5 * 60);
 /// Rows of a card and the row after it, for paging through them.
 const CARD_ROWS: isize = 11;
 
 impl App {
-    /// The feed has Rakumux mode's keys: the drawer has them on its Feed tab.
+    /// The feed has Rakumux mode's keys.
     pub fn feed_has_keys(&self) -> bool {
-        self.drawer_has_keys() && self.drawer_tab == DrawerTab::Feed
+        self.keys_panel() == Some(Panel::Feed)
     }
 
-    /// The feed is on screen: the drawer shows its Feed tab (its cards, or a
-    /// reply read whole).
+    /// The feed is on screen: the left column shows the Inbox (its cards, or
+    /// a reply read whole).
     pub fn feed_shown(&self) -> bool {
-        self.drawer_shown() && self.drawer_tab == DrawerTab::Feed
+        self.left_tab_shown(LeftTab::Inbox)
     }
 
     /// The cards, the line and the selected reply side by side: the Tabs
-    /// layout's drawer on the Feed, wide enough (`layout::feed_tab_columns`).
+    /// layout's Inbox, wide enough (`layout::feed_tab_columns`).
     pub fn feed_columns(&self) -> Option<(Rect, Rect, Rect)> {
-        if !self.drawer_tab_shown() || self.drawer_tab != DrawerTab::Feed {
+        if self.left_tab() != LeftTab::Inbox {
             return None;
         }
-        self.screen().feed.and_then(layout::feed_tab_columns)
+        let panel = self.screen().panel?;
+        layout::feed_tab_columns(layout::left_split(panel).0)
     }
 
     /// The selected reply is on screen whole: read in the cards' place, or
@@ -63,26 +62,19 @@ impl App {
         self.feed_shown() && (self.feed.reading || self.feed_columns().is_some())
     }
 
-    /// `f`, the footer's Feed button or Settings: show the drawer on the
-    /// Feed with the keys, switch it to the Feed, give it the keys while the
-    /// list has them, or hide it while the Feed has them.
+    /// `f`, the footer's Inbox button or Settings: the left column's Inbox
+    /// with the keys, or back to the sessions while it has them.
     pub fn toggle_feed(&mut self) {
-        self.toggle_drawer(DrawerTab::Feed);
-    }
-
-    /// Show the drawer on the Feed and give it the keys.
-    #[cfg(test)]
-    pub fn open_feed(&mut self) {
-        self.open_drawer(DrawerTab::Feed);
+        self.toggle_left_tab(LeftTab::Inbox);
     }
 
     /// The feed's Esc: a reply read in the cards' place goes back to them,
-    /// else the list gets the keys.
+    /// else the left column goes back to the sessions.
     pub fn feed_back(&mut self) {
         if self.feed.reading && self.feed_columns().is_none() {
             self.feed.reading = false;
         } else {
-            self.unfocus_drawer();
+            self.show_sessions_tab();
         }
     }
 
@@ -121,7 +113,7 @@ impl App {
     pub(in crate::app) fn drop_feed_divider(&mut self) {
         self.feed_divider = DividerState::default();
         if let Err(error) = self.save_settings() {
-            self.set_status(format!("Inbox width changed but not saved: {error}"));
+            self.set_status(format!("rtop's width changed but not saved: {error}"));
         }
     }
 
@@ -216,8 +208,7 @@ impl App {
     }
 
     /// Ask for the changes since what's held; the service reads the cloud
-    /// more often only while the feed is on screen (and, one a start opened,
-    /// its window in use).
+    /// more often only while the feed is on screen.
     fn read_feed(&mut self, now: Instant) {
         let shown = self.feed_shown();
         let every = if shown { FEED_EVERY } else { FEED_HIDDEN_EVERY };
@@ -225,11 +216,10 @@ impl App {
         self.feed.busy = true;
         let generation = self.feed.request_generation;
         let (after, held) = self.feed.cursor();
-        let watched = shown && (!self.drawer_at_start || self.used_within(WATCHED_AFTER_USE, now));
         let access = self.account_access.clone();
         self.exec.job(move || AppEvent::Feed {
             generation,
-            result: access.feed(after, held, watched),
+            result: access.feed(after, held, shown),
         });
     }
 
@@ -325,7 +315,7 @@ impl App {
     /// does.
     pub fn click_feed_entry(&mut self, index: usize) {
         let again = self.feed_has_keys() && self.feed.selected_index() == Some(index);
-        self.show_drawer_tab(DrawerTab::Feed);
+        self.show_left_tab(LeftTab::Inbox);
         self.feed.select(index);
         if again || self.phone() {
             self.open_feed_entry();
@@ -344,7 +334,7 @@ impl App {
     /// A click on a card's `▾ more` (`▴ less`): the feed gets the keys, the
     /// card is selected and shown whole (or back at its usual height).
     pub fn click_feed_expand(&mut self, index: usize) {
-        self.show_drawer_tab(DrawerTab::Feed);
+        self.show_left_tab(LeftTab::Inbox);
         self.feed.select(index);
         self.feed.toggle_expanded(index);
         self.follow_turn();
@@ -373,7 +363,6 @@ impl App {
             return;
         };
         if self.list.get(&session).is_some() {
-            self.drawer_focused = false;
             self.go_into(session);
             return;
         }
@@ -408,7 +397,7 @@ impl App {
         let area = self
             .feed_columns()
             .map(|(_, _, reply)| reply)
-            .or(self.screen().feed);
+            .or_else(|| self.left_body());
         area.map_or(20, |area| (area.height.saturating_sub(4) as isize).max(1))
     }
 }

@@ -10,6 +10,7 @@ use session_core::api::{TranscriptMessage, TranscriptPart, TranscriptRole};
 
 use super::{FeedStore, ThreadItem, MAX_ENTRIES};
 use crate::app::grouping::Grouping;
+use crate::app::left::LeftTab;
 use crate::app::testing::{options, scope, start, view, FakeAccount, FakeApi, Harness};
 use crate::app::types::{AppMode, Focus};
 use crate::app::Hit;
@@ -271,97 +272,6 @@ fn here_and_elsewhere(account: &FakeAccount) {
     ));
 }
 
-/// Started with the Inbox open at start, on a screen `width` × 48.
-fn inbox_at_start(width: u16, layout: SessionLayout) -> (Harness, Arc<FakeAccount>) {
-    let fake = FakeApi::new(vec![view("A", "api", 20), view("B", "docs", 10)]);
-    let dir = tempfile::tempdir().unwrap();
-    let account = Arc::new(FakeAccount::with_feed());
-    let mut options = options(&fake, scope(), &dir);
-    options.account = account.clone();
-    options.settings.sessions.layout = layout;
-    options.settings.sessions.inbox_at_start = true;
-    let mut h = start(options, fake, dir);
-    h.app.resize(width, 48);
-    (h, account)
-}
-
-#[tokio::test]
-async fn a_start_opens_the_inbox_beside_the_session_where_it_docks() {
-    let (mut h, account) = inbox_at_start(160, SessionLayout::Sidebar);
-    assert!(h.app.feed_shown());
-    assert!(h.app.screen().feed_divider.is_some(), "docked");
-    assert!(h.app.screen().detail.is_some());
-    // The list has the keys: what they do is as before.
-    assert!(!h.app.drawer_has_keys());
-    h.press(KeyCode::Right).await;
-    assert_eq!(h.app.list.grouping(), Grouping::Repo);
-    h.press(KeyCode::Left).await;
-    // In session mode it stays beside the session.
-    h.press(KeyCode::Enter).await;
-    assert_eq!(h.app.focus, Focus::Session);
-    assert!(h.app.feed_shown());
-    h.rakumux().await;
-    // Read as shown while the window is used; left alone, rakumux.com isn't
-    // read for it more often than for a hidden one.
-    tick(&mut h, Duration::from_secs(5));
-    assert_eq!(account.feed_shown().last(), Some(&true));
-    tick(&mut h, Duration::from_secs(20 * 60));
-    assert_eq!(account.feed_shown().last(), Some(&false));
-    // f gives it the keys, then hides it; used by the user, it's read as
-    // shown however long the window was left.
-    h.press(KeyCode::Char('f')).await;
-    assert!(h.app.feed_has_keys());
-    tick(&mut h, Duration::from_secs(40 * 60));
-    assert_eq!(account.feed_shown().last(), Some(&true));
-    h.press(KeyCode::Char('f')).await;
-    assert!(!h.app.drawer_open());
-    assert!(h.app.screen().feed.is_none());
-
-    // Where it wouldn't dock it takes no other pane's place: a narrow
-    // window, a phone, the Tabs layout. A window that widens docks it.
-    for width in [40, 90, 110] {
-        let (mut h, _) = inbox_at_start(width, SessionLayout::Sidebar);
-        assert!(h.app.screen().feed.is_none(), "{width}");
-        assert!(!h.app.drawer_tab_shown());
-        h.app.resize(160, 48);
-        assert!(h.app.feed_shown(), "{width}");
-        h.app.resize(width, 48);
-        assert!(h.app.screen().feed.is_none(), "{width}");
-        // f still shows it there.
-        h.press(KeyCode::Char('f')).await;
-        assert!(h.app.feed_has_keys() && h.app.feed_shown(), "{width}");
-    }
-    let (h, _) = inbox_at_start(160, SessionLayout::Tabs);
-    assert!(h.app.screen().feed.is_none());
-    assert!(!h.app.drawer_tab_shown());
-}
-
-#[tokio::test]
-async fn inbox_open_at_start_turns_off_in_settings_and_is_saved_only_off() {
-    use crate::app::types::SettingsItem;
-    assert!(crate::app::Settings::default().sessions.inbox_at_start);
-    let (mut h, _) = inbox_at_start(160, SessionLayout::Sidebar);
-    let row = SettingsItem::InboxAtStart.index();
-    let general = &h.app.modal_context(false).general[row];
-    assert_eq!(general.label, "Inbox open at start");
-    assert_eq!(general.value, "[On] Off");
-    h.press(KeyCode::Char(',')).await;
-    for _ in 0..row {
-        h.press(KeyCode::Down).await;
-    }
-    h.press(KeyCode::Enter).await;
-    let path = h.home.path().join("config.json");
-    let saved = || crate::app::Settings::load_from(&path).unwrap();
-    assert!(!saved().sessions.inbox_at_start);
-    // This window's stays until it's hidden; the next start opens none.
-    assert!(h.app.feed_shown());
-    h.press(KeyCode::Enter).await;
-    assert!(saved().sessions.inbox_at_start);
-    assert!(!std::fs::read_to_string(&path)
-        .unwrap()
-        .contains("inbox_at_start"));
-}
-
 #[tokio::test]
 async fn nothing_shows_a_hidden_feed_by_itself() {
     for layout in SessionLayout::ALL {
@@ -381,79 +291,123 @@ async fn nothing_shows_a_hidden_feed_by_itself() {
             "{layout:?}"
         );
         assert_eq!(h.app.feed.status(), Some(FeedStatus::Ready));
-        assert!(!h.app.drawer_open(), "{layout:?}");
-        assert!(h.app.screen().feed.is_none(), "{layout:?}");
-        assert!(!h.app.drawer_tab_shown(), "{layout:?}");
+        assert_eq!(h.app.left_tab(), LeftTab::Sessions, "{layout:?}");
+        assert!(h.app.bar_panels().is_empty(), "{layout:?}");
         // Nor on a phone.
         h.app.resize(45, 40);
         tick(&mut h, Duration::from_secs(40));
-        assert!(h.app.screen().feed.is_none(), "{layout:?}");
+        assert_eq!(h.app.left_tab(), LeftTab::Sessions, "{layout:?}");
     }
     // Off: nothing is asked while it's hidden.
     let (mut h, account) = feed_harness(FakeAccount::signed_in(), SessionLayout::Sidebar);
     tick(&mut h, Duration::from_secs(120));
     assert!(account.feed_asks().is_empty());
-    assert!(!h.app.drawer_open());
 }
 
 #[tokio::test]
-async fn f_docks_the_feed_on_the_right_and_esc_and_f_move_the_keys() {
+async fn f_shows_the_inbox_in_the_left_column_and_esc_and_f_go_back_to_the_sessions() {
     let (mut h, _) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
     let before = h.app.screen();
-    let detail = before.detail.unwrap();
     show_feed(&mut h).await;
-    // Session list | session | feed: the list keeps its width, the session
-    // narrows, the feed takes the right edge.
-    let screen = h.app.screen();
-    let feed = screen.feed.unwrap();
-    assert_eq!(feed.right(), 160);
-    assert_eq!(feed.width, layout::default_feed_width(160));
-    assert_eq!(screen.feed_divider.unwrap().x, feed.x - 1);
-    assert_eq!(screen.list, before.list);
-    let narrowed = screen.detail.unwrap();
-    assert_eq!(narrowed.x, detail.x);
-    assert_eq!(narrowed.right(), feed.x - 1);
-    assert!(narrowed.width >= layout::FEED_SESSION_MIN_COLS);
-    // ←/→ and `h` do nothing while the feed has the keys.
+    // In the list's place: nothing moves, the session keeps its columns.
+    assert_eq!(h.app.screen(), before);
+    assert_eq!(h.app.left_tab(), LeftTab::Inbox);
+    assert_eq!(h.app.left_pane(), before.list);
+    // ←/→ and `h` do nothing while the Inbox has the keys.
     for code in [KeyCode::Left, KeyCode::Right, KeyCode::Char('h')] {
         h.press(code).await;
         assert!(h.app.feed_has_keys(), "{code:?}");
     }
     assert_eq!(h.app.list.grouping(), Grouping::Status);
-    // Esc cancels a pending key first, then gives the list the keys back;
-    // the feed stays.
+    // Esc cancels a pending key first, then goes back to the sessions.
     h.press(KeyCode::Char('g')).await;
     h.press(KeyCode::Esc).await;
     assert!(h.app.feed_has_keys());
     h.press(KeyCode::Esc).await;
-    assert!(!h.app.feed_has_keys());
-    assert!(h.app.feed_shown());
+    assert!(!h.app.feed_has_keys() && !h.app.feed_shown());
+    assert_eq!(h.app.left_tab(), LeftTab::Sessions);
     assert_eq!(h.app.focus, Focus::List);
     h.press(KeyCode::Right).await;
     assert_eq!(h.app.list.grouping(), Grouping::Repo);
-    // `f` gives the feed the keys, then hides it.
+    // `f` shows it, `f` again goes back.
     h.press(KeyCode::Char('f')).await;
     assert!(h.app.feed_has_keys());
     h.press(KeyCode::Char('f')).await;
-    assert!(!h.app.drawer_open());
-    assert_eq!(h.app.screen(), before);
-    // Picking a grouping (P, a tab's modal) gives the list the keys.
+    assert_eq!(h.app.left_tab(), LeftTab::Sessions);
+    // From Beats it goes to the Inbox, and B back to Beats.
+    h.press(KeyCode::Char('B')).await;
+    assert!(h.app.beats_has_keys());
+    h.press(KeyCode::Char('f')).await;
+    assert!(h.app.feed_has_keys());
+    h.press(KeyCode::Char('B')).await;
+    assert!(h.app.beats_has_keys() && !h.app.feed_shown());
+    // Picking a grouping (P, a tab's modal) shows the sessions.
     show_feed(&mut h).await;
     h.app.show_tab(Grouping::App);
-    assert!(!h.app.feed_has_keys());
-    assert!(h.app.drawer_open());
+    assert_eq!(h.app.left_tab(), LeftTab::Sessions);
+    // With the column hidden, f shows it again, on the Inbox.
+    h.press(KeyCode::Char('b')).await;
+    assert!(h.app.screen().rail.is_some());
+    h.press(KeyCode::Char('f')).await;
+    assert!(h.app.feed_has_keys() && h.app.feed_shown());
+    assert!(h.app.screen().rail.is_none());
+    // Hidden while it shows the Inbox, the keys move the sessions.
+    h.press(KeyCode::Char('b')).await;
+    assert!(!h.app.feed_has_keys() && !h.app.feed_shown());
 }
 
 #[tokio::test]
-async fn the_session_takes_the_size_the_feed_leaves_it() {
+async fn the_left_columns_tabs_switch_what_it_shows() {
+    let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
+    here_and_elsewhere(&account);
+    for tab in [LeftTab::Beats, LeftTab::Inbox, LeftTab::Sessions] {
+        let area = target(&mut h, Hit::LeftTab(tab));
+        // At the bottom of the column.
+        let list = h.app.screen().list.unwrap();
+        assert_eq!(area.bottom(), list.bottom());
+        click_at(&mut h, area.x + 2, area.y + 1);
+        assert_eq!(h.app.left_tab(), tab);
+        assert_eq!(h.app.keys_panel(), tab.panel());
+    }
+    // On the tab shown, a click goes back from a reply read whole.
+    show_feed(&mut h).await;
+    tick(&mut h, Duration::from_secs(3));
+    h.press(KeyCode::Enter).await;
+    assert!(h.app.feed.reading);
+    let inbox = target(&mut h, Hit::LeftTab(LeftTab::Inbox));
+    click_at(&mut h, inbox.x + 2, inbox.y + 1);
+    assert!(!h.app.feed.reading && h.app.feed_has_keys());
+    // Session mode leaves the tab; a click on one gives Rakumux mode the
+    // keys there.
+    h.press(KeyCode::Esc).await;
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    let beats = target(&mut h, Hit::LeftTab(LeftTab::Beats));
+    click_at(&mut h, beats.x + 2, beats.y + 1);
+    assert_eq!(h.app.focus, Focus::List);
+    assert!(h.app.beats_has_keys());
+    // Working in a session from there, the column stays on it.
+    h.press(KeyCode::Char('1')).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    assert_eq!(h.app.left_tab(), LeftTab::Beats);
+    h.rakumux().await;
+    assert!(h.app.beats_has_keys());
+}
+
+#[tokio::test]
+async fn the_session_takes_the_size_the_drawer_leaves_it() {
     use session_core::api::StreamCommand;
     use session_core::client::AttachOutgoing;
     let (mut h, _) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
     let (index, _) = h.last_attach();
     h.fake.outgoing(index);
     let wide = h.app.terminal_size();
-    // Observed in Rakumux mode: it's fitted to the narrower pane.
+    // The Inbox leaves it alone: it's in the list's place.
     show_feed(&mut h).await;
+    h.press(KeyCode::Esc).await;
+    assert!(h.fake.outgoing(index).is_empty());
+    // Observed in Rakumux mode: it's fitted to the narrower pane.
+    h.press(KeyCode::Char('t')).await;
     let narrow = h.app.terminal_size();
     assert_eq!(narrow.0, h.app.screen().detail.unwrap().width);
     assert!(narrow.0 < wide.0);
@@ -464,20 +418,20 @@ async fn the_session_takes_the_size_the_feed_leaves_it() {
             rows: narrow.1
         })]
     );
-    // Working in it, the feed stays beside it and the list gets the keys
+    // Working in it, the drawer stays beside it and the list gets the keys
     // when Rakumux mode comes back.
     h.press(KeyCode::Esc).await;
     h.press(KeyCode::Enter).await;
     assert_eq!(h.app.focus, Focus::Session);
-    assert!(h.app.feed_shown());
-    assert!(!h.app.feed_has_keys());
+    assert!(h.app.rtop_shown());
+    assert!(!h.app.rtop_has_keys());
     assert_eq!(h.app.screen().terminal.unwrap().width, narrow.0);
     h.rakumux().await;
-    assert!(!h.app.feed_has_keys());
+    assert!(!h.app.rtop_has_keys());
     // Hidden: the session gets its columns back.
     h.fake.outgoing(index);
-    h.press(KeyCode::Char('f')).await;
-    h.press(KeyCode::Char('f')).await;
+    h.press(KeyCode::Char('t')).await;
+    h.press(KeyCode::Char('t')).await;
     assert!(!h.app.drawer_open());
     assert_eq!(h.app.terminal_size(), wide);
     assert_eq!(
@@ -490,9 +444,9 @@ async fn the_session_takes_the_size_the_feed_leaves_it() {
 }
 
 #[tokio::test]
-async fn dragging_the_line_left_of_the_feed_resizes_it_and_saves_its_width() {
+async fn dragging_the_line_left_of_the_drawer_resizes_it_and_saves_its_width() {
     let (mut h, _) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
-    show_feed(&mut h).await;
+    h.press(KeyCode::Char('t')).await;
     let line = h.app.screen().feed_divider.unwrap();
     let mouse = |kind, column| MouseEvent {
         kind,
@@ -526,9 +480,9 @@ async fn dragging_the_line_left_of_the_feed_resizes_it_and_saves_its_width() {
         serde_json::from_str(&std::fs::read_to_string(h.home.path().join("config.json")).unwrap())
             .unwrap();
     assert_eq!(saved["sessions"]["feed_width"], 39);
-    // The feed keeps the keys it had; the list's divider still keeps the
+    // rtop keeps the keys it had; the list's divider still keeps the
     // docked session's columns.
-    assert!(h.app.feed_has_keys());
+    assert!(h.app.rtop_has_keys());
     let divider = h.app.screen().divider.unwrap();
     h.app
         .handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), divider.x));
@@ -548,13 +502,17 @@ async fn a_click_gives_the_keys_to_the_side_it_lands_on_and_a_second_opens_a_car
     show_feed(&mut h).await;
     tick(&mut h, Duration::from_secs(3));
     assert_eq!(ids(&h.app.feed), ["L", "R"]);
-    // The list's row: the list has the keys; the feed's band: the feed.
-    let row = target(&mut h, Hit::ListRow(2));
-    click_at(&mut h, row.x + 4, row.y);
-    assert!(!h.app.feed_has_keys());
-    assert_eq!(h.app.focus, Focus::List);
-    let feed = h.app.screen().feed.unwrap();
-    click_at(&mut h, feed.right() - 2, feed.y + 1);
+    // rtop beside it: a click on either gives it the keys.
+    h.press(KeyCode::Char('t')).await;
+    assert!(h.app.rtop_has_keys() && h.app.feed_shown());
+    let pane = h.app.screen().list.unwrap();
+    click_at(&mut h, pane.right() - 2, pane.y);
+    assert!(h.app.feed_has_keys());
+    let drawer = h.app.screen().feed.unwrap();
+    draw(&mut h);
+    click_at(&mut h, drawer.right() - 2, drawer.y + 1);
+    assert!(h.app.rtop_has_keys());
+    h.press(KeyCode::Char('t')).await;
     assert!(h.app.feed_has_keys());
     // A card: selected; again: read whole in the cards' place.
     click_card(&mut h, 1);
@@ -562,14 +520,13 @@ async fn a_click_gives_the_keys_to_the_side_it_lands_on_and_a_second_opens_a_car
     assert!(!h.app.feed.reading);
     click_card(&mut h, 1);
     assert!(h.app.feed.reading);
-    // The band's ‹ goes back to the cards.
+    // The ‹ over it goes back to the cards.
     let back = target(&mut h, Hit::FeedBack);
-    click_at(&mut h, back.x + 3, back.y + 1);
+    click_at(&mut h, back.x + 3, back.y);
     assert!(!h.app.feed.reading);
     // From a session a click on a card gives Rakumux mode the feed's keys,
     // and selects it.
-    h.press(KeyCode::Esc).await;
-    h.press(KeyCode::Enter).await;
+    h.press(KeyCode::Char('1')).await;
     assert_eq!(h.app.focus, Focus::Session);
     click_card(&mut h, 0);
     assert_eq!(h.app.focus, Focus::List);
@@ -614,8 +571,8 @@ async fn enter_reads_a_reply_in_the_pane_and_again_goes_into_its_session() {
     assert!(h.app.feed_has_keys());
     h.press(KeyCode::Down).await;
     assert_eq!(h.app.feed.selected_index(), Some(1));
-    // A reply made here: into its session, grouped as it was, the feed
-    // beside it.
+    // A reply made here: into its session, grouped as it was, the Inbox
+    // still beside it.
     h.press(KeyCode::Enter).await;
     h.press(KeyCode::Enter).await;
     assert_eq!(h.app.focus, Focus::Session);
@@ -623,50 +580,43 @@ async fn enter_reads_a_reply_in_the_pane_and_again_goes_into_its_session() {
     assert_eq!(h.app.list.grouping(), Grouping::App, "as they were");
     assert!(h.app.feed_shown());
     assert!(!h.app.feed_has_keys());
-    // Back in Rakumux mode the list has the keys.
+    // Back in Rakumux mode it has the keys again, where it was.
     h.rakumux().await;
     assert_eq!(h.app.focus, Focus::List);
-    assert!(!h.app.feed_has_keys());
-    assert!(h.app.feed_shown());
+    assert!(h.app.feed_has_keys());
+    assert!(h.app.feed.reading);
 }
 
 #[tokio::test]
-async fn in_tabs_the_feed_is_a_tab_of_its_own() {
+async fn in_tabs_the_inbox_takes_the_sessions_place_with_a_tab_of_its_own() {
+    use crate::app::drawer::Panel;
     let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Tabs);
     account.queue_feed(page(1, 1, vec![entry("L", "B", 1_000, Some(1))], false));
     let before = h.app.screen();
     let selected = h.selected();
-    assert!(!h.app.drawer_tab_shown());
+    assert!(h.app.bar_panels().is_empty());
     show_feed(&mut h).await;
-    assert!(h.app.drawer_tab_shown());
-    // The tab bar stays; the feed fills the rest, its cards beside the
+    assert_eq!(h.app.bar_panels(), [Panel::Feed]);
+    // The tab bar stays; the Inbox fills the rest, its cards beside the
     // selected reply.
     let screen = h.app.screen();
     assert_eq!(screen.tabs, before.tabs);
-    assert_eq!(screen.feed, before.detail);
+    assert_eq!(screen.panel, before.detail);
     assert!(screen.detail.is_none() && screen.terminal.is_none());
     assert!(h.app.feed_columns().is_some());
     assert!(h.app.feed_reply_shown());
-    // Esc: the session's tab you were on; the Feed tab stays.
-    h.press(KeyCode::Esc).await;
-    assert!(!h.app.feed_has_keys());
-    assert!(h.app.drawer_tab_shown());
-    assert_eq!(h.app.screen(), before);
-    assert_eq!(h.selected(), selected);
-    // `f` selects it again, then hides it with its tab.
+    // Esc, or f: the session you were on.
     h.press(KeyCode::Char('f')).await;
-    assert!(h.app.feed_has_keys());
-    h.press(KeyCode::Char('f')).await;
-    assert!(!h.app.drawer_tab_shown());
-    assert_eq!(h.app.screen(), before);
-    assert_eq!(h.selected(), selected);
-    // A click on the Feed tab selects it; one on a session's tab goes back
-    // to the sessions.
+    for code in [KeyCode::Esc, KeyCode::Char('f')] {
+        show_feed(&mut h).await;
+        h.press(code).await;
+        assert!(!h.app.feed_has_keys());
+        assert!(h.app.bar_panels().is_empty());
+        assert_eq!(h.app.screen(), before);
+        assert_eq!(h.selected(), selected);
+    }
+    // A click on a session's tab goes back to the sessions.
     show_feed(&mut h).await;
-    h.press(KeyCode::Esc).await;
-    let tab = target(&mut h, Hit::DrawerBarTab);
-    click_at(&mut h, tab.x + 1, tab.y);
-    assert!(h.app.feed_has_keys());
     draw(&mut h);
     let (_, first) = h.app.tab_hits[0];
     click_at(&mut h, first.x + 1, first.y);
@@ -677,81 +627,95 @@ async fn in_tabs_the_feed_is_a_tab_of_its_own() {
     h.press(KeyCode::Enter).await;
     assert_eq!(h.app.focus, Focus::Session);
     assert_eq!(h.selected().as_deref(), Some("B"));
-    assert!(h.app.drawer_tab_shown());
-    assert!(!h.app.feed_has_keys());
-    // In session mode the Feed tab stays; a click on it gives Rakumux mode
-    // the feed.
-    let tab = target(&mut h, Hit::DrawerBarTab);
+    assert!(h.app.screen().detail.is_some());
+    // In session mode its tab stays; a click on it gives Rakumux mode the
+    // Inbox.
+    let tab = target(&mut h, Hit::PanelTab(Panel::Feed));
     click_at(&mut h, tab.x + 1, tab.y);
     assert_eq!(h.app.focus, Focus::List);
     assert!(h.app.feed_has_keys());
-    // Hiding the feed while its tab is selected: the session you were on.
-    h.press(KeyCode::Char('f')).await;
-    assert!(!h.app.drawer_tab_shown());
+    // rtop has a tab beside it; either's click shows it, and its own
+    // bottom tabs go between the three.
+    h.press(KeyCode::Char('t')).await;
+    assert_eq!(h.app.bar_panels(), [Panel::Feed, Panel::Rtop]);
+    assert!(h.app.rtop_has_keys() && h.app.screen().panel.is_none());
+    let tab = target(&mut h, Hit::PanelTab(Panel::Feed));
+    click_at(&mut h, tab.x + 1, tab.y);
+    assert!(h.app.feed_has_keys());
+    let beats = target(&mut h, Hit::LeftTab(LeftTab::Beats));
+    click_at(&mut h, beats.x + 1, beats.y);
+    assert!(h.app.beats_has_keys());
+    assert_eq!(h.app.bar_panels(), [Panel::Beats, Panel::Rtop]);
+    let sessions = target(&mut h, Hit::LeftTab(LeftTab::Sessions));
+    click_at(&mut h, sessions.x + 1, sessions.y);
     assert_eq!(h.selected().as_deref(), Some("B"));
     assert!(h.app.screen().detail.is_some());
 }
 
 #[tokio::test]
-async fn on_a_phone_the_feed_fills_the_screen_while_it_has_the_keys() {
-    for layout in [SessionLayout::Sidebar, SessionLayout::Tabs] {
-        let (mut h, account) = feed_harness(FakeAccount::with_feed(), layout);
-        h.app.resize(45, 40);
-        here_and_elsewhere(&account);
-        show_feed(&mut h).await;
-        tick(&mut h, Duration::from_secs(3));
-        let screen = h.app.screen();
-        assert_eq!(screen.feed, Some(ratatui::layout::Rect::new(0, 0, 45, 39)));
-        assert!(screen.list.is_none() && screen.tabs.is_none(), "{layout:?}");
-        assert!(screen.detail.is_none(), "{layout:?}");
-        assert!(!h.app.drawer_tab_shown(), "{layout:?}");
-        // Enter reads a reply; Esc goes back to the cards, then hides the
-        // feed.
-        h.press(KeyCode::Down).await;
-        h.press(KeyCode::Enter).await;
-        assert!(h.app.feed.reading);
-        h.press(KeyCode::Esc).await;
-        assert!(!h.app.feed.reading);
-        assert!(h.app.feed_has_keys());
-        h.press(KeyCode::Esc).await;
-        assert!(!h.app.drawer_open(), "{layout:?}");
-        assert!(h.app.screen().feed.is_none());
-        // A tap on a card reads it at once; Enter goes into its session,
-        // full screen.
-        show_feed(&mut h).await;
-        click_card(&mut h, 0);
-        assert!(h.app.feed.reading);
-        h.press(KeyCode::Enter).await;
-        assert_eq!(h.app.focus, Focus::Session, "{layout:?}");
-        assert_eq!(h.selected().as_deref(), Some("B"));
-        assert!(h.app.screen().feed.is_none(), "{layout:?}");
-    }
+async fn on_a_phone_the_inbox_is_a_tap_on_its_tab_away() {
+    let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
+    h.app.resize(45, 40);
+    here_and_elsewhere(&account);
+    let list = h.app.screen().list;
+    let tab = target(&mut h, Hit::LeftTab(LeftTab::Inbox));
+    click_at(&mut h, tab.x + 1, tab.y + 1);
+    assert!(h.app.feed_has_keys());
+    tick(&mut h, Duration::from_secs(3));
+    let screen = h.app.screen();
+    assert_eq!(screen.list, list, "the whole screen, as the sessions");
+    assert!(screen.tabs.is_none() && screen.detail.is_none());
+    // Enter reads a reply; Esc goes back to the cards, then the sessions.
+    h.press(KeyCode::Down).await;
+    h.press(KeyCode::Enter).await;
+    assert!(h.app.feed.reading);
+    h.press(KeyCode::Esc).await;
+    assert!(!h.app.feed.reading);
+    assert!(h.app.feed_has_keys());
+    h.press(KeyCode::Esc).await;
+    assert_eq!(h.app.left_tab(), LeftTab::Sessions);
+    // A tap on a card reads it at once; Enter goes into its session, full
+    // screen.
+    show_feed(&mut h).await;
+    click_card(&mut h, 0);
+    assert!(h.app.feed.reading);
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    assert_eq!(h.selected().as_deref(), Some("B"));
+    assert!(h.app.left_pane().is_none());
+    // The Tabs layout: under its bar.
+    let (mut h, _) = feed_harness(FakeAccount::with_feed(), SessionLayout::Tabs);
+    h.app.resize(45, 40);
+    show_feed(&mut h).await;
+    let screen = h.app.screen();
+    assert!(screen.tabs.is_some() && screen.detail.is_none());
+    assert_eq!(screen.panel.map(|panel| panel.height), Some(38));
 }
 
 #[tokio::test]
-async fn too_narrow_to_dock_it_the_feed_takes_the_sessions_place_in_rakumux_mode() {
+async fn too_narrow_to_dock_it_the_drawer_takes_the_sessions_place_in_rakumux_mode() {
     let (mut h, _) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
     h.app.resize(120, 40);
     let before = h.app.screen();
     let size = h.app.terminal_size();
-    show_feed(&mut h).await;
-    // The list stays; the feed is where the session was.
+    h.press(KeyCode::Char('t')).await;
+    // The list stays; rtop is where the session was.
     let screen = h.app.screen();
     assert_eq!(screen.list, before.list);
     assert_eq!(screen.feed, before.detail);
     assert!(screen.terminal.is_none() && screen.feed_divider.is_none());
     assert_eq!(h.app.terminal_size(), size);
-    // The list takes the keys back; the feed stays.
+    // The list takes the keys back; rtop stays.
     h.press(KeyCode::Esc).await;
-    assert!(!h.app.feed_has_keys());
+    assert!(!h.app.rtop_has_keys());
     assert_eq!(h.app.screen().feed, before.detail);
-    // A session keeps every column: no feed beside it.
+    // A session keeps every column: no drawer beside it.
     h.press(KeyCode::Enter).await;
     assert_eq!(h.app.focus, Focus::Session);
     assert!(h.app.screen().feed.is_none());
     assert_eq!(h.app.screen().terminal, before.detail);
     h.rakumux().await;
-    // Hiding the list makes room: the feed docks beside the session.
+    // Hiding the list makes room: it docks beside the session.
     h.press(KeyCode::Char('b')).await;
     let screen = h.app.screen();
     assert!(screen.rail.is_some() && screen.feed_divider.is_some());
@@ -764,6 +728,17 @@ async fn too_narrow_to_dock_it_the_feed_takes_the_sessions_place_in_rakumux_mode
     assert!(screen.stacked);
     assert_eq!(screen.feed.unwrap().y, screen.divider.unwrap().bottom());
     assert!(screen.detail.is_none());
+    // The Inbox takes all of a stacked screen; the session under the list
+    // comes back with the sessions.
+    h.press(KeyCode::Char('t')).await;
+    h.press(KeyCode::Char('t')).await;
+    let stacked = h.app.screen();
+    show_feed(&mut h).await;
+    let screen = h.app.screen();
+    assert!(!screen.stacked && screen.detail.is_none());
+    assert_eq!(screen.list.map(|list| list.height), Some(39));
+    h.press(KeyCode::Esc).await;
+    assert_eq!(h.app.screen(), stacked);
 }
 
 #[tokio::test]
@@ -1504,7 +1479,7 @@ fn feed_lines(h: &mut Harness) -> Vec<String> {
     let backend = ratatui::backend::TestBackend::new(area.width, area.height);
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
     terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
-    let feed = h.app.screen().feed.unwrap();
+    let feed = h.app.left_body().unwrap();
     let buffer = terminal.backend().buffer();
     (feed.y..feed.bottom())
         .map(|y| {
@@ -1529,7 +1504,7 @@ async fn cards_are_ten_rows_a_row_apart_and_expand_to_show_all_they_say() {
     let account = Arc::new(FakeAccount::with_feed());
     let mut options = options(&fake, scope(), &dir);
     options.account = account.clone();
-    options.settings.sessions.feed_width = Some(70);
+    options.settings.sessions.sidebar_width = Some(70);
     let mut h = start(options, fake, dir);
     let mut long = entry("L", "B", 2_000, Some(2));
     long.session_name = "docs".into();

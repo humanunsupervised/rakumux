@@ -1,12 +1,11 @@
-//! The agent feed (`app/feed`) in the drawer ([`draw_feed`]): the drawer's
-//! band (`drawer.rs`), in the accent while it has the keys, over the replies
+//! The agent feed (`app/feed`) in the left column ([`draw_feed`]): the replies
 //! newest first, each a card a row apart (its session, then its agent,
 //! folder, repository and branch, on the left of its top border; its age and
 //! where it's up to on the right; the start of the reply inside, or all of
 //! it once expanded: Space, or the `▾ more` on its bottom border), or what
 //! the feed is waiting for (a
 //! sign-in, the switch, the first read). The reply read whole (Enter) takes
-//! the cards' place, a `‹` on the band to go back; a wide Feed tab shows it
+//! the cards' place, under a `‹` row to go back; the Tabs layout's wide one shows it
 //! beside them. It's its whole turn in order once it's read (the prompt,
 //! the agent's reasoning, its tool calls with the start of their output, its
 //! text), else the reply alone, then its thread when someone wrote back
@@ -24,10 +23,10 @@ use ratatui::{
 };
 use session_core::api::{TranscriptMessage, TranscriptPart, TranscriptRole};
 
-use super::drawer::draw_band;
+use super::drawer::draw_back;
 use super::format::{now_secs, relative_time, truncate};
 use super::markdown;
-use super::session_list::{first_visible_row, folder_item_height};
+use super::session_list::first_visible_row;
 use super::utils::get_spinner_char;
 use crate::app::feed::{agent_name, plain, Card, EntryStatus, ThreadItem, TurnState};
 use crate::app::types::AccountStatus;
@@ -62,48 +61,28 @@ fn status(app: &App) -> FeedStatus {
     }
 }
 
-/// The feed in `area` (the drawer's, on its Feed tab): the drawer's band
-/// over the cards, or the reply read in their place; in a wide Feed tab,
-/// the cards with the selected reply beside them.
+/// The feed in `area` (the left column's, over its tabs): the cards, or the
+/// reply read in their place under a row to go back; the Tabs layout's wide
+/// one, the cards with the selected reply beside them.
 pub fn draw_feed(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) {
     if area.width == 0 || area.height == 0 {
         return;
     }
-    let p = theme::palette();
-    let focused = app.drawer_has_keys();
-    let (cards, beside) = match app.feed_columns() {
-        Some((cards, line, reply)) => {
-            let lines: Vec<Line> = (0..line.height).map(|_| Line::from("│")).collect();
-            f.render_widget(
-                Paragraph::new(lines).style(Style::default().fg(p.border_dim).bg(p.background)),
-                line,
-            );
-            (cards, Some(reply))
-        }
-        None => (area, None),
-    };
-    f.render_widget(
-        Block::default().style(Style::default().fg(p.text_primary).bg(p.panel)),
-        cards,
-    );
-    let band = Rect {
-        height: folder_item_height(cards.height),
-        ..cards
-    };
-    let reading = app.feed.reading && beside.is_none();
-    draw_band(f, app, band, reading, hits);
-    let below = Rect {
-        y: band.bottom(),
-        height: cards.height - band.height,
-        ..cards
-    };
-    if reading {
+    let focused = app.feed_has_keys();
+    if let Some((cards, line, reply)) = app.feed_columns() {
+        let p = theme::palette();
+        let lines: Vec<Line> = (0..line.height).map(|_| Line::from("│")).collect();
+        f.render_widget(
+            Paragraph::new(lines).style(Style::default().fg(p.border_dim).bg(p.background)),
+            line,
+        );
+        draw_feed_list(f, app, cards, focused, hits);
+        draw_feed_reply(f, app, reply, hits);
+    } else if app.feed.reading {
+        let below = draw_back(f, "Inbox", area, Hit::FeedBack, hits);
         draw_feed_reply(f, app, below, hits);
     } else {
-        draw_feed_list(f, app, below, focused, hits);
-    }
-    if let Some(reply) = beside {
-        draw_feed_reply(f, app, reply, hits);
+        draw_feed_list(f, app, area, focused, hits);
     }
 }
 

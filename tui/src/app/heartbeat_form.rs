@@ -513,7 +513,6 @@ impl App {
             workspace: self.new_session_workspace(),
         };
         self.creating_session = true;
-        self.drawer_focused = false;
         self.beats.reading = None;
         self.set_status(format!("Made {}: asking its agent", heartbeat.name));
         self.exec.job(move || AppEvent::Created {

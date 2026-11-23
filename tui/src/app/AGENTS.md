@@ -20,8 +20,8 @@ new-session flow, and code boundaries.
   The detail has no title row: the footer names the session in view (`session: ● <name>`, the
   mark its list row has). The footer is a full-width bar with that at its left, then messages,
   and the mode label (`RAKUMUX MODE`, `SESSION MODE`, `TERMINAL MODE`) in its centre: orange with dark text in
-  Rakumux mode (`f ≡ Inbox`, with `●N` new entries, `FooterKey::Feed` → `App::toggle_feed`;
-  `? Help` and `, Settings` buttons in a darker orange, and `Sign in` while signed out,
+  Rakumux mode (`f ≡ Inbox`, with `●N` new entries, `FooterKey::Feed` → `App::toggle_feed`, while
+  the left column isn't on screen; `? Help` and `, Settings` buttons in a darker orange, and `Sign in` while signed out,
   `FooterKey::SignIn` → `App::start_sign_in`), muted blue in session and
   terminal input modes (a `Ctrl-\` button); the label and buttons are hit targets.
 - A session the user exits from inside (controller, session mode) is deleted on its `exited`
@@ -75,7 +75,7 @@ new-session flow, and code boundaries.
   the workspace shown (`new_session_workspace`). Keys in `handlers/workspaces.rs`, drawing in
   `components/workspaces.rs`. The test fake announces `workspaces` only with
   `FakeState::keeps_workspaces`.
-- `heartbeats.rs`: the drawer's Beats tab (`BeatsView`, `BeatAction`: the selected heartbeat's
+- `heartbeats.rs`: the left column's Beats tab (`BeatsView`, `BeatAction`: the selected heartbeat's
   buttons; `+ New heartbeat`, `Hit::BeatNew`); `heartbeat_form.rs`: the New heartbeat form
   (`AppMode::NewHeartbeat(HeartbeatForm)`, its keys, clicks (`FormHit`) and what it makes).
   Drawing in `components/heartbeats.rs` and `components/heartbeat_form.rs`.
@@ -100,10 +100,10 @@ new-session flow, and code boundaries.
   capped at 500, the selection kept by id, the reply's scroll, `reading` (the selected reply
   read whole in the cards' place), the service's generation and revision, and the ids that were
   on screen: `mark_seen`, `unseen` counts the rest that finished after the window started) and
-  `pane.rs`, which puts it on the drawer's Inbox tab (`drawer.rs`, below): `feed_has_keys` and
-  `feed_shown` are the drawer's on that tab; `feed_columns` puts the reply beside the cards from
+  `pane.rs`, which puts it on the left column's Inbox tab (`left.rs`, below): `feed_has_keys` and
+  `feed_shown` are the column's on that tab; `feed_columns` puts the reply beside the cards from
   100 columns in the Tabs layout; `toggle_feed` (`f`, the footer's `FooterKey::Feed`, Settings'
-  `KeyAction::Feed`) is `toggle_drawer(Feed)`; `feed_back` is the feed's Esc. It polls `AccountAccess::feed` off the UI thread every 2 s while
+  `KeyAction::Feed`) is `toggle_left_tab(Inbox)`; `feed_back` is the feed's Esc. It polls `AccountAccess::feed` off the UI thread every 2 s while
   on screen, and every 10 s as a background read while the account's feed is on, so
   `feed_unseen` can count for the footer and the Inbox tab (again at once while `more`). Its keys
   (`feed_key`: ←/→ and `h` do nothing, `l` is Enter, ↑/↓ scroll a reply being read, Space
@@ -115,26 +115,30 @@ new-session flow, and code boundaries.
   (`AccountAccess::feed_turn`, off the UI thread, the rest asked for at once while `next`;
   `FeedStore` keeps the last 20 turns, `TurnState`), drawn in order by
   `components::feed::turn_lines` (`›` prompts, quiet reasoning, `●` tool calls with the first
-  lines of their output). `components/feed.rs::draw_feed` draws it under the drawer's band
-  (`‹` back while reading) over the cards or the reply.
-- `drawer.rs`: the drawer, `DrawerTab` Feed or Rtop. `drawer_open` (shown; this window's, opened
-  by every start on the Inbox where it docks: `drawer_at_start` until it's used, `FeedShown::Docked`), `drawer_focused` (it has Rakumux mode's keys:
-  `drawer_has_keys`; `drawer_lost_keys` when session mode or the terminal panel takes them) and
-  `drawer_tab` go to the layout as `PaneSizes::feed` (`layout::FeedShown`), and `Screen::feed`
-  says where it is: docked on the right (Master detail; `Screen::feed_divider`,
-  `drag_feed_divider` saves `sessions.feed_width`), the session's place on narrower windows in
-  Rakumux mode, the body under the tab bar while the Tabs layout's drawer tab is selected
-  (`drawer_tab_shown`), or the screen on a phone while it has the keys. `drawer_shown` is
-  whether it's on screen. `toggle_drawer(tab)` (`f` Feed, `t` rtop): shown on that tab with the
-  keys, switched to it, the keys, or hidden; `show_drawer_tab` (a click on the band's tab,
-  `Hit::DrawerTab`); `unfocus_drawer` (Esc, a click beside it, a grouping picked) gives the
-  list the keys, hiding it where it would leave the screen; `drawer_back` is the active tab's
-  Esc, `drawer_key` its keys, `drawer_session` what the footer names. Every change runs
-  `drawer_moved`: the session on screen takes its new pane size (`sync_terminal_size`), and the
-  tab that came on screen starts (feed read, rtop sample)
-  while the other stops. `components/drawer.rs::draw_drawer` draws the band (`≡ Inbox   ▥ rtop`,
-  the active one underlined, the accent while it has the keys) and the active tab;
-  `components/session_tabs.rs` draws the Tabs layout's drawer tab, named by its active tab.
+  lines of their output). `components/feed.rs::draw_feed` draws the cards, or
+  the reply under a `‹` row.
+- `left.rs`: the left column's tabs (`LeftTab`: Sessions, Inbox, Beats; `App::left_tab`, this
+  window's, Sessions at every start) and `keys_panel`, what has Rakumux mode's keys instead of the
+  sessions (`drawer::Panel`: the drawer, else the column's Inbox or Beats on screen). `left_pane` is
+  the column (`Screen::list`, or the Tabs layout's `Screen::panel`), `left_body` it without its tabs
+  (`layout::left_split`). `show_left_tab` (a click, with the keys; shows a hidden column),
+  `toggle_left_tab` (`f`, `B`), `click_left_tab` (`Hit::LeftTab`), `show_sessions_tab` (Esc, a
+  grouping, folder or workspace picked). `components/left.rs` draws what the tab shows, the tabs
+  and the hidden column's rail.
+- `drawer.rs`: the drawer, rtop. `drawer_open` (shown; this window's, hidden at every start, nothing
+  opens it by itself) and `drawer_focused` (it has Rakumux mode's keys; `drawer_lost_keys` when
+  session mode or the terminal panel takes them) go to the layout as `PaneSizes::feed`
+  (`layout::FeedShown`), and `Screen::feed` says where it is: docked on the right (Master detail;
+  `Screen::feed_divider`, `drag_feed_divider` saves `sessions.feed_width`), the session's place on
+  narrower windows in Rakumux mode, the body under the tab bar while the Tabs layout's rtop tab is
+  selected, or the screen on a phone while it has the keys. `drawer_shown` is whether it's on
+  screen. `toggle_rtop` (`t`): shown with the keys, the keys, or hidden; `unfocus_drawer` (Esc, a
+  click beside it) gives the left column the keys, hiding it where it would leave the screen. The
+  panels' shared keys are here (`panel_key`, `panel_back`, `panel_session`, what the footer names).
+  Every change of either runs `drawer_moved`: the session on screen takes its new pane size
+  (`sync_terminal_size`), and what came on screen starts (feed read, rtop sample) while the rest
+  stops. `bar_panels` are the panels with a tab in the Tabs layout's bar
+  (`components/session_tabs.rs`).
 - `list_tabs.rs`: `App::tab_label` (the active tab names its filter, inactive ones say Repos /
   Agent / Status; the Repos tab names the folder filter), `filter_label` (the Tabs layout's
   selector, after the tab's mark), `switch_tab`/`show_tab` (both give the list
@@ -179,10 +183,10 @@ new-session flow, and code boundaries.
   Narrow Sidebar windows (80–99 columns) stack the list above the detail in Rakumux mode
   (`Screen::stacked`, the divider a row) and give the session everything above the footer in
   session mode; `terminal_size` is always the session-mode pane. Side by side the list can be
-  hidden (`App::toggle_list`: `b`, Settings, the list's `« Hide list` row, `Hit::HideList`;
+  hidden (`App::toggle_list`: `b`, Settings, the `«` right of the column's tabs, `Hit::HideList`;
   `PaneSizes::list_hidden`, this window's only): `Screen::rail` (`layout::RAIL_COLS`) replaces
   the list and divider, and a click on it (`Hit::ShowList`) shows the list again.
-- `rtop.rs`: rtop, the drawer's rtop tab (`App::rtop: RtopView`, `t` or Settings → rtop; drawn
+- `rtop.rs`: rtop, the drawer (`App::rtop: RtopView`, `t` or Settings → rtop; drawn
   by `components/rtop.rs`, the sorted column marked `▾`). Asks `SessionApi::resources` off the
   UI thread (`AppEvent::Resources`, checked against the view's generation) on ticks about every
   second while its tab is on screen (`rtop_shown`, `rtop_timers`), the second sample half a
@@ -211,13 +215,12 @@ new-session flow, and code boundaries.
   active one's modal; the band beside them, `Hit::FolderSelector`, opens it too), the Folders,
   App and Status modals' rows (`Hit::FolderRow`, `Hit::SectionRow`), and the footer's
   mode label (`Hit::ModeBadge`: `enter_rakumux_mode` / `return_to_session`) and key hints
-  (`Hit::FooterKey`: what the keys do), the list's `« Hide list` row and the hidden list's rail
+  (`Hit::FooterKey`: what the keys do), the left column's tabs (`Hit::LeftTab`), their `«` and the hidden column's rail
   (`Hit::HideList`, `Hit::ShowList`: `toggle_list`, in either mode), and the feed (`Hit::FeedEntry`
-  selects a card, a second click opens it; `Hit::FeedBack`, `Hit::FeedReply`, the band's
-  `Hit::DrawerTab`, rtop's `Hit::RtopRow`, `Hit::Drawer` anywhere else on it, the Tabs layout's
-  `Hit::DrawerBarTab`): a click on it gives it the keys, a click beside it (not the
-  footer) gives them to the list. The divider drags side to side, or up and down when
-  stacked; the line left of the docked feed (`Screen::feed_divider`) drags side to side.
+  selects a card, a second click opens it; `Hit::FeedBack`, `Hit::FeedReply`, `Hit::LeftPane` anywhere else on it), rtop
+  (`Hit::RtopRow`, `Hit::Drawer`) and the Tabs layout's `Hit::PanelTab`: a click on one gives it
+  the keys. The divider drags side to side, or up and down when
+  stacked; the line left of the docked drawer (`Screen::feed_divider`) drags side to side.
   A press the session's (or the focused panel's) program takes holds the mouse until it's let
   go (`mouse_held_by_program`, `App::mouse_grab`): its drags and release go to that program
   wherever they are, at the pane's nearest cell (`TerminalView::held_mouse_bytes`).
@@ -269,9 +272,8 @@ new-session flow, and code boundaries.
 - `handlers/`: key handling by target (`Focus::List` = Rakumux mode, `Focus::Session` = main
   session, `Focus::Terminal` = utility shell):
   - Rakumux mode (`handlers/list.rs`): arrows and Vim keys (`j`/`k`, `gg`/`G`, `Ctrl-d`/`u`,
-    `{`/`}` groups; ←/→, `h`/`l` on the tabs row switch tabs; `*` the Pinned tab; `f` the drawer's Feed and `t` its rtop:
-    shown on that tab with the keys, switched to it, the keys, hidden; `drawer_key` while it has
-    them),
+    `{`/`}` groups; ←/→, `h`/`l` on the tabs row switch tabs; `*` the Pinned tab; `f` the left column's Inbox and `B` its
+    Beats, `t` the drawer, rtop; `panel_key` while one has the keys),
     `gg` via `App::pending_key`,
     `d`/`dd` opens delete confirmation, `b` hides or shows the list, Enter/`i`
     go in, Esc (cancel first) or the
@@ -371,5 +373,6 @@ timers ───────────┘                                     
   empty, live, exited and dead states in both layouts, at phone sizes (45×40, 40×20) for the
   list-then-session layout, taps and dialogs, and at narrow-window sizes (90×40, 90×20) for the
   stacked layout.
-- The drawer: `feed/tests.rs` for the Inbox tab, `ui.rs` for its rendering, rtop and switching tabs
-  (`rtop_from_settings_…`, `the_drawer_switches_…`, `the_tabs_layout_names_the_drawer_…`).
+- The left column and the drawer: `feed/tests.rs` for the Inbox and the column's tabs, `ui.rs` for
+  their rendering (`the_left_columns_tabs_…`, `rtop_from_settings_…`, `rtop_is_beside_…`);
+  `tests/heartbeat_tui.rs` in the real TUI.

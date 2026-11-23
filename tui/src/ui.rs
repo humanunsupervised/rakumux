@@ -22,9 +22,9 @@ use crate::components::{
     drawer::draw_drawer,
     folder_picker::draw_folder_picker,
     footer::draw_footer,
+    left::{draw_left, draw_rail},
     section_picker::draw_section_picker,
     session_detail::draw_session_detail,
-    session_list::{draw_list_rail, draw_session_list},
     session_tabs::draw_session_tabs,
     terminal_panel::draw_terminal_panel,
 };
@@ -79,14 +79,14 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let mut hits = Vec::new();
     let mut tab_hits = Vec::new();
 
-    if let Some(list) = screen.list {
-        draw_session_list(f, app, list, &mut hits);
+    if let Some(left) = screen.list.or(screen.panel) {
+        draw_left(f, app, left, &mut hits);
     }
     if let Some(divider) = screen.divider {
         draw_divider(f, app.divider, divider, screen.stacked);
     }
     if let Some(rail) = screen.rail {
-        draw_list_rail(f, rail, &mut hits);
+        draw_rail(f, rail, &mut hits);
     }
     if let Some(tabs) = screen.tabs {
         let (targets, first) = draw_session_tabs(f, app, tabs, &mut hits);
@@ -402,10 +402,16 @@ mod tests {
                     .map(|(area, _)| area.x)
                     .min()
                     .expect("buttons");
-                if width >= 160 {
+                // Master detail has no Inbox button: more room.
+                let centred = if layout == SessionLayout::Tabs {
+                    160
+                } else {
+                    120
+                };
+                if width >= centred {
                     assert_eq!(x, (width - 14) / 2, "{width}");
                 } else {
-                    assert_eq!(x + 14 + 1, buttons, "{width}");
+                    assert!(x + 14 < buttons, "{width}");
                 }
                 // Help/Settings keep the mode bar visible on short screens too.
                 h.press(KeyCode::Char('?')).await;
@@ -745,10 +751,10 @@ mod tests {
             // The footer names it, then says why; at 80 columns the
             // message keeps the room.
             let footer = screen.lines().last().unwrap();
-            let named = if width == 160 {
+            let named = if width >= 100 {
                 " session: ✕ build "
             } else {
-                ""
+                " ✕ build "
             };
             assert!(
                 footer.starts_with(&format!("{named} build exited with code 3 ")),
@@ -794,25 +800,29 @@ mod tests {
         let screen = render(&mut h.app, 160, 48);
         let rows: Vec<&str> = screen.lines().collect();
         let list = h.app.screen().list.unwrap();
-        // The list pane's last row, just above the footer.
-        assert!(rows[46].starts_with("   « Hide list "), "{:?}", rows[46]);
+        // At the right of the column's tabs, at its bottom.
+        assert!(
+            list_column(&screen, list.width.into())[45].ends_with(" «"),
+            "{:?}",
+            rows[45]
+        );
         let button = h
             .app
             .hits
             .iter()
             .find(|(_, hit)| *hit == Hit::HideList)
             .map(|(area, _)| *area);
-        assert_eq!(button, Some(Rect::new(0, 46, list.width, 1)));
+        assert_eq!(button, Some(Rect::new(list.width - 3, 44, 3, 3)));
         let beside = h.app.screen().terminal.unwrap();
 
         tap(&mut h, Hit::HideList);
         let screen = render(&mut h.app, 160, 48);
         let rows: Vec<&str> = screen.lines().collect();
-        assert!(!screen.contains("Hide list"), "{screen}");
+        assert!(!screen.contains("❯ Sessions"), "{screen}");
         assert!(!screen.contains("◔ Status"), "{screen}");
         // A column of the list pane with `»` where the button was, the
         // divider's line, then the session from the third column.
-        assert!(rows[46].starts_with("»│"), "{:?}", rows[46]);
+        assert!(rows[45].starts_with("»│"), "{:?}", rows[45]);
         assert!(
             rows[0].starts_with(" │hello from the fake"),
             "{:?}",
@@ -835,31 +845,31 @@ mod tests {
         // A click anywhere on the rail shows the list again.
         tap_at(&mut h, 1, 20);
         let screen = render(&mut h.app, 160, 48);
-        assert!(screen.contains("« Hide list"), "{screen}");
+        assert!(screen.contains("❯ Sessions"), "{screen}");
         assert!(screen.contains("◔ Status"), "{screen}");
         assert_eq!(h.app.screen().terminal, Some(beside));
     }
 
     #[test]
-    fn the_docked_feed_stays_while_the_list_hides() {
+    fn the_docked_drawer_stays_while_the_list_hides() {
         let mut h = harness(vec![view("A", "api", 20)]);
-        h.app.open_feed();
+        h.app.open_rtop();
         render(&mut h.app, 160, 48);
         let session = h.app.screen().terminal.unwrap();
         tap(&mut h, Hit::HideList);
         let screen = render(&mut h.app, 160, 48);
         assert!(
-            screen.lines().nth(46).unwrap().starts_with("»│"),
+            screen.lines().nth(45).unwrap().starts_with("»│"),
             "{screen}"
         );
-        // The session takes the list's columns; the feed keeps its own.
+        // The session takes the list's columns; the drawer keeps its own.
         let hidden = h.app.screen();
         let feed = hidden.feed.unwrap();
         assert_eq!(feed.right(), 160);
         assert_eq!(hidden.terminal.unwrap().right(), session.right());
         assert!(hidden.terminal.unwrap().width > session.width);
         assert!(
-            screen.lines().nth(1).unwrap().contains("≡ Inbox"),
+            screen.lines().nth(1).unwrap().contains("▥ rtop"),
             "{screen}"
         );
     }
@@ -1858,10 +1868,9 @@ mod tests {
         assert!(narrow.contains("▤ Repos"), "{narrow}");
         assert!(narrow.contains("   api "), "{narrow}");
         assert!(narrow.contains("hello from the fake"), "{narrow}");
-        // The footer names the session in view under the bar (its mark
-        // and name: what fits beside the label and the buttons).
+        // The footer names the session in view under the bar.
         let footer = narrow.lines().last().unwrap();
-        assert!(footer.starts_with(" ? frontend "), "{footer:?}");
+        assert!(footer.starts_with(" session: ? frontend "), "{footer:?}");
     }
 
     #[tokio::test]
@@ -2367,16 +2376,13 @@ mod tests {
         tap(&mut h, Hit::FooterKey(FooterKey::Rakumux));
         assert_eq!(h.app.focus, Focus::List);
 
-        // `? Help` and `, Settings` open them (Settings from 49 columns).
+        // `? Help` and `, Settings` open them.
         render(&mut h.app, width, height);
         tap(&mut h, Hit::FooterKey(FooterKey::Help));
         assert_eq!(modal_tab(&h), Some(Modal::Help.first_tab()));
         h.press(KeyCode::Esc).await;
         render(&mut h.app, width, height);
-        let settings = Hit::FooterKey(FooterKey::Settings);
-        assert!(!h.app.hits.iter().any(|(_, hit)| *hit == settings));
-        render(&mut h.app, 49, height);
-        tap(&mut h, settings);
+        tap(&mut h, Hit::FooterKey(FooterKey::Settings));
         assert_eq!(modal_tab(&h), Some(ModalTab::Settings));
         h.press(KeyCode::Esc).await;
         h.press(KeyCode::Esc).await; // back into the session
@@ -2469,15 +2475,13 @@ mod tests {
                     };
                     assert_eq!(shown, wanted);
                 }
-                // Rakumux mode has the Feed, Help and Settings, a session the
-                // way out.
+                // Rakumux mode has Help and Settings (the Inbox is the left
+                // column's own tab), a session the way out.
                 let has = |key| targets.iter().any(|(_, hit)| *hit == Hit::FooterKey(key));
                 use crate::app::FooterKey::{Feed, Help, Rakumux, Settings};
-                assert_eq!(has(Feed), !session, "{width} {session}");
+                assert!(!has(Feed), "{width} {session}");
                 assert_eq!(has(Help), !session, "{width} {session}");
-                // A 40- or 45-column phone has room for the Feed and Help,
-                // Settings from 48 columns.
-                assert_eq!(has(Settings), !session && width >= 48, "{width} {session}");
+                assert_eq!(has(Settings), !session, "{width} {session}");
                 assert_eq!(has(Rakumux), session, "{width} {session}");
             }
         }
@@ -2498,7 +2502,7 @@ mod tests {
         if let Some(page) = page {
             account.queue_feed(page);
         }
-        h.app.open_feed();
+        h.app.toggle_feed();
         h.app
             .on_tick(std::time::Instant::now() + std::time::Duration::from_secs(3));
         h.app.process_pending();
@@ -2554,22 +2558,8 @@ mod tests {
         }
     }
 
-    /// The columns of `screen` from `x` on, each row's end trimmed.
-    fn pane_column(screen: &str, x: u16) -> Vec<String> {
-        screen
-            .lines()
-            .map(|l| {
-                l.chars()
-                    .skip(usize::from(x))
-                    .collect::<String>()
-                    .trim_end()
-                    .to_string()
-            })
-            .collect()
-    }
-
     #[tokio::test]
-    async fn the_feed_pane_shows_finished_replies_at_the_right() {
+    async fn the_inbox_shows_finished_replies_in_the_left_column() {
         use rakumux_sensagent::feed::FeedStatus;
         let machine = rakumux_sensagent::feed::machine_name();
         let mut pending = reply(
@@ -2596,44 +2586,46 @@ mod tests {
         );
         let wide = render(&mut h.app, 160, 48);
         let screen = h.app.screen();
-        let feed = screen.feed.unwrap();
-        assert_eq!((feed.x, feed.width), (160 - 44, 44));
-        let pane = pane_column(&wide, feed.x);
+        let feed = screen.list.unwrap();
+        assert_eq!((feed.x, feed.width), (0, 48));
+        let pane = list_column(&wide, 48);
         let rows: Vec<&str> = wide.lines().collect();
-        // The list keeps its tabs and the session stays in view, narrower.
-        assert!(rows[1].starts_with("   ★ Pinned    ◔ Status ▾"), "{wide}");
+        // In the sessions' place; the session stays in view, as wide.
+        assert!(!wide.contains("◔ Status"), "{wide}");
         assert!(wide.contains("hello from the fake"), "{wide}");
-        assert_eq!(screen.detail.unwrap().right(), feed.x - 1);
-        // The pane's band names it, bright while it has the keys.
-        assert_eq!(pane[1], "   ≡ Inbox   ♥ Beats   ▥ rtop", "{wide}");
-        assert_eq!(pane[2], "   ▁▁▁▁▁▁▁", "{wide}");
+        assert_eq!(screen.detail.unwrap().right(), 160);
+        // The column's tabs at its bottom, the Inbox's in the accent.
+        assert_eq!(
+            pane[45], "   ❯ Sessions   ≡ Inbox   ♥ Beats             «",
+            "{wide}"
+        );
+        assert_eq!(pane[44], "                ▔▔▔▔▔▔▔", "{wide}");
         let mut terminal = Terminal::new(TestBackend::new(160, 48)).unwrap();
         terminal.draw(|f| draw(f, &mut h.app)).unwrap();
         let p = crate::theme::palette();
-        // `≡ Feed`, the first tab.
-        let mark = terminal.backend().buffer().get(feed.x + 3, 1).fg;
+        let mark = terminal.backend().buffer().get(16, 45).fg;
         assert_eq!(mark, p.accent_primary);
         // The newest first, each a card: its session, agent and folder (no
         // branch known) on the top border, then its age and `sending` while
         // it isn't uploaded, `done` once it is (only the mark, short of
         // room).
-        assert!(pane[4].starts_with(" ╭ api  claude · repo ─"), "{wide}");
-        assert!(pane[4].contains(" now · "), "{wide}");
-        assert!(pane[4].ends_with(" sending ╮"), "{wide}");
-        assert!(pane[5].starts_with(" │ Done: the parser handles"), "{wide}");
+        assert!(pane[1].starts_with(" ╭ api  claude · repo ─"), "{wide}");
+        assert!(pane[1].contains(" now · "), "{wide}");
+        assert!(pane[1].ends_with(" sending ╮"), "{wide}");
+        assert!(pane[2].starts_with(" │ Done: the parser handles"), "{wide}");
         // Ten rows a card, everything it says fitting, so nothing to expand;
         // a row between cards.
-        assert!(pane[13].starts_with(" ╰─"), "{wide}");
-        assert!(!pane[13].contains("more"), "{wide}");
-        assert_eq!(pane[14], "", "{wide}");
+        assert!(pane[10].starts_with(" ╰─"), "{wide}");
+        assert!(!pane[10].contains("more"), "{wide}");
+        assert_eq!(pane[11], "", "{wide}");
         assert!(
-            pane[15].starts_with(" ╭ nightly-build  claude · repo ─"),
+            pane[12].starts_with(" ╭ nightly-build  claude · repo ─"),
             "{wide}"
         );
-        assert!(pane[15].ends_with(" 5m · ● ╮"), "{wide}");
+        assert!(pane[12].ends_with(" 5m · ● done ╮"), "{wide}");
         assert_eq!(
-            pane[4].chars().count(),
-            pane[5].trim_end_matches(' ').chars().count(),
+            pane[1].chars().count(),
+            pane[2].trim_end_matches(' ').chars().count(),
             "{wide}"
         );
         assert!(!wide.contains('\u{1b}'), "{wide}");
@@ -2643,28 +2635,29 @@ mod tests {
         assert!(footer.starts_with(" session: ● api "), "{footer:?}");
         assert!(footer.contains(" RAKUMUX MODE "), "{footer:?}");
         assert!(!footer.contains("FEED"), "{footer:?}");
-        assert!(footer.contains(" f ≡ Inbox "), "{footer:?}");
-        // Enter: the reply whole in the cards' place, `‹` on the band.
+        // Enter: the reply whole in the cards' place, under `‹`.
         h.press(KeyCode::Enter).await;
         let wide = render(&mut h.app, 160, 48);
-        let pane = pane_column(&wide, feed.x);
-        assert_eq!(pane[1], "   ‹ ≡ Inbox   ♥ Beats   ▥ rtop", "{wide}");
+        let pane = list_column(&wide, 48);
+        assert_eq!(pane[0], "   ‹ Inbox", "{wide}");
         assert!(wide.contains("Enter goes into its session"), "{wide}");
         assert!(wide.contains("Run cargo test to check."), "{wide}");
         assert!(wide.contains("hello from the fake"), "{wide}");
-        // The list gets the keys back: the band goes quiet.
+        // A narrow window: all of it, over the tabs.
         h.press(KeyCode::Esc).await;
-        h.press(KeyCode::Esc).await;
-        let mut terminal = Terminal::new(TestBackend::new(160, 48)).unwrap();
-        terminal.draw(|f| draw(f, &mut h.app)).unwrap();
-        let mark = terminal.backend().buffer().get(feed.x + 3, 1).fg;
-        assert_eq!(mark, p.neutral_gray);
-        // A narrow window: under the list, where the session was.
         let narrow = render(&mut h.app, 90, 40);
-        let divider = h.app.screen().divider.unwrap();
+        assert!(h.app.screen().divider.is_none());
         assert!(narrow.contains("api  claude · repo"), "{narrow}");
-        let feed_band = narrow.lines().nth(usize::from(divider.y) + 2).unwrap();
-        assert!(feed_band.contains("≡ Inbox"), "{narrow}");
+        assert!(
+            narrow.contains("❯ Sessions   ≡ Inbox   ♥ Beats"),
+            "{narrow}"
+        );
+        assert!(!narrow.contains("«"), "{narrow}");
+        // Esc: the sessions again.
+        h.press(KeyCode::Esc).await;
+        let wide = render(&mut h.app, 160, 48);
+        assert!(wide.contains("◔ Status ▾"), "{wide}");
+        assert!(!wide.contains("api  claude · repo"), "{wide}");
     }
 
     #[tokio::test]
@@ -2677,8 +2670,9 @@ mod tests {
             Some(feed_page(FeedStatus::Ready, vec![done])),
         );
         h.press(KeyCode::Enter).await;
+        h.app.settings.sessions.sidebar_width = Some(36);
         let wide = render(&mut h.app, 160, 48);
-        let pane = pane_column(&wide, h.app.screen().feed.unwrap().x);
+        let pane = list_column(&wide, h.app.left_pane().unwrap().width.into());
         let at = pane
             .iter()
             .position(|row| row.contains("Enter goes into its session"))
@@ -2720,14 +2714,15 @@ mod tests {
             status_at: 1,
         }];
         let mut h = feed_harness(crate::app::testing::FakeAccount::with_feed(), Some(page));
-        // A wide screen's pane is a quarter of it (at most 60 columns).
+        // A column dragged wide.
+        h.app.settings.sessions.sidebar_width = Some(70);
         let wide = render(&mut h.app, 240, 48);
-        let pane = pane_column(&wide, h.app.screen().feed.unwrap().x);
+        let pane = list_column(&wide, 70);
         assert!(
-            pane[4].starts_with(" ╭ parser  claude · repo ⎇ fix/csv ─"),
+            pane[1].starts_with(" ╭ parser  claude · repo ⎇ fix/csv ─"),
             "{wide}"
         );
-        assert!(pane[4].ends_with(" 3m · ✓ answered ╮"), "{wide}");
+        assert!(pane[1].ends_with(" 3m · ✓ answered ╮"), "{wide}");
         // Short of room, the status's word goes first: the mark stays.
         let phone = render(&mut h.app, 45, 30);
         let top = phone
@@ -2789,12 +2784,11 @@ mod tests {
         ];
         let mut out = Vec::new();
         for (name, width, height, key, feed, list_hidden) in cases {
-            let mut h = if feed {
-                feed_harness(crate::app::testing::FakeAccount::with_feed(), None)
-            } else {
-                harness(vec![view("A", "api", 20), view("B", "docs", 10)])
-            };
+            let mut h = harness(vec![view("A", "api", 20), view("B", "docs", 10)]);
             h.app.resize(width, height);
+            if feed {
+                h.app.open_rtop();
+            }
             render(&mut h.app, width, height);
             if list_hidden {
                 h.press(KeyCode::Char('b')).await;
@@ -2840,35 +2834,23 @@ mod tests {
             }
             assert!(screen.contains("Cargo.toml"), "{name}\n{screen}");
             if name.contains("feed") {
-                assert!(screen.contains("≡ Inbox"), "{name}\n{screen}");
+                assert!(screen.contains("▥ rtop"), "{name}\n{screen}");
             }
         }
     }
 
     #[tokio::test]
-    async fn f_shows_and_hides_the_feed_beside_the_sessions() {
+    async fn f_shows_the_inbox_in_the_sessions_place_and_again_brings_them_back() {
         let mut h = feed_harness(crate::app::testing::FakeAccount::with_feed(), None);
-        let first = |h: &mut Harness| {
-            render(&mut h.app, 160, 48)
-                .lines()
-                .nth(1)
-                .unwrap()
-                .to_string()
-        };
-        let row = first(&mut h);
-        assert!(
-            row.contains("◔ Status ▾") && row.contains("≡ Inbox"),
-            "{row}"
-        );
-        assert!(render(&mut h.app, 160, 48).contains("+ New session"));
-        h.press(KeyCode::Char('f')).await;
-        let row = first(&mut h);
-        assert!(row.contains("◔ Status ▾"), "{row}");
-        assert!(!row.contains("≡"), "{row}");
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("No replies yet"), "{screen}");
+        assert!(!screen.contains("◔ Status"), "{screen}");
+        assert!(!screen.contains("+ New session"), "{screen}");
         h.press(KeyCode::Char('f')).await;
         let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("◔ Status ▾"), "{screen}");
         assert!(screen.contains("+ New session"), "{screen}");
-        assert!(screen.contains("No replies yet"), "{screen}");
+        assert!(!screen.contains("No replies yet"), "{screen}");
     }
 
     #[tokio::test]
@@ -2881,6 +2863,8 @@ mod tests {
         let mut options = options(&fake, scope(), &dir);
         options.account = account.clone();
         let mut h = start(options, fake, dir);
+        // The column hidden: the footer has the button.
+        h.press(KeyCode::Char('b')).await;
         // Two replies finish while it's hidden; and one from before this
         // window started, which isn't new.
         let new = |id: &str| {
@@ -2903,35 +2887,33 @@ mod tests {
         };
         let shown = footer(&mut h);
         assert!(shown.contains(" f ≡ Inbox ●2   ? Help "), "{shown:?}");
-        // A tap: the feed, with the keys; nothing is new any more.
+        // A tap: the column, on the Inbox, with the keys; nothing is new any
+        // more, and its tab takes the button's place.
         tap(&mut h, Hit::FooterKey(FooterKey::Feed));
         assert!(h.app.feed_shown());
         assert!(h.app.feed_has_keys());
         let shown = footer(&mut h);
         assert!(shown.contains(" RAKUMUX MODE "), "{shown:?}");
-        assert!(shown.contains(" f ≡ Inbox   ? Help "), "{shown:?}");
-        // The label does what Esc does: the list gets the keys back, the
-        // feed stays.
+        assert!(!shown.contains("≡ Inbox"), "{shown:?}");
+        // The label does what Esc does: back to the sessions.
         tap(&mut h, Hit::ModeBadge);
-        assert!(!h.app.feed_has_keys());
-        assert!(h.app.feed_shown());
+        assert!(!h.app.feed_has_keys() && !h.app.feed_shown());
         assert_eq!(h.app.focus, Focus::List);
-        // The button: the keys again, then it hides.
-        render(&mut h.app, 160, 48);
-        tap(&mut h, Hit::FooterKey(FooterKey::Feed));
-        assert!(h.app.feed_has_keys());
-        render(&mut h.app, 160, 48);
-        tap(&mut h, Hit::FooterKey(FooterKey::Feed));
-        assert!(!h.app.drawer_open());
-        // On a phone it fits beside the label and Help.
-        h.app.resize(40, 20);
-        h.press(KeyCode::Char('f')).await;
-        let phone = render(&mut h.app, 40, 20);
-        let shown = phone.lines().last().unwrap();
+        // What comes while the sessions show is counted on its tab.
+        account.queue_feed(rakumux_sensagent::feed::FeedPage {
+            revision: 2,
+            ..feed_page(FeedStatus::Ready, vec![new("R3")])
+        });
+        h.app
+            .on_tick(std::time::Instant::now() + std::time::Duration::from_secs(30));
+        h.app.process_pending();
+        let screen = render(&mut h.app, 160, 48);
         assert!(
-            shown.ends_with(" RAKUMUX MODE   f ≡ Inbox   ? Help  "),
-            "{shown:?}"
+            screen.contains("❯ Sessions   ≡ Inbox ●1   ♥ Beats"),
+            "{screen}"
         );
+        let phone = render(&mut h.app, 40, 20);
+        assert!(phone.contains("≡ Inbox ●1"), "{phone}");
     }
 
     #[tokio::test]
@@ -2952,8 +2934,8 @@ mod tests {
         h.app.resize(45, 40);
         let phone = render(&mut h.app, 45, 40);
         assert_eq!(
-            phone.lines().nth(1).unwrap().trim_end(),
-            "   ≡ Inbox   ♥ Beats   ▥ rtop",
+            phone.lines().nth(37).unwrap().trim_end(),
+            "   ❯ Sessions   ≡ Inbox   ♥ Beats",
             "{phone}"
         );
         assert!(phone.contains("nightly-build"), "{phone}");
@@ -2961,8 +2943,8 @@ mod tests {
         h.press(KeyCode::Enter).await;
         let reading = render(&mut h.app, 45, 40);
         assert_eq!(
-            reading.lines().nth(1).unwrap().trim_end(),
-            "   ‹ ≡ Inbox   ♥ Beats   ▥ rtop",
+            reading.lines().next().unwrap().trim_end(),
+            "   ‹ Inbox",
             "{reading}"
         );
         assert!(reading.contains("finished 5m ago"), "{reading}");
@@ -2999,11 +2981,12 @@ mod tests {
             "{:?}",
             rows[0]
         );
-        // Selected: the cards on the left, the selected reply beside them.
+        // Selected: the cards on the left, the selected reply beside them,
+        // over the left column's tabs.
         let width = usize::from(crate::layout::sidebar_width(160));
         let cards = list_column(&screen, width);
-        assert_eq!(cards[2], "   ≡ Inbox   ♥ Beats   ▥ rtop", "{screen}");
-        assert!(cards[5].starts_with(" ╭ api  claude · repo ─"), "{screen}");
+        assert_eq!(cards[45], "   ❯ Sessions   ≡ Inbox   ♥ Beats", "{screen}");
+        assert!(cards[2].starts_with(" ╭ api  claude · repo ─"), "{screen}");
         assert!(rows[2].chars().nth(width) == Some('│'), "{screen}");
         assert!(screen.contains("finished 2m ago"), "{screen}");
         assert!(!screen.contains("hello from the fake"), "{screen}");
@@ -3014,11 +2997,11 @@ mod tests {
         let buffer = terminal.backend().buffer();
         assert_eq!(buffer.get(15, 0).bg, p.surface);
         assert_ne!(buffer.get(26, 0).bg, p.surface);
-        // Esc: the session's tab, the Feed tab still there.
+        // Esc: the session's tab, the Inbox's gone.
         h.press(KeyCode::Esc).await;
         let screen = render(&mut h.app, 160, 48);
         assert!(
-            screen.lines().next().unwrap().contains("≡ Inbox"),
+            !screen.lines().next().unwrap().contains("≡ Inbox"),
             "{screen}"
         );
         assert!(screen.contains("hello from the fake"), "{screen}");
@@ -3123,7 +3106,6 @@ mod tests {
         assert_eq!((drawer.x, drawer.right()), (116, 160));
         let pane = drawer_text(&screen, usize::from(drawer.x));
         for text in [
-            "Inbox   ",
             "rtop",
             "this window",
             "rakumux-ptyd",
@@ -3167,7 +3149,7 @@ mod tests {
         h.press(KeyCode::Enter).await;
         assert_eq!(h.selected().as_deref(), Some("A"));
         assert_eq!(h.app.focus, Focus::Session);
-        assert!(!h.app.drawer_has_keys());
+        assert!(!h.app.panel_has_keys());
         render(&mut h.app, 160, 48);
         assert!(h.app.rtop_shown(), "it stays beside the session");
 
@@ -3190,7 +3172,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_drawer_switches_between_the_feed_and_rtop() {
+    async fn rtop_is_beside_the_session_whatever_the_left_column_shows() {
         let mut h = harness(vec![view("A", "fix-login", 20)]);
         h.fake.state.lock().unwrap().resources = vec![resource_sample(1_000, 1)];
         h.press(KeyCode::Char('f')).await;
@@ -3198,49 +3180,89 @@ mod tests {
         render(&mut h.app, 160, 48);
         h.app.process_pending();
         let calls = |h: &Harness| h.fake.calls().iter().filter(|c| *c == "resources").count();
-        assert_eq!(calls(&h), 0, "the Inbox's tab doesn't sample");
+        assert_eq!(calls(&h), 0, "the Inbox doesn't sample");
 
-        // `t` switches the drawer to rtop with the keys, in the same place.
-        let feed_area = h.app.screen().feed;
+        // `t` gives it the keys; the Inbox stays in the left column.
         h.press(KeyCode::Char('t')).await;
         assert!(h.app.rtop_has_keys());
-        assert!(!h.app.feed_shown());
-        render(&mut h.app, 160, 48);
-        assert_eq!(h.app.screen().feed, feed_area);
+        assert!(h.app.feed_shown());
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("▥ rtop"), "{screen}");
         h.app.process_pending();
         assert!(calls(&h) >= 1);
 
-        // A click on the band's Feed switches back; rtop forgets its sample.
-        let feed_tab = h
-            .app
-            .hits
-            .iter()
-            .find(|(_, hit)| *hit == Hit::DrawerTab(crate::app::drawer::DrawerTab::Feed))
-            .map(|(area, _)| *area)
-            .unwrap();
-        h.app.handle_mouse(MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: feed_tab.x + 1,
-            row: feed_tab.y,
-            modifiers: KeyModifiers::NONE,
-        });
-        h.app.process_pending();
-        assert!(h.app.feed_has_keys());
-        render(&mut h.app, 160, 48);
-        h.app.on_tick(std::time::Instant::now());
-        assert!(!h.app.rtop.loaded());
-
-        // Esc gives the list the keys back; the drawer stays beside the
-        // session on whichever tab it was.
-        h.press(KeyCode::Char('t')).await;
+        // Esc gives the Inbox the keys back; rtop stays beside the session.
         h.press(KeyCode::Esc).await;
-        assert!(!h.app.drawer_has_keys());
-        assert!(h.app.drawer_open());
-        assert_eq!(h.app.drawer_tab(), crate::app::drawer::DrawerTab::Rtop);
+        assert!(h.app.feed_has_keys());
+        assert!(h.app.rtop_shown());
+        // f, from there, goes back to the sessions; from rtop, to the Inbox.
+        h.press(KeyCode::Char('f')).await;
+        assert!(!h.app.panel_has_keys() && h.app.rtop_shown());
+        h.press(KeyCode::Char('t')).await;
+        h.press(KeyCode::Char('f')).await;
+        assert!(h.app.feed_has_keys());
+    }
+
+    #[test]
+    fn the_left_columns_tabs_stay_at_its_bottom_at_every_size() {
+        use crate::app::left::LeftTab;
+        for (width, height) in [(160, 48), (100, 30), (90, 40), (45, 40), (40, 20)] {
+            let mut h = harness(vec![view("A", "fix-login", 20)]);
+            for tab in LeftTab::ALL {
+                h.app.resize(width, height);
+                h.app.show_left_tab(tab);
+                let screen = render(&mut h.app, width, height);
+                let pane = h.app.left_pane().unwrap();
+                let (body, tabs) = crate::layout::left_split(pane);
+                assert_eq!(tabs.bottom(), pane.bottom());
+                let row = list_column(&screen, pane.width.into())
+                    [usize::from(tabs.y + tabs.height / 2)]
+                .clone();
+                for label in ["Sessions", "Inbox", "Beats"] {
+                    assert!(row.contains(label), "{width}x{height}: {row:?}");
+                }
+                // Only the sessions have their own tabs over them.
+                assert_eq!(
+                    screen.contains("◔ Status"),
+                    tab == LeftTab::Sessions,
+                    "{width}x{height} {tab:?}: {screen}"
+                );
+                // Whole on the row, each its own target.
+                let targets: Vec<Rect> = h
+                    .app
+                    .hits
+                    .iter()
+                    .filter(|(_, hit)| matches!(hit, Hit::LeftTab(_)))
+                    .map(|(area, _)| *area)
+                    .collect();
+                assert_eq!(targets.len(), 3);
+                for (i, area) in targets.iter().enumerate() {
+                    assert!(area.right() <= pane.right() && area.y >= body.bottom());
+                    for other in &targets[i + 1..] {
+                        assert!(area.intersection(*other).is_empty());
+                    }
+                }
+            }
+        }
+        // The active one's line and name are the accent's while it has the
+        // keys, quiet in session mode.
+        let mut h = harness(vec![view("A", "fix-login", 20)]);
+        let mark = |h: &mut Harness| {
+            let mut terminal = Terminal::new(TestBackend::new(160, 48)).unwrap();
+            terminal.draw(|f| draw(f, &mut h.app)).unwrap();
+            let cell = terminal.backend().buffer().get(3, 44).clone();
+            (cell.symbol().to_string(), cell.fg)
+        };
+        let p = crate::theme::palette();
+        assert_eq!(mark(&mut h), ("▔".to_string(), p.accent_primary));
+        h.app.activate_selected();
+        h.app.process_pending();
+        assert_eq!(h.app.focus, Focus::Session);
+        assert_eq!(mark(&mut h), ("▔".to_string(), p.neutral_gray));
     }
 
     #[tokio::test]
-    async fn the_tabs_layout_names_the_drawer_by_its_tab_and_a_phone_gives_it_the_screen() {
+    async fn the_tabs_layout_gives_rtop_a_tab_and_a_phone_the_screen() {
         let mut h = harness(vec![view("A", "fix-login", 20)]);
         h.fake.state.lock().unwrap().resources = vec![resource_sample(1_000, 1)];
         h.app.set_layout(SessionLayout::Tabs);
@@ -3258,7 +3280,7 @@ mod tests {
             .next()
             .unwrap()
             .to_string();
-        assert!(bar.contains("Inbox") && !bar.contains("rtop"), "{bar}");
+        assert!(bar.contains(" ≡ Inbox   ▥ rtop  │ "), "{bar}");
 
         // A phone: the drawer fills the screen while it has the keys; Esc
         // hides it.
@@ -3497,7 +3519,7 @@ mod tests {
         assert!(enables(&h).is_empty());
         let screen = render(&mut h.app, 160, 48);
         assert!(screen.contains("Then push to main."), "{screen}");
-        // In full, wrapped in the drawer.
+        // In full, wrapped in the column.
         assert!(
             screen.contains("--dangerously-skip-permissions"),
             "{screen}"
@@ -3510,7 +3532,7 @@ mod tests {
             .status()
             .is_some_and(|m| m.contains("Approved nightly")));
 
-        // r runs it now; its run is listed with ♥ and among its runs.
+        // r runs it now; its run is among its runs, and listed with ♥.
         h.press(KeyCode::Char('r')).await;
         let run = h
             .fake
@@ -3528,8 +3550,10 @@ mod tests {
                 session: run.clone(),
             },
         );
+        h.press(KeyCode::Char('B')).await;
         let screen = render(&mut h.app, 160, 48);
         assert!(screen.contains("♥ nightly #1"), "{screen}");
+        h.press(KeyCode::Char('B')).await;
         assert_eq!(
             h.app
                 .heartbeat_runs(&run.heartbeat.as_ref().unwrap().heartbeat)

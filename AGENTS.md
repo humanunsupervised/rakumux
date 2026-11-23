@@ -818,7 +818,8 @@ tui/
                              # terminal shows it: control characters as `?`; every TUI frame
                              # (`ui::draw`) and each value the CLI prints as text (not `--json`)
     updater.rs, version.rs, theme.rs, icons.rs (plain / emoji / Nerd Font marks)
-  tests/heartbeat_tui.rs     # Beats in the real TUI, in a session of another daemon
+  tests/heartbeat_tui.rs     # the left column, Beats and Help's search in the real TUI, in a
+                             # session of another daemon
   tests/mid_turn_replies.rs  # replies typed into Claude Code at work, end to end: real daemon and
                              # account service, a local rakumux.com (mid_turn/fake_cloud.rs, HTTPS
                              # through RAKUMUX_CLOUD_CA), a stand-in Claude Code (mid_turn/claude.sh);
@@ -1383,8 +1384,7 @@ accidents; they don't stop a hostile process running as the same user.
 - **Config** (`tui/src/app/config.rs`): `Config {anthropic_api_key, openai_api_key,
   ai_primary_provider, openai_model}` plus `sessions {rakumux_key ("ctrl+\\"; an older
   `prefix_key` other than "ctrl+b" still counts), cycle_keys (["alt+up", "alt+down"]),
-  cycle_keys_in_session (false), tips (true: a tip in the footer; saved only when false), inbox_at_start (true: every start
-  opens the Inbox where it docks; saved only when false),
+  cycle_keys_in_session (false), tips (true: a tip in the footer; saved only when false),
   icons ("plain" | "emoji" | "nerd":
   the folder and branch marks), welcome_seen (false: the welcome tour shows on startup until
   its "Don't show this on startup" box is ticked), phone_offer_seen (false: "Use Rakumux from your
@@ -1392,7 +1392,7 @@ accidents; they don't stop a hostile process running as the same user.
   auto_update (true: new releases install by themselves and the UI reloads, the server and
   its services restarting in place with it, once idle, see
   "Updates"; Settings → Update automatically; only false is written), sidebar_width (dragged divider),
-  feed_width (the docked feed pane's width, set by dragging the line left of it; left out until
+  feed_width (the docked drawer's width, set by dragging the line left of it; left out until
   dragged), sprite_folders (folders whose new sessions run on your Sprite), sprite_env_copy
   ({folder path: bool}: whether its `.env` files are copied to your Sprite; asked once),
   stacked_list_percent (the list's share of the height on narrow screens, set by dragging the
@@ -1637,12 +1637,15 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 - **Section bar**: a section's header in the list (a status's, a repository's, an agent's): a
   bar on a background of its own; a click or tap on it, or Space on it, collapses its sessions
   under it and opens them again.
-- **Drawer** (`app/drawer.rs`): what shows beside the sessions, with three tabs, the
-  **Inbox**, **Beats** (heartbeats) and **rtop**: a pane on the right in Master detail, a tab in Tabs, the screen on a phone.
-  It takes Rakumux mode's keys from the list while focused. Every start opens it on the Inbox
-  where it docks, without the keys (`sessions.inbox_at_start`).
+- **Left column** (`app/left.rs`, `LeftTab`): Master detail's column, with three tabs fixed at its
+  bottom, a level above the list tabs: **Sessions** (the list with its own tabs), **Inbox** and
+  **Beats**. What its tab shows has Rakumux mode's keys. Every start shows Sessions.
+- **Drawer** (`app/drawer.rs`): rtop, beside the sessions: a pane on the right in Master detail, a
+  tab in Tabs, the screen on a phone. It takes Rakumux mode's keys from the left column while
+  focused. Hidden at every start; never opens by itself.
 - **Inbox** (`app/feed`, `f`; the feed in code, contracts and on the wire): what agents said,
-  across sessions and machines: the drawer's Inbox tab.
+  across sessions and machines: the left column's Inbox tab.
+- **Beats** (`app/heartbeats.rs`, `B`): the heartbeats: the left column's Beats tab.
 - **Pin**: a user mark that lists a session in the list's Pinned tab (and shows `★` before its
   name in the list).
 - **Workspace**: a named group of this machine's sessions (`workspace_*`); the list shows every
@@ -1708,11 +1711,11 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 - **Layout**: Master detail (`sidebar`, default: list left, detail right; on narrow windows the
   list stacked above the detail in Rakumux mode) or Tabs (`tabs`, tab bar on top). Not saved:
   every start opens Master detail. On phones Master detail is the list, then a session under
-  tabs, and Tabs the tab bar over the session. The drawer (the Inbox and rtop) docks on the right
+  tabs, and Tabs the tab bar over the session. The drawer (rtop) docks on the right
   in Master detail and is a tab in Tabs.
 - **rtop** (`t`): what the machine, Rakumux's own processes and every running session's
-  processes use (CPU, memory, network), from `resource_usage`, as graphs over time in the drawer
-  beside the Inbox; kept in this window's memory for about five minutes. On rakumux.com the same tab shows every machine of the
+  processes use (CPU, memory, network), from `resource_usage`, as graphs over time in the drawer;
+  kept in this window's memory for about five minutes. On rakumux.com the same tab shows every machine of the
   account, from the account service's uploads (component 10).
 - **Contracts**: the crate types and traits that define the architecture.
 
@@ -1749,8 +1752,8 @@ on). Rakumux mode (also where the TUI starts): `↑/↓`, `j/k`, `Option`/`Alt`+
 session preview fades by 30% in Rakumux mode and 45% under a dialog or for saved output,
 while the list never fades; the tabs, a header and + New session keep the last session in view,
 one the filters show), `←`/`→` switch between the tabs, Pinned, Status, Repos and Agent,
-wherever the selection is (`h`/`l` on the tabs row), `*` the Pinned tab, `f` the feed, `B` the heartbeats and `t` rtop, the drawer's tabs (shows the drawer on that tab with the keys,
-switches to it, gives it the keys, hides it; below),
+wherever the selection is (`h`/`l` on the tabs row), `*` the Pinned tab, `f` the Inbox and `B` Beats, the left column's tabs (again: back to the sessions), and `t` rtop, the
+drawer (shows it with the keys, gives it the keys, hides it; below),
 `gg`/`G`, `Ctrl-d`/`Ctrl-u`, `{`/`}` (previous/next folder, app or status) (a Ctrl or Alt
 that no shortcut uses is ignored, so Ctrl-↑ from a phone's key bar moves and Alt-q quits), `Enter`/`i`/`l` go in (revive/restart; on a
 folder header, a new session there), `Esc` (after cancelling a pending key or the filter) or
@@ -1786,18 +1789,31 @@ session works or is read; stepping
 Tabs that don't fit scroll to keep the selected one in view, holding still while it moves among
 those shown (`layout::render_tabs_from`, `App::tab_first`), and the ends say how many are hidden
 (`‹3`, `5›`; a click goes to the nearest one).
-**The drawer** (`app/drawer.rs`, `components/drawer.rs`) holds three tabs, the feed (`f`, the
-footer's Inbox button, or Settings; `app/feed/pane.rs`), Beats (`B`, or Settings; below) and rtop
-(`t`, or Settings; below), named on its band (`≡ Inbox   ♥ Beats   ▥ rtop`, as tall as the list's tabs: the active one bold and underlined,
-in the accent while the drawer has the keys; a click on a name shows that tab with the keys). Every
-start opens it on the Inbox, without the keys, where Master detail docks it
-(`sessions.inbox_at_start`, Settings → Inbox open at start; `App::drawer_at_start`,
-`FeedShown::Docked`): until it's used it takes no other pane's place, so a narrow window, a phone
-and Tabs show it only once asked, and a window left unused 5 minutes reads it as `background`.
-Nothing else opens it by itself; the shown/hidden state and its tab are this
-window's, never saved. Only the tab on screen works: the feed and the heartbeats are read every
-2 s and rtop samples only while their tab shows. Master
-detail docks it on the right (`layout::split_with`, `Screen::feed`): list | session | a
+**The left column** (`app/left.rs`, `components/left.rs`) has three tabs fixed at its bottom, a level
+above the list tabs (`layout::left_split`: a band of `left_tabs_rows`, 3 rows or 1 on short
+columns): `❯ Sessions   ≡ Inbox ●N   ♥ Beats` (the active one bold with a line over it, in the accent
+while the column has the keys; short rows narrow the gaps, then drop the marks, then the count),
+each a click target (`Hit::LeftTab`; on the active one, what's read whole goes back to its list)
+and, beside the session, `«` at their right, which hides the column. Sessions is the list with its
+own tabs over it; the Inbox (`f`, or Settings; `app/feed/pane.rs`) and Beats (`B`, or Settings;
+below) show in its place, with nothing over them but a `‹` row while one thing is read whole
+(`Hit::FeedBack`, `Hit::BeatBack`). What the tab shows has Rakumux mode's keys
+(`App::keys_panel`, `drawer::Panel`; `App::panel_key`) unless the drawer has them; `f` (`B`) again,
+or `Esc` (after a pending key and from a reply or heartbeat read whole), goes back to the sessions
+(`App::show_sessions_tab`, as picking a grouping, a folder or a workspace does). Session mode leaves
+the tab as it is: going into a session from the Inbox, the Inbox is there when Rakumux mode comes
+back. With the column hidden `f` and `B` show it, and the keys move the sessions otherwise. The tab
+is this window's, never saved: every start shows Sessions. Only what's on screen works: the feed
+and the heartbeats are read every 2 s while theirs shows. On a phone each fills the screen over the
+tabs, and on a stacked window the Inbox and Beats do (`PaneSizes::left_panel`). Tabs has no column:
+the Inbox or Beats takes the session's place under the tab bar in Rakumux mode (`Screen::panel`),
+over the same three tabs, with a tab of its own in the bar (` ≡ Inbox ●N `, `Hit::PanelTab`); the
+Inbox has the selected reply beside its cards there from 100 columns (`layout::feed_tab_columns`).
+**The drawer** (`app/drawer.rs`, `components/drawer.rs`) is rtop (`t`, or Settings; below), under a
+band naming it (`▥ rtop`, in the accent while it has the keys). It is hidden at every start and
+never opens by itself; the shown/hidden state is this window's, never saved, and rtop samples only
+while it's on screen. Master
+detail docks it on the right (`layout::split_with`, `Screen::feed`): left column | session | a
 one-column line (`Screen::feed_divider`, dragged to resize, saved as
 `sessions.feed_width`) | the drawer, `layout::default_feed_width` (44 columns, a quarter of wide
 screens, at most 60) and at least `FEED_MIN_COLS` (30). The session narrows and takes the new
@@ -1805,19 +1821,16 @@ size at once, as a dragged divider gives it (`sync_terminal_size`); it docks onl
 keeps `FEED_SESSION_MIN_COLS` (60) beside it (and Master detail its list or rail: hiding the list
 makes room). Narrower windows from 80 columns show the drawer in the session's place in Rakumux
 mode only (beside or under the list) and session
-mode keeps the session's full width. Tabs gives it a tab of its own, first in the tab bar before a
-`│`, unnumbered, never moved, named by its active tab (` ≡ Inbox ●N `, with the count, or
-` ▥ rtop `); selected, the body under the bar shows the drawer, on the Inbox its cards and, from
-100 columns, the selected reply beside them (`layout::feed_tab_columns`). On a phone it fills the
-screen while it has the keys. It has Rakumux mode's keys of its own (`App::drawer_has_keys`; its
-active tab handles them, `App::drawer_key`): `f` (`t`) shows it on the Inbox (rtop) with them,
-switches to that tab, gives them to it while the list has them, and hides it while that tab has
-them; a click gives them to the side it lands on; `Esc` (after a pending key; the feed first goes
-back from a reply read whole) gives them back to the list, hiding it where it would leave the
-screen (a phone); session mode gives them back too. The footer names the selected
-card's session (rtop's selected row's) while it has the keys. On the Inbox, the selected card's
+mode keeps the session's full width. Tabs gives it a tab of its own in the tab bar (` ▥ rtop `,
+after the Inbox's or Beats', before a `│`, unnumbered, never moved); selected, it fills the body
+under the bar. On a phone it fills the
+screen while it has the keys (`App::rtop_has_keys`): `t` shows it with them, gives them to it while
+the left column has them, and hides it while it has them; a click gives them to the side it lands
+on; `Esc` gives them back, hiding it where it would leave the screen (a phone); session mode gives
+them back too. The footer names the selected
+card's session (rtop's selected row's) while a panel has the keys. On the Inbox, the selected card's
 border is in the accent while it has the keys. With them `↑`/`↓`/`j`/`k` go through the cards, `Enter` (or a second click,
-a tap on a phone) reads the selected reply whole in the cards' place (a `‹` on the band, or `Esc`,
+a tap on a phone) reads the selected reply whole in the cards' place (the `‹` over it, or `Esc`,
 goes back; `↑`/`↓` scroll it; `Ctrl-d`/`Ctrl-u`, PgUp/PgDn page it), and `Enter` there (or beside
 the cards) goes into its session when it runs here; `Space` (or a click on a card's `▾ more`)
 shows the selected card whole in the list (`▴ less`, or `Space` again, back; `FeedStore::expanded`,
@@ -1847,10 +1860,11 @@ panel), since the detail has no title row: the session's terminal fills it from 
 then messages and the daemon connection while it isn't up (`⠋ connecting`, `✕ daemon
 unavailable`). In the centre the mode label (`RAKUMUX MODE`, or a quiet `SESSION MODE`/`TERMINAL
 MODE`), centred while it clears both sides, else between them. On the right buttons
-(a darker shade of the orange bar; dark chips on the blue one): in Rakumux mode `f ≡ Inbox`
-(with `●N`, `●99+` beyond 99, for the feed entries that finished during this run and arrived
-since the feed was last on screen: memory only, `FeedStore::unseen`, counted while the account's
-feed is on; it does what `f` does), `? Help` and `, Settings`, then the
+(a darker shade of the orange bar; dark chips on the blue one): in Rakumux mode, while the left
+column isn't on screen (hidden, or the Tabs layout), `f ≡ Inbox` (it does what `f` does; with
+`●N`, as the column's Inbox tab: `●99+` beyond 99, the feed entries that finished during this run and
+arrived since the feed was last on screen: memory only, `FeedStore::unseen`, counted while the
+account's feed is on), `? Help` and `, Settings`, then the
 Rakumux account: `a Sign in` while signed out (a tap asks for a sign-in code
 at once), `a ✓ Signed in` while signed in (a tap opens the account dialog); `Ctrl-\` alone in
 session mode (the label names the mode); and last, quieter, this Rakumux's version (`v0.1.37`, a
@@ -1870,16 +1884,16 @@ button (and the tip moves none): each shows only while it fits whole, a column o
 it. When the row is
 short the tip goes first (it shows only while the version does), then the version, then the session gives way (to its name alone, then nothing), then the message is cut, then
 buttons go from the right (the account, Settings, Help, then the Inbox's, which carries the
-count: a 40-column phone keeps it and Help, Settings from 49); the label never goes, its short
+count); the label never goes, its short
 word (`RAKUMUX`) under 14 columns.
 Help and Settings list every key; Settings runs them. A welcome tour
 (`components/welcome.rs`, `AppMode::Welcome`) opens on startup until its "Don't show this on
 startup" box (on every card, Space) is ticked; `t` in Help replays it. Drag the divider to resize the
-list, and the line left of the feed to resize it.
-Beside the session (Master detail, 100 columns or more) the list's last row is `« Hide list`
-(`Hit::HideList`): it, `b` or Settings hides the list (`App::toggle_list`, `PaneSizes::list_hidden`)
+list, and the line left of the drawer to resize it.
+Beside the session (Master detail, 100 columns or more) the left column's tabs end with `«`
+(`Hit::HideList`): it, `b` or Settings hides the column (`App::toggle_list`, `PaneSizes::list_hidden`)
 and the session takes its columns, leaving a `layout::RAIL_COLS` (2) wide rail at the left edge, a
-sliver of the list pane with `»` at its bottom and the divider's line (`Hit::ShowList`: a click
+sliver of the column with `»` at its bottom and the divider's line (`Hit::ShowList`: a click
 shows the list again, as `b` does). Keys still move through the sessions while it's hidden. The session on screen takes the new pane size at once (`sync_terminal_size`, as a dragged
 divider does). Stacked and phone screens and Tabs show no button and ignore it (`b` says so);
 the state is this window's, never saved, and comes back when the window widens again.
@@ -1910,8 +1924,8 @@ Below `STACK_MIN_ROWS` (15 rows above the footer, a 16-row screen) Rakumux mode 
 alone. Session mode fills everything above the footer. Taps arrive as clicks, so the footer is a
 tap target too (`Hit::ModeBadge`, `Hit::FooterKey`, recorded by `components/footer.rs`): the
 SESSION MODE label and the `Ctrl-\` button switch to Rakumux mode like `Ctrl-\`, the RAKUMUX
-MODE label does what `Esc` does (back to the session you came from; while the feed has the keys, its
-`Esc`), `f ≡ Inbox` does what `f` does, and `? Help` and
+MODE label does what `Esc` does (back to the session you came from; while a panel has the keys, its
+`Esc`), and `? Help` and
 `, Settings` open them. Dialogs are at least
 min(screen width − 2, 48) columns (`components/utils.rs::popup_width`), wrap their key lines and
 grow to fit their text; the welcome tour tightens its spacing when it doesn't fit, and Settings
@@ -2079,8 +2093,8 @@ hides (the feed, a restore) shows All. A daemon without `workspaces` gets "resta
 its footer still names the session.
 
 **rtop.** `t` in Rakumux mode or Settings → rtop (`app/rtop.rs`, `components/rtop.rs`) shows, in
-the drawer's rtop tab (above), what this machine and Rakumux use over time, drawn as btop does,
-read with `SessionApi::resources` off the UI thread about every second while that tab is on
+the drawer (above), what this machine and Rakumux use over time, drawn as btop does,
+read with `SessionApi::resources` off the UI thread about every second while it's on
 screen (the first two samples half a second apart). Each sample's use is kept in this window's
 memory only (`app/rtop/history.rs`): a point a sample, the last 300 (about five minutes), for the
 machine, Rakumux's total and each row (at most 512 rows' series, processes last), a row's dropped
@@ -2109,7 +2123,7 @@ highlighted, and a click selects one: again, or a tap on a phone, goes in; the w
 list the keys; `t` hides the drawer. A daemon without `resources` gets "restart it (S)".
 
 **Beats** (heartbeats). `B` in Rakumux mode or Settings → Heartbeats (`app/heartbeats.rs`,
-`components/heartbeats.rs`) shows the drawer's Beats tab: the heartbeats of every folder, read
+`components/heartbeats.rs`) shows the left column's Beats tab: the heartbeats of every folder, read
 with `SessionApi::heartbeats` off the UI thread every 2 s while the tab is on screen (the daemon
 sends no heartbeat events), two lines each: a mark (`?` waiting for approval, orange; `●` on;
 `○` paused or empty), the name and when it runs next (`in 25m`, `approve?`, `paused`, `empty`),
@@ -2117,7 +2131,7 @@ then its schedule, folder and last run; those waiting for approval first, then b
 name. Under the selected one its buttons (`BeatAction`: `r run`, `p pause` or `e enable`/`approve`,
 `c rename`, `d delete`; short of room rename and delete stay), each a click target, and under
 them all `+ New heartbeat`, a row to select like them (`BeatsView::on_new`; the only one when
-there are none). With the drawer's keys: `↑`/`↓` (`j`/`k`) select; `Enter` shows one whole (its
+there are none). `↑`/`↓` (`j`/`k`) select; `Enter` shows one whole (its
 buttons, how it runs, its command and prompt in full, then its runs, newest first: `↑`/`↓` pick
 one, `Enter` goes into it); `e` from the list shows it whole first, and there approves or enables
 it, so nothing an agent wrote runs unread (one waiting for approval has no `r run` button); `p`
@@ -2137,7 +2151,7 @@ a task was written, and a session in its folder running its command (the agent's
 kept) whose first input, typed once the agent's prompt shows and not
 sent, asks the agent to ask the user what to run and how often and save both with
 `"$RAKUMUX_BIN" heartbeat update hb_… --prompt … --every …` (or `update_heartbeat`), then goes
-into it (`heartbeats::setup_prompt`); `Esc` goes back, then gives the list the keys. A click
+into it (`heartbeats::setup_prompt`); `Esc` goes back, then shows the sessions. A click
 selects a row, a second (a tap on a phone) does what Enter does. A heartbeat's runs show `♥`
 before their name in the list and the tab bar (`Icons::beats`). A daemon without `heartbeats`
 gets "restart it (S)".
@@ -2194,7 +2208,7 @@ Settings is one scrolling page without tabs (`help::ModalTab::Settings`) under a
 typing narrows it to the settings and actions whose section or name has every word typed
 (`Backspace` deletes, `Esc` clears, then closes; `Space` changes the selected row while nothing
 is typed), and the dialog keeps its size meanwhile. The settings come first (Account, where you
-sign in and pair devices, then Appearance (Layout, Icons, Tips in the footer, Inbox open at start), Keyboard and App, whose Update
+sign in and pair devices, then Appearance (Layout, Icons, Tips in the footer), Keyboard and App, whose Update
 automatically turns automatic updates on and off and whose Session history opens the session
 history modal, greyed out with a note to restart the server (S) against a daemon without
 `session.history`), then under a `Keys`

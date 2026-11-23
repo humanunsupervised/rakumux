@@ -1,9 +1,9 @@
-//! The drawer's Beats tab: the user's heartbeats, tasks the daemon runs on a
+//! The left column's Beats tab: the user's heartbeats, tasks the daemon runs on a
 //! clock (each run a new session given the task). Read from the daemon
 //! (`heartbeat_list`, off the UI thread) every 2 s while the tab is on
 //! screen; the daemon sends no heartbeat events.
 //!
-//! With the drawer's keys: `↑`/`↓` (`j`/`k`) select, `Enter` reads the
+//! With Rakumux mode's keys: `↑`/`↓` (`j`/`k`) select, `Enter` reads the
 //! selected heartbeat whole (its prompt, command and runs; there `↑`/`↓` pick
 //! a run and `Enter` goes into it), `e` approves or enables (from the list it
 //! first shows the heartbeat whole, so its prompt and command are read before
@@ -21,7 +21,8 @@ use session_core::heartbeat::Heartbeat;
 use session_core::ids::{HeartbeatId, SessionId};
 use session_core::model::SessionView;
 
-use super::drawer::DrawerTab;
+use super::drawer::Panel;
+use super::left::LeftTab;
 use super::runtime::AppEvent;
 use super::types::{AppMode, RenameDialog, RenameTarget};
 use super::{App, TextInput};
@@ -184,18 +185,18 @@ pub fn setup_prompt(heartbeat: &Heartbeat) -> String {
 impl App {
     /// The Beats tab is on screen.
     pub fn beats_shown(&self) -> bool {
-        self.drawer_shown() && self.drawer_tab == DrawerTab::Beats
+        self.left_tab_shown(LeftTab::Beats)
     }
 
     /// The Beats tab has Rakumux mode's keys.
     pub fn beats_has_keys(&self) -> bool {
-        self.drawer_has_keys() && self.drawer_tab == DrawerTab::Beats
+        self.keys_panel() == Some(Panel::Beats)
     }
 
-    /// `B` or Settings: show the drawer on Beats with the keys, switch to
-    /// it, or hide the drawer while Beats has the keys.
+    /// `B` or Settings: the left column's Beats with the keys, or back to the
+    /// sessions while it has them.
     pub fn toggle_beats(&mut self) {
-        self.toggle_drawer(DrawerTab::Beats);
+        self.toggle_left_tab(LeftTab::Beats);
     }
 
     /// The tick's Beats work: coming on screen it reads at once, then every
@@ -389,15 +390,14 @@ impl App {
             self.set_status("No runs yet: r runs it now.");
             return;
         };
-        self.drawer_focused = false;
         self.go_into(run);
     }
 
     /// Esc: from a heartbeat read whole back to the list; from the list, the
-    /// keys go back to the sessions.
+    /// left column goes back to the sessions.
     pub fn beats_back(&mut self) {
         if self.beats.reading.take().is_none() {
-            self.unfocus_drawer();
+            self.show_sessions_tab();
         }
     }
 
@@ -474,7 +474,7 @@ impl App {
     /// A click on one of the selected (or read) heartbeat's buttons.
     pub fn click_beat_action(&mut self, action: BeatAction) {
         let deleting = self.beats.deleting.take();
-        self.show_drawer_tab(DrawerTab::Beats);
+        self.show_left_tab(LeftTab::Beats);
         match action {
             BeatAction::Run => self.beats_run(),
             BeatAction::Enable => self.beats_enable(),
@@ -529,7 +529,7 @@ impl App {
                 Some(_) => self.beats.run == index,
                 None => self.beats.selected_index() == index,
             };
-        self.show_drawer_tab(DrawerTab::Beats);
+        self.show_left_tab(LeftTab::Beats);
         self.beats.deleting = None;
         match self.beats.reading.clone() {
             Some(_) => self.beats.run = index,

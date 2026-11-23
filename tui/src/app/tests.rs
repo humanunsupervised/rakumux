@@ -741,8 +741,8 @@ async fn rakumux_mode_shows_the_mode_the_selected_session_help_and_settings_in_t
         .map(|x| buffer.get(x, 39).symbol().to_string())
         .collect();
     assert!(footer.starts_with(" session: ● a "), "A: {footer:?}");
-    // The mode (left of the middle, for the version), then the buttons.
-    assert!(footer.contains(" RAKUMUX MODE   f ≡ Inbox "), "{footer:?}");
+    // The mode, then the buttons.
+    assert!(footer.contains(" RAKUMUX MODE "), "{footer:?}");
     assert!(
         crate::components::footer::without_version(&footer)
             .ends_with(" ? Help   , Settings   a ✓ Signed in  "),
@@ -946,7 +946,7 @@ async fn b_hides_the_list_beside_the_session_which_takes_its_columns() {
         .unwrap();
     h.app.handle_mouse(mouse(
         MouseEventKind::Down(MouseButton::Left),
-        button.x + 4,
+        button.x + 1,
         button.y,
     ));
     assert!(h.app.list_hidden());

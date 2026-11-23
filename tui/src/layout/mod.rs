@@ -200,9 +200,6 @@ pub enum FeedShown {
     /// Not on screen anywhere.
     #[default]
     Hidden,
-    /// Shown where it docks, hidden where it would take another pane's
-    /// place; the list has the keys.
-    Docked,
     /// Shown; the list (or tab bar) has the keys.
     Shown,
     /// Shown with Rakumux mode's keys.
@@ -232,7 +229,10 @@ pub struct LayoutAreas {
     /// screen too short to stack, with the list focused); check
     /// `detail.is_empty()` before drawing or resizing a terminal to it.
     pub detail: Rect,
-    /// The agent feed: a docked pane on the right, or wherever it takes
+    /// The Tabs layout's Inbox or Beats ([`PaneSizes::left_panel`]), in the
+    /// session's place under the bar, in Rakumux mode.
+    pub panel: Option<Rect>,
+    /// The drawer (rtop): a docked pane on the right, or wherever it takes
     /// another pane's place (see [`PaneSizes::feed`]).
     pub feed: Option<Rect>,
     /// The draggable line left of a docked feed pane.
@@ -252,7 +252,11 @@ pub struct PaneSizes {
     /// rail [`RAIL_COLS`] wide is left of the detail. A stacked or phone
     /// screen shows the list as usual.
     pub list_hidden: bool,
-    /// The agent feed: hidden, shown, or shown with the keys.
+    /// The left column shows the Inbox or Beats instead of the sessions: a
+    /// stacked screen gives it everything in Rakumux mode, and the Tabs
+    /// layout, which has no column, the session's place.
+    pub left_panel: bool,
+    /// The drawer (rtop): hidden, shown, or shown with the keys.
     pub feed: FeedShown,
     /// Docked feed pane width (see [`docked_feed_width`]).
     pub feed_cols: Option<u16>,
@@ -433,10 +437,9 @@ pub fn split_with(
     }
     let mut areas = split_sessions(area, layout, focus, without);
     match layout {
-        _ if sizes.feed == FeedShown::Docked => {}
-        // The tab bar stays; the selected Feed tab fills the rest.
+        // The tab bar stays; the selected rtop tab fills the rest.
         SessionLayout::Tabs if focused => {
-            areas.feed = Some(areas.detail);
+            areas.feed = Some(areas.panel.take().unwrap_or(areas.detail));
             areas.detail = hidden(areas.detail);
         }
         // Too narrow to dock: in the session's place in Rakumux mode.
@@ -462,6 +465,7 @@ fn only(detail: Rect) -> LayoutAreas {
         rail: None,
         tabs: None,
         detail,
+        panel: None,
         feed: None,
         feed_divider: None,
     }
@@ -507,19 +511,23 @@ fn split_sessions(
     if focus == PaneFocus::Zoomed {
         return only(area);
     }
-    // A tab bar row, then the detail.
+    // A tab bar row, then the detail (the Inbox or Beats in its place in
+    // Rakumux mode).
     let tabs_over = |area: Rect| {
         let bar_height = area.height.min(1);
+        let below = Rect {
+            y: area.y + bar_height,
+            height: area.height - bar_height,
+            ..area
+        };
+        let panel = sizes.left_panel && focus == PaneFocus::List;
         LayoutAreas {
             tabs: Some(Rect {
                 height: bar_height,
                 ..area
             }),
-            ..only(Rect {
-                y: area.y + bar_height,
-                height: area.height - bar_height,
-                ..area
-            })
+            panel: panel.then_some(below),
+            ..only(if panel { hidden(below) } else { below })
         }
     };
     // A phone's Master detail is the list, then a session under tabs; its
@@ -535,7 +543,7 @@ fn split_sessions(
     }
     match layout {
         SessionLayout::Sidebar if is_single_pane(area.width, layout) => match focus {
-            PaneFocus::List if can_stack(area) => {
+            PaneFocus::List if can_stack(area) && !sizes.left_panel => {
                 let rows = list_rows(area.height, sizes.list_percent);
                 LayoutAreas {
                     list: Some(Rect {
@@ -566,7 +574,36 @@ fn split_sessions(
     }
 }
 
-/// The Tabs layout's selected Feed tab, when `area` is wide enough for both
+/// Rows of the tabs at the bottom of a left column `height` rows tall: their
+/// line, with a row above (the active one's mark) and below where there's
+/// room.
+pub const fn left_tabs_rows(height: u16) -> u16 {
+    if height >= 18 {
+        3
+    } else if height >= 4 {
+        1
+    } else {
+        0
+    }
+}
+
+/// The left column in `area`: what its tab shows, and its tabs at the
+/// bottom.
+pub fn left_split(area: Rect) -> (Rect, Rect) {
+    let rows = left_tabs_rows(area.height);
+    let body = Rect {
+        height: area.height - rows,
+        ..area
+    };
+    let tabs = Rect {
+        y: body.bottom(),
+        height: rows,
+        ..area
+    };
+    (body, tabs)
+}
+
+/// The Tabs layout's Inbox, when `area` is wide enough for both
 /// (from [`SINGLE_PANE_BELOW`] columns): the cards in a column as wide as
 /// Master detail's list, a one-column line, then the selected reply.
 pub fn feed_tab_columns(area: Rect) -> Option<(Rect, Rect, Rect)> {

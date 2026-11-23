@@ -2,11 +2,11 @@
 //! has the keys, and the session is previewed. Arrows and Vim keys both
 //! move (←/→ switch the list's tabs); Enter (or `i`) goes into a session;
 //! Esc cancels what's pending, then goes back to the session Rakumux mode
-//! was entered from. `f` shows the drawer on the Feed and gives it the
-//! keys, `t` on rtop: switches to that tab, gives it the keys while the list
-//! has them, and hides the drawer while that tab has them; with them, the
-//! moves go through the Feed's cards or rtop's rows, Enter reads a reply or
-//! goes into a row's session and Esc gives them back (`App::drawer_key`).
+//! was entered from. `f` shows the left column's Inbox with the keys and
+//! `B` its Beats (again: back to the sessions), `t` the drawer, rtop, with
+//! the keys (again: hides it); with them, the moves go through the Inbox's
+//! cards, the heartbeats or rtop's rows, Enter reads a reply or goes into a
+//! row's session and Esc gives them back (`App::panel_key`).
 //! `b` hides Master detail's list beside the session, and shows it again.
 //! `T` opens the terminal panel where it was last placed, `|` beside the
 //! session and `-` below it.
@@ -28,8 +28,8 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
     // The second key of `gg`; anything else drops the first.
     if let Some(first) = app.pending_key.take() {
         match (first, key.code) {
-            ('g', KeyCode::Char('g')) if !ctrl && !alt && app.drawer_has_keys() => {
-                app.drawer_to_top();
+            ('g', KeyCode::Char('g')) if !ctrl && !alt && app.panel_has_keys() => {
+                app.panel_to_top();
                 return AppResult::Continue;
             }
             ('g', KeyCode::Char('g')) if !ctrl && !alt => {
@@ -46,14 +46,14 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
         return AppResult::Continue;
     }
     if let Some(delta) = app.cycle_direction(&key) {
-        if app.drawer_has_keys() {
-            app.move_drawer_selection(delta as isize);
+        if app.panel_has_keys() {
+            app.move_panel_selection(delta as isize);
         } else {
             app.cycle_session(delta);
         }
         return AppResult::Continue;
     }
-    if app.drawer_has_keys() && app.drawer_key(key) {
+    if app.panel_has_keys() && app.panel_key(key) {
         return AppResult::Continue;
     }
     match key.code {

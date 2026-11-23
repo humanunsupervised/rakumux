@@ -134,15 +134,18 @@ Tabs across the top of the list group your sessions:
 
 Inside a repository or an app, sessions are listed by status.
 
-`f` (or the footer's **≡ Inbox** button) shows the **Inbox** beside your sessions: your agents'
-replies, newest first (needs an account). It's a tab of the drawer on the right in Master detail
-(a tab of its own in Tabs). `Enter` reads a reply, again goes into its session; `Esc`
-gives the list the keys back, and `f` hides the inbox. The button counts the replies that came in
-since you last looked.
+The left column has three tabs at its bottom: **Sessions**, **Inbox** and **Beats**.
 
-`t` shows **rtop** in the same drawer: the CPU, memory and network this machine, Rakumux and
+`f` (or a click on its tab) shows the **Inbox**: your agents' replies, newest first (needs an
+account). `Enter` reads a reply, again goes into its session; `Esc` or `f` goes back to the
+sessions. The tab counts the replies that came in since you last looked.
+
+`B` shows **Beats**: your heartbeats, tasks Rakumux runs on a clock. `n` (or `+ New heartbeat`)
+makes one, `c` renames it, `d` twice deletes it.
+
+`t` shows **rtop** in a drawer on the right: the CPU, memory and network this machine, Rakumux and
 each session's processes use, graphed over the last few minutes as btop does. `s` sorts, `←` `→` fold a session's processes, `Enter` goes
-into it; `f` and `t` switch between the two.
+into it; `t` hides it.
 
 ### Status
 

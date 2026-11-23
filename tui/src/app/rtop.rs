@@ -21,7 +21,7 @@ use session_core::ids::SessionId;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::drawer::DrawerTab;
+use super::drawer::Panel;
 use super::grouping::AppKey;
 use super::runtime::AppEvent;
 use super::App;
@@ -529,26 +529,30 @@ fn short_id(id: &SessionId) -> String {
 }
 
 impl App {
-    /// rtop is on screen: the drawer shows its rtop tab.
+    /// rtop is on screen: the drawer shows it.
     pub fn rtop_shown(&self) -> bool {
-        self.drawer_shown() && self.drawer_tab == DrawerTab::Rtop
+        self.drawer_shown()
     }
 
-    /// rtop has Rakumux mode's keys: the drawer has them on its rtop tab.
+    /// rtop has Rakumux mode's keys.
     pub fn rtop_has_keys(&self) -> bool {
-        self.drawer_has_keys() && self.drawer_tab == DrawerTab::Rtop
+        self.keys_panel() == Some(Panel::Rtop)
     }
 
-    /// `t` or Settings: show the drawer on rtop with the keys, switch it to
-    /// rtop, give it the keys while the list has them, or hide it while
-    /// rtop has them.
+    /// `t` or Settings: show the drawer with the keys, give it the keys while
+    /// the left column has them, or hide it while it has them.
     pub fn toggle_rtop(&mut self) {
-        self.toggle_drawer(DrawerTab::Rtop);
+        if self.rtop_has_keys() {
+            self.close_drawer();
+        } else {
+            self.open_rtop();
+        }
     }
 
-    /// Show the drawer on rtop and give it the keys.
+    /// Show the drawer and give it the keys.
     pub fn open_rtop(&mut self) {
-        self.open_drawer(DrawerTab::Rtop);
+        self.drawer_open = true;
+        self.focus_drawer();
     }
 
     /// The tick's rtop work: coming on screen it asks for a sample at once,
@@ -729,7 +733,7 @@ impl App {
     pub fn click_rtop_row(&mut self, index: usize) {
         let rows = self.rtop_rows();
         let again = self.rtop_has_keys() && self.rtop.selected_index(&rows) == index;
-        self.show_drawer_tab(DrawerTab::Rtop);
+        self.open_rtop();
         self.rtop.select(&rows, index);
         if again || self.phone() {
             self.rtop_enter();

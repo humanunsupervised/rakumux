@@ -44,6 +44,16 @@ impl Icons {
         }
     }
 
+    /// Marks the left column's Sessions tab.
+    pub fn sessions(self) -> &'static str {
+        match self {
+            Icons::Plain => "❯",
+            Icons::Emoji => "💻",
+            // nf-fa-terminal
+            Icons::Nerd => "\u{f120}",
+        }
+    }
+
     /// Marks the list's App tab: the agent or program sessions run.
     pub fn app(self) -> &'static str {
         match self {
@@ -74,8 +84,7 @@ impl Icons {
         }
     }
 
-    /// Marks rtop: what this machine and Rakumux use now.
-    /// The drawer's Beats tab (heartbeats), and a heartbeat's runs.
+    /// The left column's Beats tab (heartbeats), and a heartbeat's runs.
     pub fn beats(self) -> &'static str {
         match self {
             Icons::Plain => "♥",
@@ -85,6 +94,7 @@ impl Icons {
         }
     }
 
+    /// Marks rtop: what this machine and Rakumux use now.
     pub fn rtop(self) -> &'static str {
         match self {
             Icons::Plain => "▥",

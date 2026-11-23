@@ -1,9 +1,6 @@
 //! The drawer (`app/drawer.rs`) where the screen puts it ([`draw_drawer`]):
-//! a band naming its tabs, `★ Pinned   ≡ Feed   ▥ rtop`, the active one
-//! underlined and, while the drawer has the keys, in the accent; under it
-//! the active tab: the pinned sessions (`pinned.rs`), the feed's cards or
-//! reply (`feed.rs`), or rtop (`rtop.rs`). A click
-//! on a tab's name shows it; a click anywhere else on the drawer focuses it.
+//! a band naming it, `▥ rtop`, in the accent while it has the keys, over rtop
+//! (`rtop.rs`). A click anywhere on it focuses it.
 
 use ratatui::{
     layout::Rect,
@@ -13,159 +10,128 @@ use ratatui::{
     Frame,
 };
 
-use super::feed::draw_feed;
-use super::heartbeats::draw_beats;
 use super::rtop::draw_rtop;
 use super::session_list::folder_item_height;
-use crate::app::drawer::DrawerTab;
+use crate::app::drawer::Panel;
 use crate::app::{App, Hit};
 use crate::layout::str_width;
 use crate::theme;
 
-/// Columns left of the band's first tab, as in the session list.
+/// Columns left of the band's name, as in the session list.
 pub(super) const INDENT: usize = 3;
-/// Columns between the band's tabs.
-const TAB_GAP: usize = 3;
 
-/// The drawer in `area` (`Screen::feed`): its band and active tab.
+/// The drawer in `area` (`Screen::feed`): its band and rtop.
 pub fn draw_drawer(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) {
     if area.width == 0 || area.height == 0 {
         return;
     }
-    match app.drawer_tab() {
-        DrawerTab::Feed => draw_feed(f, app, area, hits),
-        DrawerTab::Rtop | DrawerTab::Beats => {
-            let p = theme::palette();
-            f.render_widget(
-                Block::default().style(Style::default().fg(p.text_primary).bg(p.panel)),
-                area,
-            );
-            let band = Rect {
-                height: folder_item_height(area.height),
-                ..area
-            };
-            draw_band(f, app, band, false, hits);
-            let body = Rect {
-                y: band.bottom(),
-                height: area.height - band.height,
-                ..area
-            };
-            match app.drawer_tab() {
-                DrawerTab::Beats => draw_beats(f, app, body, hits),
-                _ => draw_rtop(f, app, body, hits),
-            }
-        }
-    }
+    let p = theme::palette();
+    f.render_widget(
+        Block::default().style(Style::default().fg(p.text_primary).bg(p.panel)),
+        area,
+    );
+    let band = Rect {
+        height: folder_item_height(area.height),
+        ..area
+    };
+    draw_band(f, app, band);
+    let body = Rect {
+        y: band.bottom(),
+        height: area.height - band.height,
+        ..area
+    };
+    draw_rtop(f, app, body, hits);
     hits.push((area, Hit::Drawer));
 }
 
-/// `tab`'s mark in the icon style the user picked.
-pub(super) fn tab_icon(app: &App, tab: DrawerTab) -> &'static str {
-    match tab {
-        DrawerTab::Feed => app.icons().feed(),
-        DrawerTab::Beats => app.icons().beats(),
-        DrawerTab::Rtop => app.icons().rtop(),
+/// `panel`'s mark in the icon style the user picked.
+pub(super) fn panel_icon(app: &App, panel: Panel) -> &'static str {
+    match panel {
+        Panel::Feed => app.icons().feed(),
+        Panel::Beats => app.icons().beats(),
+        Panel::Rtop => app.icons().rtop(),
     }
 }
 
 /// The drawer's band, as tall as the list's tabs so what's under it starts
-/// where the sessions do: each tab's mark and name, the active one bold and
-/// underlined, in the accent while the drawer has the keys. With `back` (a
-/// reply read in the feed's cards' place) it starts with `‹`, and a click
-/// there goes back to the cards.
-pub(super) fn draw_band(
-    f: &mut Frame,
-    app: &App,
-    area: Rect,
-    back: bool,
-    hits: &mut Vec<(Rect, Hit)>,
-) {
+/// where the sessions do: its mark and name, bold and underlined, in the
+/// accent while it has the keys.
+fn draw_band(f: &mut Frame, app: &App, area: Rect) {
     let p = theme::palette();
     f.render_widget(Block::default().style(Style::default().bg(p.surface)), area);
-    let focused = app.drawer_has_keys();
-    let active = app.drawer_tab();
-    let (mark, label) = if focused {
+    let (mark, label) = if app.rtop_has_keys() {
         (p.accent_primary, p.text_bright)
     } else {
         (p.neutral_gray, p.neutral_gray)
     };
-    let row = Rect {
-        y: area.y + area.height / 2,
-        height: 1,
-        ..area
-    };
-    let mut spans = vec![Span::raw(" ".repeat(INDENT))];
-    let mut x = INDENT;
-    if back {
-        spans.push(Span::styled(
-            "‹ ",
-            Style::default().fg(mark).add_modifier(Modifier::BOLD),
-        ));
-        hits.push((
-            Rect {
-                x: area.x,
-                width: (x + 2).min(usize::from(area.width)) as u16,
-                ..area
-            },
-            Hit::FeedBack,
-        ));
-        x += 2;
-    }
-    let tab_width = |tab: DrawerTab| str_width(tab_icon(app, tab)) + 1 + str_width(tab.label());
-    let names: usize = DrawerTab::ALL.into_iter().map(tab_width).sum();
-    let gaps = DrawerTab::ALL.len() - 1;
-    let gap = if x + names + TAB_GAP * gaps > usize::from(area.width) {
-        1
-    } else {
-        TAB_GAP
-    };
-    let mut underline = None;
-    for (index, tab) in DrawerTab::ALL.into_iter().enumerate() {
-        if index > 0 {
-            spans.push(Span::raw(" ".repeat(gap)));
-            x += gap;
-        }
-        let icon = tab_icon(app, tab);
-        let name = tab.label();
-        let width = tab_width(tab);
-        let (icon_style, name_style) = if tab == active {
-            (
-                Style::default().fg(mark),
-                Style::default().fg(label).add_modifier(Modifier::BOLD),
-            )
-        } else {
-            let quiet = Style::default().fg(p.text_muted);
-            (quiet, quiet)
-        };
-        spans.extend([
-            Span::styled(icon, icon_style),
-            Span::raw(" "),
-            Span::styled(name, name_style),
-        ]);
-        let target = Rect {
-            x: area.x.saturating_add(x as u16),
-            width: width as u16,
+    let icon = panel_icon(app, Panel::Rtop);
+    let name = Panel::Rtop.label();
+    let line = Line::from(vec![
+        Span::raw(" ".repeat(INDENT)),
+        Span::styled(format!("{icon} "), Style::default().fg(mark)),
+        Span::styled(
+            name,
+            Style::default().fg(label).add_modifier(Modifier::BOLD),
+        ),
+    ]);
+    f.render_widget(
+        Paragraph::new(line),
+        Rect {
+            y: area.y + area.height / 2,
+            height: 1,
             ..area
+        },
+    );
+    if area.height >= 3 {
+        let under = Rect {
+            x: area.x.saturating_add(INDENT as u16),
+            y: area.bottom() - 1,
+            width: (str_width(icon) + 1 + str_width(name)) as u16,
+            height: 1,
         }
         .intersection(area);
-        if tab == active {
-            underline = Some(target);
-        }
-        hits.push((target, Hit::DrawerTab(tab)));
-        x += width;
-    }
-    f.render_widget(Paragraph::new(Line::from(spans)), row);
-    if let Some(target) = underline.filter(|_| area.height >= 3) {
         f.render_widget(
             Paragraph::new(Span::styled(
-                "▁".repeat(usize::from(target.width)),
+                "▁".repeat(usize::from(under.width)),
                 Style::default().fg(mark),
             )),
-            Rect {
-                y: area.bottom() - 1,
-                height: 1,
-                ..target
-            },
+            under,
         );
+    }
+}
+
+/// A row saying what `‹` goes back to while one thing is read whole; a click
+/// anywhere on it is `hit`. Returns the rest of `area`.
+pub(super) fn draw_back(
+    f: &mut Frame,
+    to: &str,
+    area: Rect,
+    hit: Hit,
+    hits: &mut Vec<(Rect, Hit)>,
+) -> Rect {
+    let p = theme::palette();
+    let row = Rect {
+        height: area.height.min(1),
+        ..area
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::raw(" ".repeat(INDENT)),
+            Span::styled(
+                "‹ ",
+                Style::default()
+                    .fg(p.accent_primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(to.to_string(), Style::default().fg(p.text_muted)),
+        ]))
+        .style(Style::default().bg(p.surface)),
+        row,
+    );
+    hits.push((row, hit));
+    Rect {
+        y: row.bottom(),
+        height: area.height - row.height,
+        ..area
     }
 }

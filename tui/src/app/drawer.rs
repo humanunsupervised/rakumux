@@ -1,56 +1,49 @@
-//! The drawer: what shows beside the sessions on the right, with three
-//! tabs, the Feed (`feed/`), Beats (`heartbeats.rs`) and rtop (`rtop.rs`).
-//! Every start opens it on the Inbox where it docks, beside the session,
-//! without the keys (`sessions.inbox_at_start`, Settings → Inbox open at
-//! start; `App::drawer_at_start` until it's used: it takes no other pane's
-//! place meanwhile); `f` shows it on the Feed, `B` on Beats, `t` on rtop (or
-//! Settings for either). Master detail docks
-//! it as a pane on the right, a draggable line left of it, and the
+//! The drawer: rtop (`rtop.rs`), beside the sessions on the right. Every
+//! start hides it; `t` (or Settings) shows it with the keys. Master detail
+//! docks it as a pane on the right, a draggable line left of it, and the
 //! session's pane narrows (the session on screen takes the new size, as a
 //! dragged divider gives it). A window too narrow to keep the session usable
 //! beside it shows it in the session's place in Rakumux mode only. Tabs
-//! shows it as a tab of its own before the sessions', named by its active
-//! tab; a phone shows it alone, full screen (`layout::split_with` decides
-//! where). Its band names the tabs, the active one underlined.
+//! shows it as a tab of its own before the sessions'; a phone shows it
+//! alone, full screen (`layout::split_with` decides where).
 //!
-//! It takes Rakumux mode's keys from the list (`drawer_focused`), and its
-//! active tab handles them (`App::feed_key`,
-//! `App::rtop_key`): `f` (`t`) shows the drawer on that tab with the
-//! keys, switches to that tab,
-//! gives it the keys while the list has them, and hides the drawer while
-//! that tab has them; a click focuses the side it lands on, a click on a
-//! band's tab shows that tab; Esc gives the keys back to the list, hiding
-//! the drawer where it would vanish (a phone). Session mode gives them back too. Only the active tab works:
-//! the feed is read fast and rtop samples only while their tab is on
-//! screen.
+//! It takes Rakumux mode's keys from the left column (`drawer_focused`):
+//! `t` gives it the keys while the left column has them, and hides it while
+//! it has them; Esc (a click beside it) gives them back. Session mode and the
+//! terminal panel drop them.
+//!
+//! What has the keys instead of the sessions, the drawer or the left
+//! column's Inbox or Beats (`left.rs`), is a [`Panel`], and handles them
+//! ([`App::panel_key`]).
 
 use std::time::Instant;
 
-use crate::app::types::Focus;
-use crate::app::{App, DividerState};
+use super::types::Focus;
+use super::{App, DividerState};
 use crate::layout::{FeedShown, SessionLayout};
 
-/// The drawer's tabs, in the band's order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum DrawerTab {
-    /// What agents said when they finished a turn (`app/feed`).
-    #[default]
+/// What shows besides the sessions and takes their keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Panel {
+    /// What agents said when they finished a turn (`app/feed`): the left
+    /// column's Inbox.
     Feed,
-    /// The heartbeats: tasks run on a clock (`app/heartbeats.rs`).
+    /// The heartbeats: tasks run on a clock (`app/heartbeats.rs`): the left
+    /// column's Beats.
     Beats,
-    /// What this machine, Rakumux and every session use now (`app/rtop.rs`).
+    /// What this machine, Rakumux and every session use now
+    /// (`app/rtop.rs`): the drawer.
     Rtop,
 }
 
-impl DrawerTab {
-    pub const ALL: [DrawerTab; 3] = [DrawerTab::Feed, DrawerTab::Beats, DrawerTab::Rtop];
-
-    /// Its name on the band and the Tabs layout's tab.
+impl Panel {
+    /// Its name on the left column's tabs, the drawer's band and the Tabs
+    /// layout's bar.
     pub fn label(self) -> &'static str {
         match self {
-            DrawerTab::Feed => "Inbox",
-            DrawerTab::Beats => "Beats",
-            DrawerTab::Rtop => "rtop",
+            Panel::Feed => "Inbox",
+            Panel::Beats => "Beats",
+            Panel::Rtop => "rtop",
         }
     }
 }
@@ -63,22 +56,10 @@ impl App {
         self.drawer_open
     }
 
-    /// The drawer's active tab.
-    pub fn drawer_tab(&self) -> DrawerTab {
-        self.drawer_tab
-    }
-
-    /// The drawer has Rakumux mode's keys: its pane is focused, its tab
-    /// selected.
-    pub fn drawer_has_keys(&self) -> bool {
-        self.drawer_open && self.drawer_focused && self.focus == Focus::List
-    }
-
     /// The drawer as the layout places it.
     pub(in crate::app) fn drawer_layout(&self) -> FeedShown {
         match (self.drawer_open, self.drawer_focused) {
             (false, _) => FeedShown::Hidden,
-            (true, _) if self.drawer_at_start => FeedShown::Docked,
             (true, false) => FeedShown::Shown,
             (true, true) => FeedShown::Focused,
         }
@@ -89,44 +70,15 @@ impl App {
         self.screen().feed.is_some()
     }
 
-    /// The Tabs layout's tab bar has the drawer's tab (phones show no tab
-    /// bar in Rakumux mode; the drawer fills the screen there).
-    pub fn drawer_tab_shown(&self) -> bool {
-        self.drawer_open
-            && !self.drawer_at_start
-            && self.session_layout() == SessionLayout::Tabs
-            && !self.phone()
-    }
-
-    /// `*`, `f` or `t` (or Settings, or the footer's Feed button): show the
-    /// drawer on `tab` with the keys, switch to `tab`, give it the keys
-    /// while the list has them, or hide the drawer while `tab` has them.
-    pub fn toggle_drawer(&mut self, tab: DrawerTab) {
-        if !self.drawer_open {
-            self.open_drawer(tab);
-        } else if self.drawer_tab != tab {
-            self.show_drawer_tab(tab);
-        } else if self.drawer_has_keys() {
-            self.close_drawer();
-        } else {
-            self.focus_drawer();
+    /// The panels with a tab in the Tabs layout's bar, before the sessions':
+    /// the Inbox or Beats while the left column's tab, and the drawer while
+    /// it's shown (phones show no tab bar in Rakumux mode).
+    pub fn bar_panels(&self) -> Vec<Panel> {
+        if self.session_layout() != SessionLayout::Tabs || self.phone() {
+            return Vec::new();
         }
-    }
-
-    /// Show the drawer on `tab` and give it the keys.
-    pub fn open_drawer(&mut self, tab: DrawerTab) {
-        if !self.drawer_open {
-            self.drawer_open = true;
-            self.feed.reading = false;
-        }
-        self.show_drawer_tab(tab);
-    }
-
-    /// Switch the drawer to `tab` (a click on the band's tab) and give it
-    /// the keys.
-    pub fn show_drawer_tab(&mut self, tab: DrawerTab) {
-        self.drawer_tab = tab;
-        self.focus_drawer();
+        let drawer = self.drawer_open.then_some(Panel::Rtop);
+        self.left_tab.panel().into_iter().chain(drawer).collect()
     }
 
     /// Give the drawer Rakumux mode's keys (from a session, in Rakumux mode).
@@ -138,7 +90,6 @@ impl App {
             self.enter_rakumux_mode();
         }
         self.drawer_focused = true;
-        self.drawer_at_start = false;
         self.pending_key = None;
         self.drawer_moved();
     }
@@ -149,87 +100,85 @@ impl App {
             return;
         }
         self.drawer_open = false;
-        self.drawer_at_start = false;
         self.drawer_focused = false;
-        self.feed.reading = false;
         self.feed_divider = DividerState::default();
         self.drawer_moved();
     }
 
-    /// The list takes Rakumux mode's keys back. Where the drawer would then
-    /// leave the screen (a phone) it's hidden; Tabs keeps its tab.
+    /// The left column takes Rakumux mode's keys back. Where the drawer would
+    /// then leave the screen (a phone) it's hidden; Tabs keeps its tab.
     pub fn unfocus_drawer(&mut self) {
         if !self.drawer_focused {
             return;
         }
         self.drawer_focused = false;
-        if self.drawer_open && !self.drawer_shown() && !self.drawer_tab_shown() {
+        if self.drawer_open && !self.drawer_shown() && !self.bar_panels().contains(&Panel::Rtop) {
             self.drawer_open = false;
-            self.feed.reading = false;
         }
         self.drawer_moved();
     }
 
-    /// Session mode or the terminal panel took the keys: the list has them
-    /// when Rakumux mode comes back.
+    /// Session mode or the terminal panel took the keys: the left column has
+    /// them when Rakumux mode comes back.
     pub(in crate::app) fn drawer_lost_keys(&mut self) {
         self.drawer_focused = false;
     }
 
-    /// Esc while the drawer has the keys (the RAKUMUX MODE label too): the
-    /// active tab's own Esc.
-    pub fn drawer_back(&mut self) {
-        match self.drawer_tab {
-            DrawerTab::Feed => self.feed_back(),
-            DrawerTab::Beats => self.beats_back(),
-            DrawerTab::Rtop => self.unfocus_drawer(),
+    /// Esc while a panel has the keys (the RAKUMUX MODE label too): its own.
+    pub fn panel_back(&mut self) {
+        match self.keys_panel() {
+            Some(Panel::Feed) => self.feed_back(),
+            Some(Panel::Beats) => self.beats_back(),
+            Some(Panel::Rtop) => self.unfocus_drawer(),
+            None => {}
         }
     }
 
-    /// `gg` while the drawer has the keys: the active tab's top.
-    pub fn drawer_to_top(&mut self) {
-        match self.drawer_tab {
-            DrawerTab::Feed => self.feed_to_top(),
-            DrawerTab::Beats => self.beats_move(isize::MIN / 2),
-            DrawerTab::Rtop => self.rtop_move(isize::MIN / 2),
+    /// `gg` while a panel has the keys: its top.
+    pub fn panel_to_top(&mut self) {
+        match self.keys_panel() {
+            Some(Panel::Feed) => self.feed_to_top(),
+            Some(Panel::Beats) => self.beats_move(isize::MIN / 2),
+            Some(Panel::Rtop) => self.rtop_move(isize::MIN / 2),
+            None => {}
         }
     }
 
-    /// The cycle keys while the drawer has the keys: through the active
-    /// tab's cards or rows.
-    pub fn move_drawer_selection(&mut self, delta: isize) {
-        match self.drawer_tab {
-            DrawerTab::Feed => self.move_feed_selection(delta),
-            DrawerTab::Beats => self.beats_move(delta),
-            DrawerTab::Rtop => self.rtop_move(delta),
+    /// The cycle keys while a panel has the keys: through its cards or rows.
+    pub fn move_panel_selection(&mut self, delta: isize) {
+        match self.keys_panel() {
+            Some(Panel::Feed) => self.move_feed_selection(delta),
+            Some(Panel::Beats) => self.beats_move(delta),
+            Some(Panel::Rtop) => self.rtop_move(delta),
+            None => {}
         }
     }
 
-    /// The session the footer names while the drawer has the keys: the
-    /// selected row's, or the selected card's when it runs here.
-    pub fn drawer_session(&self) -> Option<&session_core::model::SessionView> {
-        match self.drawer_tab {
-            DrawerTab::Feed => self.feed_session(),
-            DrawerTab::Beats => self.beats_session(),
-            DrawerTab::Rtop => self.rtop_session(),
+    /// The session the footer names while a panel has the keys: the selected
+    /// row's, or the selected card's when it runs here.
+    pub fn panel_session(&self) -> Option<&session_core::model::SessionView> {
+        match self.keys_panel()? {
+            Panel::Feed => self.feed_session(),
+            Panel::Beats => self.beats_session(),
+            Panel::Rtop => self.rtop_session(),
         }
     }
 
-    /// Rakumux mode keys while the drawer has them; `false` leaves the key
-    /// to the list's handler.
-    pub fn drawer_key(&mut self, key: crossterm::event::KeyEvent) -> bool {
-        match self.drawer_tab {
-            DrawerTab::Feed => self.feed_key(key),
-            DrawerTab::Beats => self.beats_key(key),
-            DrawerTab::Rtop => self.rtop_key(key),
+    /// Rakumux mode keys while a panel has them; `false` leaves the key to
+    /// the list's handler.
+    pub fn panel_key(&mut self, key: crossterm::event::KeyEvent) -> bool {
+        match self.keys_panel() {
+            Some(Panel::Feed) => self.feed_key(key),
+            Some(Panel::Beats) => self.beats_key(key),
+            Some(Panel::Rtop) => self.rtop_key(key),
+            None => false,
         }
     }
 
-    /// The drawer came, went, moved or changed tab: the session on screen
-    /// takes its pane's new size (as a dragged divider gives it), and the
-    /// tab that came on screen starts
-    /// (the feed is asked for changes, rtop for a sample) while the one that
-    /// left stops.
+    /// The drawer or the left column came, went, moved or changed what it
+    /// shows: the session on screen takes its pane's new size (as a dragged
+    /// divider gives it), and what came on screen starts (the feed is asked
+    /// for changes, rtop for a sample) while what left stops.
     pub(in crate::app) fn drawer_moved(&mut self) {
         self.sync_terminal_size();
         let now = Instant::now();

@@ -69,11 +69,6 @@ impl App {
         self.auto_update.last_input = now;
     }
 
-    /// Someone used this window within `within`.
-    pub(super) fn used_within(&self, within: Duration, now: Instant) -> bool {
-        now.saturating_duration_since(self.auto_update.last_input) < within
-    }
-
     /// The version installed for this window to reload into.
     pub fn update_ready(&self) -> Option<&str> {
         self.auto_update.ready.as_deref()

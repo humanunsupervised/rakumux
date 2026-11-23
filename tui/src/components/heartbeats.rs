@@ -1,4 +1,4 @@
-//! The drawer's Beats tab (`app/heartbeats.rs`): the heartbeats, two lines
+//! The left column's Beats tab (`app/heartbeats.rs`): the heartbeats, two lines
 //! each (a mark, the name and when it runs next; its schedule, folder and
 //! last run), those waiting for approval first, the selected one's buttons
 //! under it, then `+ New heartbeat`; or one heartbeat whole: its buttons, how
@@ -14,6 +14,7 @@ use ratatui::{
 };
 use session_core::heartbeat::{Heartbeat, RunOutcome};
 
+use super::drawer::draw_back;
 use crate::app::heartbeats::BeatAction;
 use crate::app::{App, Hit};
 use crate::components::dialogs::{error_line, text_rows};
@@ -23,11 +24,15 @@ use crate::layout::str_width;
 use crate::printable::printable;
 use crate::theme;
 
-/// The tab under its band, in `area`.
+/// The tab in `area` (the left column's, over its tabs).
 pub fn draw_beats(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) {
     let p = theme::palette();
     let view = &app.beats;
-    // A row under the band, a column each side, as rtop.
+    let area = match view.read() {
+        Some(_) => draw_back(f, "Beats", area, Hit::BeatBack, hits),
+        None => area,
+    };
+    // A row down, a column each side, as rtop.
     let body = Rect {
         x: area.x.saturating_add(1),
         y: area.y.saturating_add(1),

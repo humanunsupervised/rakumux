@@ -2,9 +2,8 @@
 //! what the list is grouped and filtered by; the active one names its
 //! filter, `▤ web ▾`, and Enter or a click on it opens its modal), then the
 //! sessions shown, under a header row per folder
-//! (app, status) when there are several, and "+ New session" last. Beside
-//! the session (Master detail) its last row is `« Hide list`; hidden, a rail
-//! at the left edge (`draw_list_rail`) shows it again.
+//! (app, status) when there are several, and "+ New session" last. The left
+//! column's own tabs are under it (`left.rs`).
 //! Each session is a compact cell after a blank row: its name (its AI title
 //! with AI session titles on), then its age and its mark (an agent's
 //! activity, else its status) at the right; then its program and state; then
@@ -94,7 +93,7 @@ pub(super) fn folder_item_height(pane: u16) -> u16 {
     }
 }
 
-/// Columns left of the tabs and `« Hide list`, the column every top-level
+/// Columns left of the tabs, the column every top-level
 /// header's and row's text starts in.
 const INDENT: usize = 3;
 
@@ -1114,62 +1113,6 @@ fn draw_tabs(f: &mut Frame, app: &App, area: Rect, selected: bool, hits: &mut Ve
     }
 }
 
-/// The list pane's last row beside the session: a click hides the list.
-fn draw_hide_list(f: &mut Frame, area: Rect, hits: &mut Vec<(Rect, Hit)>) {
-    let p = theme::palette();
-    let quiet = Style::default().fg(p.neutral_gray);
-    let line = Line::from(vec![
-        Span::raw(" ".repeat(INDENT)),
-        Span::styled("« Hide list", quiet),
-    ]);
-    f.render_widget(
-        Paragraph::new(line).style(Style::default().bg(p.surface)),
-        area,
-    );
-    hits.push((area, Hit::HideList));
-}
-
-/// What's left of a hidden list (Master detail): a column of the list pane
-/// (its tabs' band at the top, its last row with `»` where `« Hide list`
-/// was), then the divider's line. A click anywhere on it shows the list.
-pub fn draw_list_rail(f: &mut Frame, area: Rect, hits: &mut Vec<(Rect, Hit)>) {
-    let p = theme::palette();
-    if area.width == 0 || area.height == 0 {
-        return;
-    }
-    let pane = Rect { width: 1, ..area };
-    f.render_widget(Block::default().style(Style::default().bg(p.panel)), pane);
-    f.render_widget(
-        Block::default().style(Style::default().bg(p.surface)),
-        Rect {
-            height: folder_item_height(area.height),
-            ..pane
-        },
-    );
-    f.render_widget(
-        Paragraph::new(Span::styled("»", Style::default().fg(p.neutral_gray)))
-            .style(Style::default().bg(p.surface)),
-        Rect {
-            y: area.bottom() - 1,
-            height: 1,
-            ..pane
-        },
-    );
-    if area.width > 1 {
-        let line = Rect {
-            x: area.x + 1,
-            width: area.width - 1,
-            ..area
-        };
-        let lines: Vec<Line> = (0..line.height).map(|_| Line::from("│")).collect();
-        f.render_widget(
-            Paragraph::new(lines).style(Style::default().fg(p.border_dim).bg(p.background)),
-            line,
-        );
-    }
-    hits.push((area, Hit::ShowList));
-}
-
 pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) {
     let p = theme::palette();
     f.render_widget(
@@ -1194,19 +1137,6 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
         height: area.height - item.height,
         ..area
     };
-    // Beside the session the pane's last row hides it.
-    if inner.height >= 2 && app.list_beside_session() {
-        inner.height -= 1;
-        draw_hide_list(
-            f,
-            Rect {
-                y: inner.bottom(),
-                height: 1,
-                ..inner
-            },
-            hits,
-        );
-    }
     if inner.height == 0 {
         return;
     }

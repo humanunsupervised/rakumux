@@ -7,8 +7,9 @@
 //! connection state and a message (a status message, why the daemon is
 //! unreachable, zoom, a pending upgrade); the mode label (`RAKUMUX MODE`,
 //! `SESSION MODE` or `TERMINAL MODE`) in the centre; and buttons on the
-//! right. In Rakumux mode: the feed (`f ≡ Feed`, with `●N` for the entries
-//! that arrived since the feed was last on screen), Help (`?`), Settings
+//! right. In Rakumux mode: the Inbox (`f ≡ Inbox`, with `●N` for the entries
+//! that arrived since it was last on screen) while the left column, whose
+//! own tab shows it, isn't on screen, Help (`?`), Settings
 //! (`,`), the workspace shown (`m ⊞ Launch`, `m ⊞ No workspace`: the
 //! workspaces modal), then the Rakumux account: Sign in while signed out, `✓ Signed in`
 //! (the account dialog) while signed in. In session mode the Rakumux key
@@ -335,7 +336,6 @@ pub fn buttons(app: &App) -> Vec<Button> {
     match app.focus {
         Focus::List => {
             let mut buttons = vec![
-                feed_button(app),
                 Button::new("?", "Help", FooterKey::Help),
                 Button::new(
                     crate::help::SETTINGS_KEY_PRIMARY,
@@ -343,6 +343,10 @@ pub fn buttons(app: &App) -> Vec<Button> {
                     FooterKey::Settings,
                 ),
             ];
+            // The left column's own tab shows it, and the count, on screen.
+            if app.left_pane().is_none() {
+                buttons.insert(0, feed_button(app));
+            }
             match app.account {
                 AccountStatus::SignedOut => {
                     buttons.push(Button::new("a", "Sign in", FooterKey::SignIn))
@@ -422,7 +426,7 @@ fn push_buttons(
 fn named_session(app: &App) -> Option<&SessionView> {
     let in_view = || app.detail.session_id().and_then(|id| app.list.get(id));
     match app.focus {
-        Focus::List if app.drawer_has_keys() => app.drawer_session(),
+        Focus::List if app.panel_has_keys() => app.panel_session(),
         Focus::List => app.list.selected_session().or_else(in_view),
         Focus::Session => in_view(),
         Focus::Terminal => None,
@@ -821,9 +825,35 @@ pub(crate) fn without_version(line: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{harness, view};
+    use crate::app::testing::{options, scope, start, view, FakeApi, Harness};
     use crossterm::event::KeyCode;
     use session_core::api::{ApiError, ErrorCode};
+
+    /// In the Tabs layout, whose footer has every button: Master detail's
+    /// left column has the Inbox's own tab.
+    fn harness(sessions: Vec<SessionView>) -> Harness {
+        let fake = FakeApi::new(sessions);
+        let dir = tempfile::tempdir().unwrap();
+        let mut options = options(&fake, scope(), &dir);
+        options.settings.sessions.layout = crate::layout::SessionLayout::Tabs;
+        start(options, fake, dir)
+    }
+
+    #[tokio::test]
+    async fn the_inboxs_button_shows_only_without_the_left_columns_tabs() {
+        let mut h = crate::app::testing::harness(vec![view("A", "api", 20)]);
+        let has = |h: &Harness| buttons(&h.app).iter().any(|b| b.target == FooterKey::Feed);
+        assert!(!has(&h), "its tab is on screen");
+        h.press(KeyCode::Char('f')).await;
+        assert!(!has(&h));
+        h.press(KeyCode::Char('f')).await;
+        // The column hidden, or the Tabs layout, which has none.
+        h.press(KeyCode::Char('b')).await;
+        assert!(has(&h));
+        h.press(KeyCode::Char('b')).await;
+        h.app.set_layout(crate::layout::SessionLayout::Tabs);
+        assert!(has(&h));
+    }
 
     fn text(line: &Line) -> String {
         line.spans.iter().map(|s| s.content.as_ref()).collect()
@@ -1505,7 +1535,8 @@ mod tests {
 
     #[tokio::test]
     async fn the_left_names_the_selected_session_or_the_one_taking_the_keys() {
-        let mut h = harness(vec![view("A", "api", 20), view("B", "docs", 10)]);
+        let sessions = vec![view("A", "api", 20), view("B", "docs", 10)];
+        let mut h = crate::app::testing::harness(sessions);
         // The account's button has its own test.
         h.app.account = crate::app::types::AccountStatus::Unknown;
         let p = theme::palette();

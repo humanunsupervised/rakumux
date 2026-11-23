@@ -54,7 +54,10 @@ pub struct Screen {
     pub terminal_panel_divider: Option<Rect>,
     /// The panel is right of the detail (its divider is a column).
     pub terminal_panel_beside: bool,
-    /// The agent feed: a docked pane on the right (Master detail), the
+    /// The Tabs layout's Inbox or Beats, under the tab bar in Rakumux mode
+    /// (Master detail's are in the list's column).
+    pub panel: Option<Rect>,
+    /// The drawer (rtop): a docked pane on the right (Master detail), the
     /// session's place (narrower windows, in Rakumux mode), the body under
     /// the tab bar (Tabs, its tab selected) or the screen (a phone).
     pub feed: Option<Rect>,
@@ -107,6 +110,7 @@ pub fn compute(
     screen.stacked = areas.stacked;
     screen.rail = areas.rail;
     screen.tabs = areas.tabs;
+    screen.panel = areas.panel;
     screen.feed = areas.feed;
     screen.feed_divider = areas.feed_divider;
     // A zero-width detail means a short narrow Sidebar shows the list
@@ -255,6 +259,7 @@ mod tests {
             screen.divider,
             screen.rail,
             screen.tabs,
+            screen.panel,
             screen.feed,
             screen.feed_divider,
             screen.terminal,

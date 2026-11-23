@@ -1511,8 +1511,6 @@ pub fn options(fake: &Arc<FakeApi>, scope: ScopeRoot, dir: &tempfile::TempDir) -
     // No tip in the footer: it changes with the date and moves the label.
     // The tips' own tests turn them on.
     settings.sessions.tips = false;
-    // Nor the Inbox beside the session: its own tests open it.
-    settings.sessions.inbox_at_start = false;
     AppOptions {
         settings,
         config_path: Some(dir.path().join("config.json")),
