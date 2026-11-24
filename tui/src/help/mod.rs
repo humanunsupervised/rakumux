@@ -1882,8 +1882,8 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     doc.bullet(format!(
         "Footer, the bottom row: a full-width orange bar in Rakumux mode, a muted blue one \
          while a program takes keys. At the left the session it's about (session: name), then \
-         messages and the daemon connection when it isn't up; the mode in the middle \
-         (RAKUMUX MODE, SESSION MODE or TERMINAL MODE); buttons on the right: this Help (`?`) and Settings (`,`) in Rakumux mode, \
+         messages and the daemon connection when it isn't up; the workspace shown in the middle \
+         (TERMINAL MODE while the terminal panel has the keys); buttons on the right: this Help (`?`) and Settings (`,`) in Rakumux mode, \
          `{p}`, the way to Rakumux mode, in a session. Settings lists every key."
     ));
     doc.note(format!(
@@ -2018,8 +2018,8 @@ fn mouse(doc: &mut Doc) {
          or up and down when the list is above the session (narrow screens).",
     );
     doc.bullet(
-        "Click the mode in the middle of the footer: SESSION MODE switches to Rakumux mode, \
-         RAKUMUX MODE does what Esc does (back to the session you came from; while the Inbox, \
+        "Click the workspace's name in the middle of the footer: in a session it switches to \
+         Rakumux mode, in Rakumux mode it does what Esc does (back to the session you came from; while the Inbox, \
          Beats or rtop has the keys, Esc there). Click a button on the right of the footer (`? Help`, \
          `, Settings`, or in a session the Rakumux key) to do what it says. Phones send taps \
          as clicks, so all of this works there too.",
@@ -2343,8 +2343,8 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     doc.text(format!(
         "On a phone (below {} columns) Master detail shows one thing at a time: Rakumux mode is the session list; tap a session to \
          open it, full screen under a row of tabs (tap a tab to switch); Tabs keeps the tabs \
-         over the session in Rakumux mode too; `{p}` or a tap on SESSION MODE in the middle of \
-         the bottom row goes back to the list, and RAKUMUX MODE returns to the session. Tap \
+         over the session in Rakumux mode too; `{p}` or a tap on the workspace's name in the middle of \
+         the bottom row goes back to the list, and another tap on it returns to the session. Tap \
          `? Help` or `, Settings` in Rakumux mode to open them.",
         layout::PHONE_BELOW
     ));

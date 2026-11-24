@@ -231,6 +231,11 @@ fn start_tui(world: &World) -> Screen {
     }
 }
 
+/// The screen's last row.
+fn footer(text: &str) -> &str {
+    text.trim_end().lines().last().unwrap_or_default()
+}
+
 #[test]
 fn the_left_columns_tabs_switch_and_help_is_searched_in_the_real_tui() {
     let world = World::new();
@@ -279,6 +284,10 @@ fn the_left_columns_tabs_switch_and_help_is_searched_in_the_real_tui() {
         .unwrap();
     screen.click(8, row as u16 + 1);
     screen.shows("▴ No workspace   ≡ Inbox   ♥ Beats");
+    // The middle of the footer names it too, and no mode.
+    screen.until("the footer's workspace", |text| {
+        footer(text).contains(" No workspace ") && !footer(text).contains("MODE")
+    });
     screen.click(5, 46);
     screen.shows("✓ No workspace");
     screen.keys(&["up", "enter"]);
@@ -303,6 +312,18 @@ fn the_left_columns_tabs_switch_and_help_is_searched_in_the_real_tui() {
     screen.shows("1 Overview");
     screen.keys(&["esc"]);
     screen.until("help closed", |text| !text.contains("1 Overview"));
+    // A session keeps the workspace there; a click on it is the way out.
+    screen.send("n", &[]);
+    let session = screen.until("a session", |text| {
+        footer(text).contains("Ctrl-\\") && footer(text).contains(" All ")
+    });
+    let line = footer(&session);
+    assert!(!line.contains("MODE"), "{line}");
+    let before = &line[..line.find(" All ").unwrap()];
+    screen.click(before.chars().count() as u16 + 2, 48);
+    screen.until("Rakumux mode", |text| {
+        footer(text).contains("? Help") && footer(text).contains(" All ")
+    });
 }
 
 #[test]

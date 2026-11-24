@@ -800,7 +800,7 @@ tui/
     app.rs, app/             # TUI state, folders and the folder filter, handlers, session pipelines, config
                              # (see tui/src/app/AGENTS.md)
     ui.rs, components/       # rendering: session list, detail, Folders modal, dialogs, footer (session,
-                             # messages, mode label), welcome tour, phone access (offer, pairing dialog with QR code)
+                             # messages, workspace), welcome tour, phone access (offer, pairing dialog with QR code)
     terminal_view/           # live terminal pane widget, key/mouse/paste encoding
     layout/                  # Master detail / Tabs geometry, tab bar, session cycling
     help/                    # Settings modal (General, Keys: actions table) and Help modal (docs, license)
@@ -1869,8 +1869,9 @@ row has (in Rakumux mode the selected session, else the one kept in view, or the
 while the feed has the keys; the one taking the keys in session mode; none for the terminal
 panel), since the detail has no title row: the session's terminal fills it from its top row;
 then messages and the daemon connection while it isn't up (`⠋ connecting`, `✕ daemon
-unavailable`). In the centre the mode label (`RAKUMUX MODE`, or a quiet `SESSION MODE`/`TERMINAL
-MODE`), centred while it clears both sides, else between them. On the right buttons
+unavailable`). In the centre the label, the name of the workspace shown (`Launch`, `All`, `No
+workspace`; quiet on the blue bar; a long one cut to a quarter of the row; `TERMINAL MODE` while the
+terminal panel has the keys; the bar's colour says the mode), centred while it clears both sides, else between them. On the right buttons
 (a darker shade of the orange bar; dark chips on the blue one): in Rakumux mode, while the left
 column isn't on screen (hidden, or the Tabs layout), `f ≡ Inbox` (it does what `f` does; with
 `●N`, as the column's Inbox tab: `●99+` beyond 99, the feed entries that finished during this run and
@@ -1878,7 +1879,7 @@ arrived since the feed was last on screen: memory only, `FeedStore::unseen`, cou
 account's feed is on), `? Help` and `, Settings`, then the
 Rakumux account: `a Sign in` while signed out (a tap asks for a sign-in code
 at once), `a ✓ Signed in` while signed in (a tap opens the account dialog); `Ctrl-\` alone in
-session mode (the label names the mode); and last, quieter, this Rakumux's version (`v0.1.37`, a
+session mode; and last, quieter, this Rakumux's version (`v0.1.37`, a
 local build's `v0.1.0`). In Rakumux mode, just left of the buttons, a **tip** (`app/tips.rs`, `App::tip`): a key and what it does (`T terminal
 panel`, `f every agent's replies`, `t rtop: what sessions use`, the Rakumux key's `session or
 Rakumux mode`, `U update (sessions stay up)`, `e where it changed files`, `v Master detail or
@@ -1895,8 +1896,7 @@ button (and the tip moves none): each shows only while it fits whole, a column o
 it. When the row is
 short the tip goes first (it shows only while the version does), then the version, then the session gives way (to its name alone, then nothing), then the message is cut, then
 buttons go from the right (the account, Settings, Help, then the Inbox's, which carries the
-count); the label never goes, its short
-word (`RAKUMUX`) under 14 columns.
+count); the label never goes, a long name cut.
 Help and Settings list every key; Settings runs them. A welcome tour
 (`components/welcome.rs`, `AppMode::Welcome`) opens on startup until its "Don't show this on
 startup" box (on every card, Space) is ticked; `t` in Help replays it. Drag the divider to resize the
@@ -1922,7 +1922,7 @@ the session list alone, full screen (the feed, while it has the keys); a tap on 
 `Enter`) goes into it, and session mode
 gives it the screen under a row of tabs, one per session (no folder filter; a tap on
 a tab switches session and stays in session mode). Tabs keeps that row of tabs over the selected
-session in Rakumux mode too. `Ctrl-\` (or a tap on SESSION MODE) goes back to Rakumux mode.
+session in Rakumux mode too. `Ctrl-\` (or a tap on the footer's label) goes back to Rakumux mode.
 Moving through Master detail's list on a phone doesn't resize anything: no session is on screen
 there.
 
@@ -1933,9 +1933,9 @@ the footer, at least `LIST_MIN_ROWS` (10: the tabs, a folder's header and two se
 `PREVIEW_MIN_ROWS` (4); dragging the divider sets that share (`sessions.stacked_list_percent`).
 Below `STACK_MIN_ROWS` (15 rows above the footer, a 16-row screen) Rakumux mode shows the list
 alone. Session mode fills everything above the footer. Taps arrive as clicks, so the footer is a
-tap target too (`Hit::ModeBadge`, `Hit::FooterKey`, recorded by `components/footer.rs`): the
-SESSION MODE label and the `Ctrl-\` button switch to Rakumux mode like `Ctrl-\`, the RAKUMUX
-MODE label does what `Esc` does (back to the session you came from; while a panel has the keys, its
+tap target too (`Hit::ModeBadge`, `Hit::FooterKey`, recorded by `components/footer.rs`): in a
+session the label and the `Ctrl-\` button switch to Rakumux mode like `Ctrl-\`, in Rakumux mode the
+label does what `Esc` does (back to the session you came from; while a panel has the keys, its
 `Esc`), and `? Help` and
 `, Settings` open them. Dialogs are at least
 min(screen width − 2, 48) columns (`components/utils.rs::popup_width`), wrap their key lines and

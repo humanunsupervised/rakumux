@@ -253,8 +253,9 @@ pub enum Hit {
     WorkspaceDelete,
     /// A row of the session history modal.
     HistoryRow(usize),
-    /// The mode label in the footer's centre: `SESSION MODE` switches to
-    /// Rakumux mode, `RAKUMUX MODE` goes back to the session you came from.
+    /// The label in the footer's centre (the workspace's name): in a session
+    /// it switches to Rakumux mode, in Rakumux mode it goes back to the
+    /// session you came from.
     ModeBadge,
     /// The list pane's last row (Master detail, beside the session): hides
     /// the list.

@@ -19,7 +19,7 @@ new-session flow, and code boundaries.
   (the rows never shift) and the wheel moves the selection. Help keeps a reading width and tabs. All dialogs leave the footer row visible.
   The detail has no title row: the footer names the session in view (`session: ● <name>`, the
   mark its list row has). The footer is a full-width bar with that at its left, then messages,
-  and the mode label (`RAKUMUX MODE`, `SESSION MODE`, `TERMINAL MODE`) in its centre: orange with dark text in
+  and its label (the name of the workspace shown, `centre_label`; `TERMINAL MODE` for the terminal panel) in its centre: orange with dark text in
   Rakumux mode (`f ≡ Inbox`, with `●N` new entries, `FooterKey::Feed` → `App::toggle_feed`, while
   the left column isn't on screen; `? Help` and `, Settings` buttons in a darker orange, and `Sign in` while signed out,
   `FooterKey::SignIn` → `App::start_sign_in`), muted blue in session and
@@ -177,7 +177,7 @@ new-session flow, and code boundaries.
 - `screen.rs`: screen geometry for a size, layout, focus, zoom and the dragged pane sizes
   (`layout::PaneSizes`: `sidebar_width`, `stacked_list_percent`, `feed_width`) and the feed
   (`PaneSizes::feed`, `Screen::feed`; see `feed/`). No header: the panes start at
-  the top row and the footer (session, messages, mode label, Help/Settings keys) is always exactly the
+  the top row and the footer (session, messages, label, Help/Settings keys) is always exactly the
   last row, zoom included, so modes, selection and messages never move a pane. Phones
   (`layout::is_phone`, under 80 columns, `App::phone`) show the list alone in Rakumux mode
   and the session under a tab bar in session mode.
@@ -215,7 +215,7 @@ new-session flow, and code boundaries.
   (`App::hits`, `Hit`): list rows, the list tabs (`Hit::ListTab`: activate one, or open the
   active one's modal; the band beside them, `Hit::FolderSelector`, opens it too), the Folders,
   App and Status modals' rows (`Hit::FolderRow`, `Hit::SectionRow`), and the footer's
-  mode label (`Hit::ModeBadge`: `enter_rakumux_mode` / `return_to_session`) and key hints
+  label (`Hit::ModeBadge`: `enter_rakumux_mode` / `return_to_session`) and key hints
   (`Hit::FooterKey`: what the keys do), the left column's tabs (`Hit::LeftTab`), their `«` and the hidden column's rail
   (`Hit::HideList`, `Hit::ShowList`: `toggle_list`, in either mode), and the feed (`Hit::FeedEntry`
   selects a card, a second click opens it; `Hit::FeedBack`, `Hit::FeedReply`, `Hit::LeftPane` anywhere else on it), rtop

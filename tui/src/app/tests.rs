@@ -742,7 +742,7 @@ async fn rakumux_mode_shows_the_mode_the_selected_session_help_and_settings_in_t
         .collect();
     assert!(footer.starts_with(" session: ● a "), "A: {footer:?}");
     // The mode, then the buttons.
-    assert!(footer.contains(" RAKUMUX MODE "), "{footer:?}");
+    assert!(footer.contains(" All "), "{footer:?}");
     assert!(
         crate::components::footer::without_version(&footer)
             .ends_with(" ? Help   , Settings   a ✓ Signed in  "),
@@ -4745,7 +4745,7 @@ async fn welcome_cards_at_80x24(h: &mut Harness) -> Vec<(String, bool)> {
 async fn welcome_cards_at(h: &mut Harness, width: u16, height: u16) -> Vec<(String, bool)> {
     // The last word of each card's text.
     const ENDS: [&str; crate::components::welcome::CARDS] =
-        ["minute.", "again.", "MODE.", "one.", "key.", "again."];
+        ["minute.", "again.", "mode.", "one.", "key.", "again."];
     h.app.open_welcome();
     let mut cards = Vec::new();
     for last_word in ENDS {
@@ -4782,9 +4782,7 @@ async fn welcome_cards_at(h: &mut Harness, width: u16, height: u16) -> Vec<(Stri
         let end = rows.iter().any(|row| row.contains(last_word));
         let keys = rows.iter().any(|row| row.contains("Esc close"));
         let opt_out = rows.iter().any(|row| row.contains("[ ] Don't show"));
-        let footer = rows
-            .last()
-            .is_some_and(|row| row.contains(" RAKUMUX MODE "));
+        let footer = rows.last().is_some_and(|row| row.contains(" All "));
         let palette = crate::theme::palette();
         assert!((0..width).all(
             |column| terminal.backend().buffer().get(column, height - 1).bg

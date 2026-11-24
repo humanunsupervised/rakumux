@@ -124,7 +124,7 @@ impl App {
         self.drawer_focused = false;
     }
 
-    /// Esc while a panel has the keys (the RAKUMUX MODE label too): its own.
+    /// Esc while a panel has the keys (the footer's label too): its own.
     pub fn panel_back(&mut self) {
         match self.keys_panel() {
             Some(Panel::Feed) => self.feed_back(),

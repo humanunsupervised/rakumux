@@ -5,23 +5,20 @@
 //! has the keys; in session mode the one taking the keys; with the status
 //! mark its list row has, since the detail has no title row), then the
 //! connection state and a message (a status message, why the daemon is
-//! unreachable, zoom, a pending upgrade); the mode label (`RAKUMUX MODE`,
-//! `SESSION MODE` or `TERMINAL MODE`) in the centre; and buttons on the
-//! right. In Rakumux mode: the Inbox (`f ≡ Inbox`, with `●N` for the entries
+//! unreachable, zoom, a pending upgrade); the name of the workspace shown in
+//! the centre (`TERMINAL MODE` while the terminal panel has the keys); and
+//! buttons on the right. In Rakumux mode: the Inbox (`f ≡ Inbox`, with `●N` for the entries
 //! that arrived since it was last on screen) while the left column, whose
 //! own tab shows it, isn't on screen, Help (`?`), Settings
-//! (`,`), the workspace shown (`m ⊞ Launch`, `m ⊞ No workspace`: the
-//! workspaces modal), then the Rakumux account: Sign in while signed out, `✓ Signed in`
+//! (`,`), then the Rakumux account: Sign in while signed out, `✓ Signed in`
 //! (the account dialog) while signed in. In session mode the Rakumux key
-//! alone, the way out (the label already names the mode). Settings lists
-//! every key. Last, at the far right, quieter, this Rakumux's version
+//! alone, the way out. Settings lists every key. Last, at the far right, quieter, this Rakumux's version
 //! (`v0.1.37`; a local build's says `v0.1.0`). In Rakumux mode, just left of
 //! the buttons, the day's tip (`app::tips`): a click on it shows the next
 //! one.
 //!
 //! The footer never wraps or grows: when the row is short the tip goes
-//! first (it shows only while the version does), then the version, then the
-//! workspace's button (each shows
+//! first (it shows only while the version does), then the version (each shows
 //! only while every button, the session and the message keep their place
 //! whole; it and the tip may take the label off centre), then the session
 //! gives way next (to its mark and name, then nothing), then the message is
@@ -29,13 +26,12 @@
 //! right (the account, Settings, Help, then the Feed's: it carries the
 //! count and is the one tap that shows the feed). The label always shows:
 //! centred on the row while it clears the left and what's on the right (the
-//! tip, the buttons, the version), else between them, in its short words (`RAKUMUX`, `SESSION`, `TERMINAL`) on a row too
-//! short for the full ones.
+//! tip, the buttons, the version), else between them, a long name cut.
 //!
 //! The label, the buttons and the tip are tap targets, for phones and the mouse:
-//! `SESSION MODE` switches to Rakumux mode, `RAKUMUX MODE` does what Esc
-//! does (back to the session you came from; while the feed has the keys, the
-//! feed's Esc), and a button does what its keys do.
+//! in a session the label switches to Rakumux mode, in Rakumux mode it does
+//! what Esc does (back to the session you came from; while the feed has the
+//! keys, the feed's Esc), and a button does what its keys do.
 
 use ratatui::{
     layout::Rect,
@@ -67,7 +63,7 @@ const WORKSPACE_NAME_COLS: usize = 16;
 /// Columns between two buttons.
 const GAP: usize = 1;
 
-/// Columns kept clear on either side of the mode label.
+/// Columns kept clear on either side of the label.
 const CLEAR: usize = 1;
 
 /// Columns before the left's text, as after the buttons.
@@ -293,41 +289,38 @@ pub const FEED_KEY: &str = "f";
 /// A tap target in the footer: `width` columns from column `x` of the row.
 pub type FooterTarget = (u16, u16, Hit);
 
-/// The mode label, in the centre of the footer: a bold `RAKUMUX MODE` on
-/// the orange bar while the keys drive Rakumux (the mode to notice), a quiet
-/// `SESSION MODE` (`TERMINAL MODE` for the terminal panel) on the blue bar
-/// while they go to a program; the short words (`RAKUMUX`) when the full
-/// ones don't fit `room` columns.
-pub fn mode_label(app: &App, room: usize) -> Span<'static> {
+/// The most columns the label takes, its spaces included, whatever the row.
+const LABEL_MAX: usize = 34;
+/// The columns the label may take on a short row, its spaces included.
+const LABEL_MIN: usize = 15;
+
+/// The label, in the centre of the footer: the name of the workspace shown
+/// (`All`, `No workspace`), bold and dark on the orange bar while the keys
+/// drive Rakumux, quiet on the blue one while they go to a session; `TERMINAL
+/// MODE` while they go to the terminal panel, which the footer names no
+/// session for. A long name is cut to a quarter of the row (within
+/// [`LABEL_MIN`] and [`LABEL_MAX`] columns).
+pub fn centre_label(app: &App, room: usize) -> Span<'static> {
     let p = theme::palette();
-    let (word, style) = match app.focus {
-        Focus::List => (
-            "RAKUMUX",
-            Style::default().fg(p.background).bg(p.accent_orange),
-        ),
-        Focus::Session => (
-            "SESSION",
-            Style::default().fg(p.neutral_gray).bg(p.selection),
-        ),
-        Focus::Terminal => (
-            "TERMINAL",
-            Style::default().fg(p.text_primary).bg(p.selection),
-        ),
+    let style = match app.focus {
+        Focus::List => Style::default().fg(p.background).bg(p.accent_orange),
+        Focus::Session => Style::default().fg(p.neutral_gray).bg(p.selection),
+        Focus::Terminal => Style::default().fg(p.text_primary).bg(p.selection),
     };
-    let full = format!(" {word} MODE ");
-    let content = if str_width(&full) <= room {
-        full
-    } else {
-        format!(" {word} ")
+    let name = match app.focus {
+        Focus::List | Focus::Session => app.workspace_name(),
+        Focus::Terminal if room < LABEL_MIN => "TERMINAL".to_owned(),
+        Focus::Terminal => "TERMINAL MODE".to_owned(),
     };
+    let most = (room / 4).clamp(LABEL_MIN, LABEL_MAX).min(room);
+    let content = format!(" {} ", truncate(&name, most.saturating_sub(2)));
     Span::styled(content, style.add_modifier(Modifier::BOLD))
 }
 
 /// The footer's buttons: the feed, Help and Settings in Rakumux mode, and
 /// the Rakumux account at the right (once it was checked): Sign in while
 /// signed out, `✓ Signed in` while signed in; in session mode the Rakumux
-/// key alone, the way out (the label names the mode; the rest are a tap
-/// away from there). Nothing while typing a filter (those keys type) or
+/// key alone, the way out (the rest are a tap away from there). Nothing while typing a filter (those keys type) or
 /// while a dialog is open.
 pub fn buttons(app: &App) -> Vec<Button> {
     if !matches!(app.mode, AppMode::Normal) || app.list.filter_editing {
@@ -570,7 +563,7 @@ fn fit(spans: Vec<Span<'static>>, max: usize) -> Vec<Span<'static>> {
     out
 }
 
-/// How many of `buttons` to keep beside a mode label `label` columns wide:
+/// How many of `buttons` to keep beside a label `label` columns wide:
 /// as many as leave the message its room at the left (all of it, or
 /// [`MIN_MESSAGE`] columns of it). Returns `(kept, room for the left's
 /// text)`, the session and the message.
@@ -592,7 +585,7 @@ fn keep_buttons(width: usize, label: usize, message: usize, buttons: &[Button]) 
 }
 
 /// The footer line for a row `width` columns wide: the session and the
-/// message at the left, the mode label in the centre and the buttons on the
+/// message at the left, the label in the centre and the buttons on the
 /// right. It always fits the row (but for a label wider than the row): the
 /// session gives way first, then the message is cut, down to
 /// [`MIN_MESSAGE`] columns, then the buttons go from the right.
@@ -610,8 +603,8 @@ fn footer(app: &App, width: usize) -> (Line<'static>, Vec<FooterTarget>) {
 
 /// [`footer`] on `day`, whose tip it shows.
 fn footer_on(app: &App, width: usize, day: i32) -> (Line<'static>, Vec<FooterTarget>) {
-    let mode = mode_label(app, width);
-    let mode_width = str_width(&mode.content);
+    let label = centre_label(app, width);
+    let label_width = str_width(&label.content);
     let message = message(app);
     let buttons = buttons(app);
     // In the Tabs layout, which has no left column for them, the workspaces'
@@ -641,7 +634,7 @@ fn footer_on(app: &App, width: usize, day: i32) -> (Line<'static>, Vec<FooterTar
     };
     // Everything keeps its place in `rest` columns with `buttons`.
     let whole = |rest: usize, buttons: &[Button]| {
-        let (kept, room) = keep_buttons(rest, mode_width, spans_width(&message), buttons);
+        let (kept, room) = keep_buttons(rest, label_width, spans_width(&message), buttons);
         let right = match buttons_width(buttons) {
             0 => rest,
             used => rest.saturating_sub(used + 1),
@@ -650,14 +643,14 @@ fn footer_on(app: &App, width: usize, day: i32) -> (Line<'static>, Vec<FooterTar
             0 => 0,
             wanted => MARGIN + wanted + CLEAR,
         };
-        kept == buttons.len() && room >= wanted && left + mode_width + CLEAR <= right
+        kept == buttons.len() && room >= wanted && left + label_width + CLEAR <= right
     };
     let with_version = width
         .checked_sub(str_width(&version) + 1)
         .filter(|&rest| whole(rest, &buttons));
     // The row but the version.
     let width_left = with_version.unwrap_or(width);
-    let (kept, room) = keep_buttons(width_left, mode_width, spans_width(&message), &buttons);
+    let (kept, room) = keep_buttons(width_left, label_width, spans_width(&message), &buttons);
     let buttons = &buttons[..kept];
     let message = fit(message, room);
     let taken = match spans_width(&message) {
@@ -701,7 +694,7 @@ fn footer_on(app: &App, width: usize, day: i32) -> (Line<'static>, Vec<FooterTar
     let tip = app
         .tip(day)
         .filter(|_| app.focus == Focus::List && with_version.is_some() && !buttons.is_empty())
-        .filter(|tip| first + mode_width + TIP_SPACE + tip.width() + TIP_SPACE <= right)
+        .filter(|tip| first + label_width + TIP_SPACE + tip.width() + TIP_SPACE <= right)
         .map(|tip| (right - TIP_SPACE - tip.width(), tip));
     // The label: centred on the row, else as near it as it gets while
     // clear of the left and what's on the right (the tip, the buttons or
@@ -711,14 +704,14 @@ fn footer_on(app: &App, width: usize, day: i32) -> (Line<'static>, Vec<FooterTar
         None if buttons.is_empty() && with_version.is_none() => right,
         None => right.saturating_sub(CLEAR),
     };
-    let last = end.saturating_sub(mode_width).max(first);
-    let x = (width.saturating_sub(mode_width) / 2).clamp(first, last);
+    let last = end.saturating_sub(label_width).max(first);
+    let x = (width.saturating_sub(label_width) / 2).clamp(first, last);
     if x > left {
         spans.push(Span::raw(" ".repeat(x - left)));
     }
     let mut targets = vec![(
         u16::try_from(x).unwrap_or(u16::MAX),
-        u16::try_from(mode_width.min(width.saturating_sub(x))).unwrap_or(u16::MAX),
+        u16::try_from(label_width.min(width.saturating_sub(x))).unwrap_or(u16::MAX),
         Hit::ModeBadge,
     )];
     targets.extend(tab_targets.into_iter().map(|(x, width, hit)| {
@@ -728,7 +721,7 @@ fn footer_on(app: &App, width: usize, day: i32) -> (Line<'static>, Vec<FooterTar
             hit,
         )
     }));
-    spans.push(mode);
+    spans.push(label);
     if app.focus == Focus::List {
         // Dark ink on the orange bar; alerts stand out in bold.
         let palette = theme::palette();
@@ -828,17 +821,37 @@ pub(crate) fn without_version(line: &str) -> &str {
 mod tests {
     use super::*;
     use crate::app::testing::{options, scope, start, view, FakeApi, Harness};
+    use crate::app::WorkspaceView;
     use crossterm::event::KeyCode;
     use session_core::api::{ApiError, ErrorCode};
+    use session_core::{ids::WorkspaceId, workspace::Workspace};
 
     /// In the Tabs layout, whose footer has every button: Master detail's
     /// left column has the Inbox's own tab.
     fn harness(sessions: Vec<SessionView>) -> Harness {
+        harness_in(sessions, "Launch plans")
+    }
+
+    /// [`harness`], the list showing workspace `name`, which has `sessions`.
+    fn harness_in(mut sessions: Vec<SessionView>, name: &str) -> Harness {
+        let workspace = Workspace {
+            id: WorkspaceId::from_string("W1"),
+            name: name.to_owned(),
+            created_at: 1,
+        };
+        for session in &mut sessions {
+            session.workspace = Some(workspace.id.clone());
+        }
         let fake = FakeApi::new(sessions);
         let dir = tempfile::tempdir().unwrap();
         let mut options = options(&fake, scope(), &dir);
         options.settings.sessions.layout = crate::layout::SessionLayout::Tabs;
-        start(options, fake, dir)
+        let mut h = start(options, fake, dir);
+        h.app
+            .list
+            .set_workspace_view(WorkspaceView::In(workspace.id.clone()));
+        h.app.workspaces = vec![workspace];
+        h
     }
 
     #[tokio::test]
@@ -937,7 +950,7 @@ mod tests {
         // buttons, and the version last while it fits whole; a phone keeps
         // the mark and name, the Feed and Help, and no version.
         let session = " session: ● api";
-        let label = " RAKUMUX MODE ";
+        let label = " Launch plans ";
         assert_eq!(
             line(&h, 160),
             row(&[
@@ -963,7 +976,7 @@ mod tests {
         // Session mode: the label in the centre, the Rakumux key alone on
         // the right.
         h.press(KeyCode::Enter).await;
-        let label = " SESSION MODE ";
+        let label = " Launch plans ";
         assert_eq!(
             line(&h, 160),
             row(&[(0, session), (73, label), (144, WAY_OUT), (153, VERSION)])
@@ -1070,7 +1083,7 @@ mod tests {
         let line = footer_line(&h.app, 120);
         let shown = text(&line);
         assert!(shown.starts_with(" session: ● api "), "{shown:?}");
-        assert!(centred(&shown, " RAKUMUX MODE "), "{shown:?}");
+        assert!(centred(&shown, " Launch plans "), "{shown:?}");
         assert!(
             without_version(&shown).ends_with(" ? Help   , Settings  "),
             "{shown:?}"
@@ -1079,7 +1092,7 @@ mod tests {
         let label = line
             .spans
             .iter()
-            .find(|s| s.content == " RAKUMUX MODE ")
+            .find(|s| s.content == " Launch plans ")
             .unwrap();
         assert_eq!(label.style.bg, Some(p.accent_orange));
         assert_eq!(label.style.fg, Some(p.background));
@@ -1094,7 +1107,7 @@ mod tests {
         let line = footer_line(&h.app, 80);
         let shown = text(&line);
         assert!(shown.starts_with(" session: ● api "), "{shown:?}");
-        assert!(centred(&shown, " SESSION MODE "), "{shown:?}");
+        assert!(centred(&shown, " Launch plans "), "{shown:?}");
         assert!(
             shown.ends_with(&format!(" Ctrl-\\  {}", version_text())),
             "{shown:?}"
@@ -1105,7 +1118,7 @@ mod tests {
         let label = line
             .spans
             .iter()
-            .find(|s| s.content == " SESSION MODE ")
+            .find(|s| s.content == " Launch plans ")
             .unwrap();
         assert_eq!(label.style.bg, Some(p.selection));
         assert_eq!(label.style.fg, Some(p.neutral_gray));
@@ -1123,7 +1136,7 @@ mod tests {
         assert!(buttons(&h.app).is_empty());
         let line = text(&footer_line(&h.app, 60));
         assert!(line.starts_with(" session: ● api "), "{line:?}");
-        assert!(centred_in(&line, " RAKUMUX MODE ", 60), "{line:?}");
+        assert!(centred_in(&line, " Launch plans ", 60), "{line:?}");
     }
 
     #[tokio::test]
@@ -1137,7 +1150,7 @@ mod tests {
             line.starts_with(" session: ● api  Layout: Tabs "),
             "{line:?}"
         );
-        assert!(centred(&line, " RAKUMUX MODE "), "{line:?}");
+        assert!(centred(&line, " Launch plans "), "{line:?}");
         assert!(
             without_version(&line).ends_with(" ? Help   , Settings  "),
             "{line:?}"
@@ -1146,7 +1159,7 @@ mod tests {
         // buttons…
         let line = text(&footer_line(&h.app, 80));
         assert!(
-            line.starts_with(" session: ● api  Layout: Tabs   RAKUMUX MODE   f ≡ Inbox "),
+            line.starts_with(" session: ● api  Layout: Tabs   Launch plans   f ≡ Inbox "),
             "{line:?}"
         );
         // …then the session gives way: its name alone, then nothing.
@@ -1155,7 +1168,7 @@ mod tests {
         assert!(line.ends_with(" ? Help   , Settings  "), "{line:?}");
         let line = text(&footer_line(&h.app, 64));
         assert!(
-            line.starts_with(" Layout: Tabs   RAKUMUX MODE "),
+            line.starts_with(" Layout: Tabs   Launch plans "),
             "{line:?}"
         );
         assert!(line.ends_with(" ? Help   , Settings  "), "{line:?}");
@@ -1169,19 +1182,19 @@ mod tests {
         h.app.set_status(long);
         let line = text(&footer_line(&h.app, 100));
         assert!(line.starts_with(" A status message"), "{line:?}");
-        assert!(line.contains("…  RAKUMUX MODE "), "{line:?}");
+        assert!(line.contains("…  Launch plans "), "{line:?}");
         assert!(line.ends_with(" ? Help   , Settings  "), "{line:?}");
         assert_eq!(str_width(&line), 100, "{line:?}");
         // …then the buttons go…
         let line = text(&footer_line(&h.app, 70));
         assert!(
-            line.ends_with(" RAKUMUX MODE   f ≡ Inbox   ? Help  "),
+            line.ends_with(" Launch plans   f ≡ Inbox   ? Help  "),
             "{line:?}"
         );
         // …and the message takes the row up to the label.
         let line = text(&footer_line(&h.app, 50));
         assert!(line.starts_with(" A status message"), "{line:?}");
-        assert!(line.ends_with("…  RAKUMUX MODE "), "{line:?}");
+        assert!(line.ends_with("…  Launch plans "), "{line:?}");
         assert_eq!(str_width(&line), 50, "{line:?}");
         // With room to spare the session comes back.
         let line = text(&footer_line(&h.app, 200));
@@ -1189,7 +1202,7 @@ mod tests {
             line.starts_with(" session: ● api  A status message"),
             "{line:?}"
         );
-        assert!(centred(&line, " RAKUMUX MODE "), "{line:?}");
+        assert!(centred(&line, " Launch plans "), "{line:?}");
     }
 
     #[tokio::test]
@@ -1204,12 +1217,10 @@ mod tests {
                 h.press(KeyCode::Enter).await;
             }
             h.app.focus = focus;
-            let word = match focus {
-                Focus::List => " RAKUMUX ",
-                Focus::Session => " SESSION ",
-                Focus::Terminal => " TERMINAL ",
+            let full = match focus {
+                Focus::List | Focus::Session => " Launch plans ",
+                Focus::Terminal => " TERMINAL MODE ",
             };
-            let full = format!("{} MODE ", word.trim_end());
             for status in [
                 None,
                 Some("Renamed to a-much-longer-session-name-than-usual"),
@@ -1221,19 +1232,21 @@ mod tests {
                 for width in 0..=160 {
                     let (line, targets) = footer(&h.app, width);
                     let line = text(&line);
-                    // The full words wherever they fit, else the short.
-                    let label = if width >= str_width(&full) {
-                        full.as_str()
-                    } else {
-                        word
+                    // The whole name wherever it fits, else its start.
+                    let label = match focus {
+                        _ if width >= str_width(full) => full.to_owned(),
+                        Focus::Terminal if width < str_width(" TERMINAL ") => String::new(),
+                        Focus::Terminal => " TERMINAL ".to_owned(),
+                        _ => full.chars().take(width.saturating_sub(3)).collect(),
                     };
                     let (x, _, hit) = targets[0];
                     assert_eq!(hit, Hit::ModeBadge);
                     let at = line.chars().skip(usize::from(x)).collect::<String>();
-                    assert!(at.starts_with(label), "{focus:?} {width}: {line:?}");
-                    if width >= str_width(word) {
-                        assert!(str_width(&line) <= width, "{width}: {line:?}");
-                    }
+                    assert!(
+                        at.starts_with(label.trim_end()),
+                        "{focus:?} {width}: {line:?}"
+                    );
+                    assert!(str_width(&line) <= width.max(2), "{width}: {line:?}");
                 }
             }
         }
@@ -1246,7 +1259,41 @@ mod tests {
         assert!(!line.contains("Ctrl-\\"), "{line:?}");
         expire(&mut h);
         let line = text(&footer_line(&h.app, 40));
-        assert!(line.ends_with(" SESSION MODE   Ctrl-\\  "), "{line:?}");
+        assert!(line.ends_with(" Launch plans   Ctrl-\\  "), "{line:?}");
+    }
+
+    /// The centre names the workspace the list shows, whoever has the keys,
+    /// a long one cut to a quarter of the row; the bar's colour is the mode.
+    #[tokio::test]
+    async fn the_centre_names_the_workspace_shown() {
+        let p = theme::palette();
+        let long = "A workspace with a very long name for what it is";
+        for (name, cut) in [
+            ("Launch", "Launch"),
+            (long, "A workspace with a very long na…"),
+        ] {
+            let mut h = harness_in(vec![view("A", "api", 10)], name);
+            for (focus, ink) in [
+                (Focus::List, p.background),
+                (Focus::Session, p.neutral_gray),
+            ] {
+                h.app.focus = focus;
+                let line = text(&footer_line(&h.app, 200));
+                assert!(centred(&line, &format!(" {cut} ")), "{focus:?}: {line:?}");
+                assert!(!line.contains("MODE"), "{focus:?}: {line:?}");
+                assert_eq!(centre_label(&h.app, 200).style.fg, Some(ink));
+                assert!(str_width(&centre_label(&h.app, 40).content) <= LABEL_MIN);
+            }
+            // The other views by what they're called.
+            h.app.focus = Focus::List;
+            for (view, called) in [
+                (WorkspaceView::All, " All "),
+                (WorkspaceView::Unassigned, " No workspace "),
+            ] {
+                h.app.list.set_workspace_view(view);
+                assert_eq!(centre_label(&h.app, 120).content, called);
+            }
+        }
     }
 
     #[tokio::test]
@@ -1256,7 +1303,7 @@ mod tests {
         // account goes first)…
         let line = text(&footer_line(&h.app, 60));
         assert!(
-            line.ends_with(" RAKUMUX MODE   f ≡ Inbox   ? Help   , Settings  "),
+            line.ends_with(" Launch plans   f ≡ Inbox   ? Help   , Settings  "),
             "{line:?}"
         );
         // …then Settings, then Help: the Feed's button stays longest…
@@ -1265,16 +1312,15 @@ mod tests {
             assert!(line.ends_with(" f ≡ Inbox   ? Help  "), "{line:?}");
         }
         let line = text(&footer_line(&h.app, 27));
-        assert_eq!(line, " RAKUMUX MODE   f ≡ Inbox  ");
-        // …and the label longer still, in its short word when even its
-        // full ones don't fit.
-        assert_eq!(text(&footer_line(&h.app, 20)), "    RAKUMUX MODE ");
-        assert_eq!(text(&footer_line(&h.app, 12)), "  RAKUMUX ");
+        assert_eq!(line, " Launch plans   f ≡ Inbox  ");
+        // …and the label longer still, cut when even it doesn't fit.
+        assert_eq!(text(&footer_line(&h.app, 20)), "    Launch plans ");
+        assert_eq!(text(&footer_line(&h.app, 12)), " Launch pl… ");
         // Session mode: the session, the label and the way out fit a
         // phone.
         h.press(KeyCode::Enter).await;
         let line = text(&footer_line(&h.app, 40));
-        assert_eq!(line, " session: ● api  SESSION MODE   Ctrl-\\  ");
+        assert_eq!(line, " session: ● api  Launch plans   Ctrl-\\  ");
         // The targets match what's shown.
         let (line, targets) = footer(&h.app, 40);
         let shown: Vec<char> = text(&line).chars().collect();
@@ -1284,7 +1330,7 @@ mod tests {
                 .collect()
         };
         assert_eq!(targets.len(), 2);
-        assert_eq!(at(&targets[0]), " SESSION MODE ");
+        assert_eq!(at(&targets[0]), " Launch plans ");
         assert_eq!(targets[0].2, Hit::ModeBadge);
         assert_eq!(at(&targets[1]), " Ctrl-\\ ");
         assert_eq!(targets[1].2, Hit::FooterKey(FooterKey::Rakumux));
@@ -1350,7 +1396,7 @@ mod tests {
         let line = text(&footer_line(&h.app, 120));
         assert!(line.starts_with(" session: ● api  "), "{line:?}");
         assert!(line.contains(" connecting "), "{line:?}");
-        assert!(centred(&line, " RAKUMUX MODE "), "{line:?}");
+        assert!(centred(&line, " Launch plans "), "{line:?}");
         assert!(
             without_version(&line).ends_with(" ? Help   , Settings  "),
             "{line:?}"
@@ -1408,7 +1454,7 @@ mod tests {
             shown.ends_with(&format!("   {tip}  {ALL_BUTTONS}{VERSION}")),
             "{shown:?}"
         );
-        assert!(centred(&shown, " RAKUMUX MODE "), "{shown:?}");
+        assert!(centred(&shown, " Launch plans "), "{shown:?}");
         // Quiet ink on the bar, its keys bold as a button's are.
         let p = theme::palette();
         let keys = h.app.tip(DAY).unwrap().keys;

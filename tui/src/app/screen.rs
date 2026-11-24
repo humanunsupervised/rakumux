@@ -3,7 +3,7 @@
 //! by drawing and by the app (terminal size for attach/resize, mouse hits).
 //!
 //! The footer is always the last row, in every layout and in zoom, so the
-//! mode label never leaves it and nothing above it shifts when the mode, the
+//! label never leaves it and nothing above it shifts when the mode, the
 //! selection or a message changes.
 //!
 //! The detail is the session's terminal alone, with no title row: the
@@ -21,7 +21,7 @@ use ratatui::layout::Rect;
 use super::types::Focus;
 use crate::layout::{self, PaneFocus, PaneSizes, PanelPlacement, SessionLayout};
 
-/// The session, messages, the mode label and the keys for Help and Settings;
+/// The session, messages, the label and the keys for Help and Settings;
 /// every other key is listed in Settings.
 const FOOTER_ROWS: u16 = 1;
 /// Terminal sizes below this make no sense to request.
@@ -63,7 +63,7 @@ pub struct Screen {
     pub feed: Option<Rect>,
     /// The draggable line left of a docked feed pane.
     pub feed_divider: Option<Rect>,
-    /// The last row: the session, messages, the mode label, keys. Shown in
+    /// The last row: the session, messages, the label, keys. Shown in
     /// zoom too.
     pub footer: Option<Rect>,
 }
@@ -819,7 +819,7 @@ mod tests {
                 PaneSizes::default(),
             );
             assert_eq!(screen.terminal, Some(Rect::new(0, 0, width, height - 1)));
-            // The footer stays, so the mode label is always on screen.
+            // The footer stays, so the label is always on screen.
             assert_eq!(screen.footer, Some(Rect::new(0, height - 1, width, 1)));
             assert!(screen.list.is_none() && screen.detail.is_none() && screen.tabs.is_none());
             assert_eq!(
