@@ -24,11 +24,11 @@ use ratatui::{
 use session_core::api::{TranscriptMessage, TranscriptPart, TranscriptRole};
 
 use super::drawer::draw_back;
-use super::format::{now_secs, relative_time, truncate};
+use super::format::{now_secs, read_period_style, relative_time, truncate};
 use super::markdown;
-use super::session_list::first_visible_row;
 use super::utils::get_spinner_char;
 use crate::app::feed::{agent_name, plain, Card, EntryStatus, ThreadItem, TurnState};
+use crate::app::grouping::ReadPeriod;
 use crate::app::types::AccountStatus;
 use crate::app::{App, Hit};
 use crate::layout::str_width;
@@ -36,13 +36,18 @@ use crate::theme;
 
 /// Columns left of the content, as in the session list.
 const INDENT: usize = 3;
-/// Rows of a card at its usual height: its top border (the header), eight
-/// rows inside and its bottom border.
-const CARD_ROWS: u16 = 10;
+/// Lines of the answer a card shows until it's expanded.
+const ANSWER_LINES: usize = 10;
 /// Rows between one card and the next.
 const CARD_GAP: u16 = 1;
-/// Lines of an answered prompt a card shows at its usual height.
+/// Rows of a time period's header over its cards.
+const PERIOD_ROWS: u16 = 1;
+/// Lines of an answered prompt a card shows until it's expanded.
 const PROMPT_LINES: usize = 1;
+/// Lines of a prompt still waiting for its answer.
+const OPEN_PROMPT_LINES: usize = 5;
+/// Columns of a card that has room for its age beside its time.
+const AGE_FROM: usize = 44;
 /// The fewest lines of the answer an expanded card taller than the feed
 /// keeps under its prompt.
 const ANSWER_MIN_LINES: usize = 3;
@@ -166,25 +171,50 @@ fn draw_feed_list(
         }
         return;
     }
-    // A row between the band and the first card.
-    area.y += 1;
-    area.height = area.height.saturating_sub(1);
-    let selected = app.feed.selected_index().unwrap_or(0);
-    // Each card's rows and the gap after it; only an expanded card's depend
-    // on what it says.
-    let card_width = area.width.saturating_sub(2);
-    let heights: Vec<u16> = cards
-        .iter()
-        .map(|card| card_rows(app, *card, card_width, area.height) + CARD_GAP)
-        .collect();
-    // The last card shown needs no gap after it.
-    let first = first_visible_row(&heights, selected, area.height + CARD_GAP);
+    let selected = app.feed.selected_index().unwrap_or(0).min(cards.len() - 1);
     let now = now_secs();
+    let period = |index: usize| ReadPeriod::of(now, card_time(cards[index], now));
+    // Only the cards around the selected one are measured: what one says
+    // sets its rows.
+    let card_width = area.width.saturating_sub(2);
+    let max = area.height.saturating_sub(PERIOD_ROWS);
+    let rows_of = |index: usize| card_rows(app, cards[index], card_width, max);
+    // As many cards before the selected one as fit, the first shown under
+    // its period's header.
+    let mut first = selected;
+    let mut used = PERIOD_ROWS + rows_of(selected);
+    while let Some(before) = first.checked_sub(1) {
+        let header = if period(before) == period(first) {
+            0
+        } else {
+            PERIOD_ROWS
+        };
+        let rows = rows_of(before) + CARD_GAP + header;
+        if used + rows > area.height {
+            break;
+        }
+        used += rows;
+        first = before;
+    }
     let mut y = area.y;
     for (index, card) in cards.iter().enumerate().skip(first) {
-        let rows = heights[index] - CARD_GAP;
-        if y + rows > area.bottom() {
+        let headed = index == first || period(index) != period(index - 1);
+        let header = if headed { PERIOD_ROWS } else { 0 };
+        let rows = rows_of(index);
+        if y + header + rows > area.bottom() {
             break;
+        }
+        if headed {
+            let count = (0..cards.len())
+                .filter(|other| period(*other) == period(index))
+                .count();
+            let line = Rect {
+                y,
+                height: PERIOD_ROWS,
+                ..area
+            };
+            draw_period(f, app, period(index), count, line);
+            y += PERIOD_ROWS;
         }
         let cell = Rect {
             y,
@@ -197,18 +227,46 @@ fn draw_feed_list(
             hits.push((toggle, Hit::FeedExpand(index)));
         }
         hits.push((cell, Hit::FeedEntry(index)));
-        y += heights[index];
+        y += rows + CARD_GAP;
     }
 }
 
-/// A card's rows: [`CARD_ROWS`], or an expanded one's whole body and its
-/// borders (never fewer, and at most `max` rows: the feed's).
-fn card_rows(app: &App, card: Card, width: u16, max: u16) -> u16 {
-    if !app.feed.is_expanded(card) {
-        return CARD_ROWS.min(max.max(1));
+/// When `card` last changed, in Unix seconds (a prompt of unknown time
+/// counts as `now`).
+fn card_time(card: Card, now: i64) -> i64 {
+    match card {
+        Card::Entry(entry) => entry.finished_at / 1000,
+        Card::Open(open) => open.prompt.at.map_or(now, |at| at / 1000),
     }
-    let body = card_body(card, width, true, false, max);
-    (body.rows() + 2).max(CARD_ROWS).min(max.max(1))
+}
+
+/// A time period's header over its cards, as ready's in the session list: a
+/// bar across, its clock, name and how many it has.
+fn draw_period(f: &mut Frame, app: &App, period: ReadPeriod, count: usize, area: Rect) {
+    let p = theme::palette();
+    let mark = format!("{} ", app.icons().clock());
+    let count = count.to_string();
+    let used = INDENT + str_width(&mark) + str_width(period.label()) + str_width(&count) + 2;
+    let gap = usize::from(area.width).saturating_sub(used);
+    let line = Line::from(vec![
+        Span::raw(" ".repeat(INDENT)),
+        Span::styled(mark, read_period_style(period)),
+        Span::styled(period.label(), Style::default().fg(p.label_blue)),
+        Span::raw(" ".repeat(gap)),
+        Span::styled(count, Style::default().fg(p.text_muted)),
+    ]);
+    f.render_widget(
+        Paragraph::new(line).style(Style::default().bg(p.subgroup_bar)),
+        area,
+    );
+}
+
+/// A card's rows, its borders included: as many as what it shows takes, at
+/// most `max` (the feed's).
+fn card_rows(app: &App, card: Card, width: u16, max: u16) -> u16 {
+    let expanded = app.feed.is_expanded(card);
+    let body = card_body(card, width, expanded, false, max);
+    (body.rows() + 2).min(max).max(1)
 }
 
 /// What a card shows inside its borders: the prompt's bar, then the answer
@@ -225,21 +283,18 @@ impl CardBody {
     }
 }
 
-/// `card`'s body for a card `width` columns wide: at its usual height, its
-/// prompt's first line (a waiting prompt as much as leaves a line for the
-/// note under it) and the start of the answer; expanded, all of both, cut
-/// to fit `max` rows with its borders.
+/// `card`'s body for a card `width` columns wide: its prompt's first line (a
+/// waiting prompt's first [`OPEN_PROMPT_LINES`]) and the answer's first
+/// [`ANSWER_LINES`]; expanded, all of both. Cut to fit `max` rows with its
+/// borders.
 fn card_body(card: Card, width: u16, expanded: bool, chosen: bool, max: u16) -> CardBody {
     let p = theme::palette();
-    let inner_rows = if expanded {
-        (max as usize).saturating_sub(2)
-    } else {
-        (CARD_ROWS as usize).saturating_sub(2)
-    };
+    let inner_rows = (max as usize).saturating_sub(2);
     // The bar runs from border to border, the text a column further in.
     let bar_width = (width as usize).saturating_sub(2);
     let text_width = (width as usize).saturating_sub(4);
-    let text_style = Style::default().fg(if chosen { p.text_primary } else { p.text_muted });
+    // The answer reads as text to read, selected or not.
+    let text_style = Style::default().fg(p.text_primary);
     let mut more = false;
     let bar = match card.prompt() {
         Some(prompt) => {
@@ -252,6 +307,9 @@ fn card_body(card: Card, width: u16, expanded: bool, chosen: bool, max: u16) -> 
             };
             let rows = match card {
                 Card::Entry(_) if !expanded => PROMPT_LINES,
+                Card::Open(_) if !expanded => {
+                    OPEN_PROMPT_LINES.min(inner_rows.saturating_sub(under + 2).max(1))
+                }
                 _ => inner_rows.saturating_sub(under + 2).max(1),
             };
             more |= whole > rows;
@@ -265,21 +323,52 @@ fn card_body(card: Card, width: u16, expanded: bool, chosen: bool, max: u16) -> 
         }
         None => Vec::new(),
     };
-    let room = inner_rows.saturating_sub(bar.len());
+    let mut room = inner_rows.saturating_sub(bar.len());
+    if !expanded {
+        room = room.min(ANSWER_LINES);
+    }
     let answer = match card {
         Card::Entry(entry) => {
             let (lines, cut) = preview(&entry.text, text_width, room, text_style, expanded);
             more |= cut;
             lines
         }
-        Card::Open(_) => vec![Line::from(Span::styled(
-            "waiting for the answer…",
-            Style::default()
-                .fg(p.text_muted)
-                .add_modifier(Modifier::ITALIC),
-        ))],
+        Card::Open(_) => vec![working_line()],
     };
     CardBody { bar, answer, more }
+}
+
+/// What stands for the answer of a prompt still waiting for it.
+fn working_line() -> Line<'static> {
+    let p = theme::palette();
+    Line::from(vec![
+        Span::styled(
+            format!("{} ", get_spinner_char()),
+            Style::default().fg(p.accent_primary),
+        ),
+        Span::styled(
+            "agent is working on a reply",
+            Style::default().fg(p.text_primary),
+        ),
+    ])
+}
+
+/// `at` (Unix seconds) as a card shows it: within a day the time of day and
+/// how long ago (`14:32 · 3m`), else the date and time (`Nov 22 14:32`);
+/// `short`, the time or the date alone.
+fn card_stamp(at: i64, now: i64, short: bool) -> String {
+    let age = relative_time(now, at);
+    let Some(time) = chrono::DateTime::from_timestamp(at, 0) else {
+        return age;
+    };
+    let time = time.with_timezone(&chrono::Local);
+    let recent = now.saturating_sub(at) < 24 * 3_600;
+    match (recent, short) {
+        (true, true) => time.format("%H:%M").to_string(),
+        (true, false) => format!("{} · {age}", time.format("%H:%M")),
+        (false, true) => time.format("%b %-d").to_string(),
+        (false, false) => time.format("%b %-d %H:%M").to_string(),
+    }
 }
 
 /// A card's border: the accent's on the selected card while the feed has
@@ -293,9 +382,9 @@ fn card_border(chosen: bool, focused: bool) -> Style {
     })
 }
 
-/// One card in `cell`, a column in from each side: the top border names its
-/// session (then, quieter, its agent, folder, repository and branch) on the
-/// left and says its age and status on the right; inside, the prompt on a
+/// One card in `cell`, a column in from each side: the top border says when
+/// and names its workspace and session (then, quieter, its agent, folder,
+/// repository and branch) on the left and its status on the right; inside, the prompt on a
 /// bar, then the answer (or that it's coming); on the bottom border, at the
 /// right, `▾ more` when it shows only part of that (`▴ less` once
 /// expanded), whose target it returns.
@@ -544,10 +633,11 @@ fn card_title(app: &App, card: Card, place: &str, width: usize) -> Line<'static>
     Line::from(spans)
 }
 
-/// A card's top border, `width` columns: `╭ workspace › session  agent ·
-/// folder · repo ⎇ branch ─── age · ● status ╮`. Short of room, the status
+/// A card's top border, `width` columns: `╭ 14:32 · 3m  workspace › session
+/// agent · folder · repo ⎇ branch ─── ● status ╮`. Short of room, the status
 /// keeps only its mark, then the agent, folder, repository and branch give
-/// way from the end, then the workspace's and the session's name.
+/// way from the end, then the workspace's and the session's name; a narrow
+/// card's time has no age.
 fn card_top(
     app: &App,
     card: Card,
@@ -571,27 +661,19 @@ fn card_top(
         Card::Open(_) => EntryStatus::Working,
     };
     let (mark, mark_style) = status_mark(status);
-    let at = match card {
-        Card::Open(open) => open.prompt.at.unwrap_or(now * 1000),
-        Card::Entry(entry) => entry.finished_at,
-    };
-    let age = relative_time(now, at / 1000);
+    let stamp = card_stamp(card_time(card, now), now, width < AGE_FROM);
+    let stamped = str_width(&stamp) + 2;
     let mut meta = card_meta(app, card);
     // The status's word goes first when the left part wouldn't fit whole.
     let named = spans_width(&card_name(app, card, usize::MAX, name_style));
-    let left_width = named + 2 + str_width(&meta);
-    let whole = str_width(&age) + str_width(status.label()) + 7;
+    let left_width = stamped + named + 2 + str_width(&meta);
+    let whole = str_width(status.label()) + 4;
     let label = if left_width + whole + 5 <= width {
         status.label()
     } else {
         ""
     };
-    let mut right = vec![
-        Span::raw(" "),
-        Span::styled(age, muted),
-        Span::styled(" · ", muted),
-        Span::styled(mark, mark_style),
-    ];
+    let mut right = vec![Span::raw(" "), Span::styled(mark, mark_style)];
     if !label.is_empty() {
         right.push(Span::raw(" "));
         right.push(Span::styled(label, mark_style));
@@ -599,7 +681,7 @@ fn card_top(
     right.push(Span::raw(" "));
     let right_width: usize = right.iter().map(|span| str_width(&span.content)).sum();
     // Corners, the spaces around the left part, and at least one dash.
-    let room = width.saturating_sub(right_width + 5);
+    let room = width.saturating_sub(right_width + stamped + 5);
     let name = card_name(app, card, room, name_style);
     let named = spans_width(&name);
     let meta_room = room.saturating_sub(named + 2);
@@ -608,9 +690,14 @@ fn card_top(
     } else {
         String::new()
     };
-    let mut spans = vec![Span::styled("╭", border), Span::raw(" ")];
+    let mut spans = vec![
+        Span::styled("╭", border),
+        Span::raw(" "),
+        Span::styled(stamp, Style::default().fg(p.neutral_gray)),
+        Span::raw("  "),
+    ];
     spans.extend(name);
-    let mut used = 2 + named;
+    let mut used = 2 + stamped + named;
     if !meta.is_empty() {
         used += 2 + str_width(&meta);
         spans.push(Span::raw("  "));
@@ -877,10 +964,7 @@ fn draw_open(
     let head = lines.len();
     let mut body = prompt_bar(&open.prompt.text, width, None, false);
     body.push(Line::default());
-    body.push(Line::from(Span::styled(
-        format!("{} Waiting for the answer…", get_spinner_char()),
-        muted,
-    )));
+    body.push(working_line());
     let room = (inner.height as usize).saturating_sub(head);
     let scroll = app.feed.scroll.min(body.len().saturating_sub(room));
     lines.extend(body.into_iter().skip(scroll).take(room));

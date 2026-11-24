@@ -1165,6 +1165,7 @@ impl App {
             || self.creating_session
             || (self.rtop_on_screen && self.rtop.waiting())
             || (self.beats_on_screen && self.beats.waiting())
+            || (self.feed_on_screen && self.feed.working())
             || self.terminal_panel.busy()
             || matches!(self.detail.view, DetailView::Loading(_))
             || match &self.mode {

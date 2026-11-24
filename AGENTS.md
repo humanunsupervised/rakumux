@@ -1835,17 +1835,24 @@ goes back; `↑`/`↓` scroll it; `Ctrl-d`/`Ctrl-u`, PgUp/PgDn page it), and `En
 the cards) goes into its session when it runs here; `Space` (or a click on a card's `▾ more`)
 shows the selected card whole in the list (`▴ less`, or `Space` again, back; `FeedStore::expanded`,
 this window's); `←`/`→` and the keys that act on the list's
-session do nothing. It lists the account's machines' turns, newest first, each a card
-(`components/feed.rs`, `app::feed::Card`), ten rows tall and a row apart: on its top border the
+session do nothing. It lists the account's machines' turns, newest first, under a header per time
+period, the ones ready's sessions have (`ReadPeriod`: `◷ last hour`, last 2, 4, 8, 12 and 24 hours,
+older; a bar with how many, the first card shown always under its own), each a card
+(`components/feed.rs`, `app::feed::Card`), a row apart and as tall as what it shows: on its top
+border when (`card_stamp`: within a day `14:32 · 3m`, older `Nov 22 14:32`; narrow cards the time or
+date alone), then the
 workspace its session is in (this machine's sessions, whichever workspace is shown: entries carry
-none), in its own colour (`App::workspace_colors`), `›` and the session's name, then quieter its agent, folder, repository (only for this machine's sessions
+none), in its own colour (`App::workspace_colors`), `›` and the session's name, then quieter its
+agent, folder, repository (only for this machine's sessions
 listed here, from their git context, and not when named like the folder: entries carry none) and
-`⎇ branch`, and at the right its age and status
+`⎇ branch`, and at the right its status
 (`done`, `sending`, `working`, or the newest reply written back to it: `reply waiting`, `reply
 typed in`, `answered`, `reply not sent`; only the mark when short of room); inside, the
-prompt on a bar, then the start of the answer, its Markdown drawn (`▾ more` on its bottom
+prompt on a bar (its first line), then the answer's first 10 lines (`ANSWER_LINES`), its Markdown
+drawn in the text's own colour, not muted (`▾ more` on its bottom
 border when there's more; expanded, all of it, at most the feed's height)
-(`components/markdown.rs`, pulldown-cmark). A prompt
+(`components/markdown.rs`, pulldown-cmark); a prompt still waiting shows a spinner and `agent is
+working on a reply` there. Only the cards around the selected one are measured each frame. A prompt
 still waiting for its answer (rakumux.com's `open` turns, from the uploaded chats) is a card of
 its own, `working`, until the entry that answers it takes the card over. A reply read whole is
 its turn, its Markdown drawn, then its thread when someone wrote back; `r` (or a click on its

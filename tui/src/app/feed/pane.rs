@@ -31,8 +31,8 @@ const FEED_EVERY: Duration = Duration::from_secs(2);
 /// How often otherwise, while the account's feed is on: to count
 /// what's new.
 pub(in crate::app) const FEED_HIDDEN_EVERY: Duration = Duration::from_secs(10);
-/// Rows of a card and the row after it, for paging through them.
-const CARD_ROWS: isize = 11;
+/// About the rows of a card and the row after it, for paging through them.
+const CARD_ROWS: isize = 12;
 
 impl App {
     /// The feed has Rakumux mode's keys.

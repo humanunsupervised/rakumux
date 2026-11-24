@@ -1322,8 +1322,8 @@ async fn cards_show_the_prompt_then_the_answer_or_that_it_is_coming() {
             .unwrap_or_else(|| panic!("{needle:?} not in\n{text}"))
     };
     // Newest first: the waiting prompt, then the finished turn.
-    assert!(at("│  Now the docs") < at("waiting for the answer…"));
-    assert!(at("waiting for the answer…") < at("│  Fix the flaky parser test"));
+    assert!(at("│  Now the docs") < at("agent is working on a reply"));
+    assert!(at("agent is working on a reply") < at("│  Fix the flaky parser test"));
     assert!(at("│  Fix the flaky parser test") < at("Reply A"));
     assert!(
         !text.contains("›"),
@@ -1334,7 +1334,10 @@ async fn cards_show_the_prompt_then_the_answer_or_that_it_is_coming() {
     assert!(bar.len() >= 40, "{bar:?}");
     assert!(text.contains(" ago · working"), "{text}");
     // The waiting prompt's detail says its answer comes there.
-    assert!(text.contains("Waiting for the answer…"), "{text}");
+    assert_eq!(text.matches("agent is working on a reply").count(), 2);
+    assert!(!text.to_lowercase().contains("waiting for"), "{text}");
+    // Their spinners turn while the Inbox shows.
+    assert!(h.app.feed.working());
 }
 
 #[test]
@@ -1493,7 +1496,7 @@ fn feed_lines(h: &mut Harness) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn cards_are_ten_rows_a_row_apart_and_expand_to_show_all_they_say() {
+async fn cards_show_ten_lines_of_an_answer_and_expand_to_show_all_they_say() {
     let mut here = view("B", "docs", 10);
     here.git = crate::app::testing::on_branch("paper-links");
     if let Some(git) = here.git.as_mut() {
@@ -1527,7 +1530,7 @@ async fn cards_are_ten_rows_a_row_apart_and_expand_to_show_all_they_say() {
     let lines = feed_lines(&mut h);
     let top = lines
         .iter()
-        .position(|line| line.contains("╭ docs"))
+        .position(|line| line.contains("  docs  claude"))
         .unwrap_or_else(|| panic!("{lines:#?}"));
     // The header names the folder, then the repository (this machine's
     // session, named unlike its folder) and the branch.
@@ -1535,25 +1538,27 @@ async fn cards_are_ten_rows_a_row_apart_and_expand_to_show_all_they_say() {
         lines[top].contains("docs  claude · repo · focal-md ⎇ paper-links ─"),
         "{lines:#?}"
     );
-    // Ten rows, the answer's start, and `▾ more` on its bottom border.
+    // Ten lines of the answer, and `▾ more` on its bottom border.
     assert!(
         lines[top + 1].contains("Line 1 of the answer."),
         "{lines:#?}"
     );
     assert!(
-        lines[top + 8].contains("Line 8 of the answer. …"),
+        lines[top + 10].contains("Line 10 of the answer. …"),
         "{lines:#?}"
     );
-    assert!(lines[top + 9].contains("╰─"), "{lines:#?}");
-    assert!(lines[top + 9].contains(" ▾ more ─╯"), "{lines:#?}");
+    assert!(lines[top + 11].contains("╰─"), "{lines:#?}");
+    assert!(lines[top + 11].contains(" ▾ more ─╯"), "{lines:#?}");
     // A row, then the next card: another machine's, so no repository is
     // known; all it says fits, so nothing to expand.
-    assert_eq!(lines[top + 10], "", "{lines:#?}");
+    assert_eq!(lines[top + 12], "", "{lines:#?}");
     assert!(
-        lines[top + 11].contains("╭ nightly  claude · repo ⎇ main ─"),
+        lines[top + 13].contains("  nightly  claude · repo ⎇ main ─"),
         "{lines:#?}"
     );
-    assert!(!lines[top + 20].contains("more"), "{lines:#?}");
+    // As tall as what it says: one line, no more.
+    assert!(lines[top + 15].contains("╰─"), "{lines:#?}");
+    assert!(!lines[top + 15].contains("more"), "{lines:#?}");
 
     // Space shows the selected card whole, blank lines kept; again, back.
     h.press(KeyCode::Char(' ')).await;
@@ -1569,9 +1574,9 @@ async fn cards_are_ten_rows_a_row_apart_and_expand_to_show_all_they_say() {
     let bottom = top + 40;
     assert!(lines[bottom - 1].contains("Line 20"), "{lines:#?}");
     assert!(lines[bottom].contains(" ▴ less ─╯"), "{lines:#?}");
-    assert!(lines[bottom + 2].contains("╭ nightly"), "{lines:#?}");
+    assert!(lines[bottom + 2].contains("  nightly  "), "{lines:#?}");
     h.press(KeyCode::Char(' ')).await;
-    assert!(feed_lines(&mut h)[top + 9].contains(" ▾ more "));
+    assert!(feed_lines(&mut h)[top + 11].contains(" ▾ more "));
     // A click on `▾ more` expands it too, and selects its card.
     h.app.feed.select(1);
     let toggle = target(&mut h, Hit::FeedExpand(0));

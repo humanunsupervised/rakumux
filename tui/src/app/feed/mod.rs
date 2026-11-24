@@ -398,6 +398,13 @@ impl FeedStore {
         cards
     }
 
+    /// A prompt here still waits for its answer (its spinner turns).
+    pub fn working(&self) -> bool {
+        self.open
+            .iter()
+            .any(|open| !self.entries.iter().any(|entry| answers(entry, open)))
+    }
+
     /// What to ask the service next: changes after this revision, of this
     /// generation.
     pub fn cursor(&self) -> (Option<u64>, Option<u64>) {

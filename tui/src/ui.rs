@@ -2605,24 +2605,32 @@ mod tests {
         let p = crate::theme::palette();
         let mark = terminal.backend().buffer().get(16, 45).fg;
         assert_eq!(mark, p.accent_primary);
-        // The newest first, each a card: its session, agent and folder (no
-        // branch known) on the top border, then its age and `sending` while
-        // it isn't uploaded, `done` once it is (only the mark, short of
-        // room).
-        assert!(pane[1].starts_with(" ╭ api  claude · repo ─"), "{wide}");
-        assert!(pane[1].contains(" now · "), "{wide}");
-        assert!(pane[1].ends_with(" sending ╮"), "{wide}");
+        // Under its time period, the newest first, each a card: when, its
+        // session, agent and folder (no branch known) on the top border,
+        // then `sending` while it isn't uploaded, `done` once it is (only
+        // the mark, short of room).
+        assert!(pane[0].starts_with("   ◷ last hour  "), "{wide}");
+        assert!(pane[0].ends_with("  2"), "{wide}");
+        assert!(pane[1].contains(" · now  api  claude · repo ─"), "{wide}");
+        assert!(pane[1].ends_with(" ╮"), "{wide}");
         assert!(pane[2].starts_with(" │ Done: the parser handles"), "{wide}");
-        // Ten rows a card, everything it says fitting, so nothing to expand;
-        // a row between cards.
-        assert!(pane[10].starts_with(" ╰─"), "{wide}");
-        assert!(!pane[10].contains("more"), "{wide}");
-        assert_eq!(pane[11], "", "{wide}");
-        assert!(
-            pane[12].starts_with(" ╭ nightly-build  claude · repo ─"),
-            "{wide}"
-        );
-        assert!(pane[12].ends_with(" 5m · ● done ╮"), "{wide}");
+        // As tall as what it says, so nothing to expand; a row between
+        // cards, the next under the same period.
+        let end = pane
+            .iter()
+            .position(|row| row.starts_with(" ╰─"))
+            .unwrap_or_else(|| panic!("{wide}"));
+        assert!(!pane[end].contains("more"), "{wide}");
+        assert_eq!(pane[end + 1], "", "{wide}");
+        let next = &pane[end + 2];
+        assert!(next.starts_with(" ╭ "), "{wide}");
+        assert!(next.contains(" · 5m  nightly-build  claude"), "{wide}");
+        assert!(next.ends_with(" ● ╮"), "{wide}");
+        // Its text isn't muted, selected or not.
+        let buffer = terminal.backend().buffer();
+        for row in [2, end + 3] {
+            assert_eq!(buffer.get(3, row as u16).fg, p.text_primary, "{wide}");
+        }
         assert_eq!(
             pane[1].chars().count(),
             pane[2].trim_end_matches(' ').chars().count(),
@@ -2719,17 +2727,17 @@ mod tests {
         let wide = render(&mut h.app, 240, 48);
         let pane = list_column(&wide, 70);
         assert!(
-            pane[1].starts_with(" ╭ parser  claude · repo ⎇ fix/csv ─"),
+            pane[1].contains(" · 3m  parser  claude · repo ⎇ fix/csv ─"),
             "{wide}"
         );
-        assert!(pane[1].ends_with(" 3m · ✓ answered ╮"), "{wide}");
+        assert!(pane[1].ends_with("─ ✓ answered ╮"), "{wide}");
         // Short of room, the status's word goes first: the mark stays.
         let phone = render(&mut h.app, 45, 30);
         let top = phone
             .lines()
-            .find(|line| line.contains("╭ parser"))
+            .find(|line| line.contains("  parser  "))
             .unwrap_or_else(|| panic!("{phone}"));
-        assert!(top.trim_end().ends_with("3m · ✓ ╮"), "{phone}");
+        assert!(top.trim_end().ends_with(" ✓ ╮"), "{phone}");
     }
 
     #[test]
@@ -2883,10 +2891,10 @@ mod tests {
         h.app.process_pending();
         let screen = render(&mut h.app, 160, 48);
         for card in [
-            "╭ Launch › api  ",
-            "╭ Infrastructure › docs  ",
-            "╭ loose  ",
-            "╭ far  ",
+            " · 4m  Launch › api  ",
+            " · 3m  Infrastructure › ",
+            " · 2m  loose  ",
+            " · 1m  far  ",
         ] {
             assert!(screen.contains(card), "{card}: {screen}");
         }
@@ -2904,10 +2912,10 @@ mod tests {
             buffer.get(at as u16 + 2, row as u16).fg
         };
         let p = crate::theme::palette();
-        let (launch, infra) = (colour("╭ Launch"), colour("╭ Infrastructure"));
+        let (launch, infra) = (colour("  Launch"), colour("  Infrastructure"));
         assert!(p.repo_labels().contains(&launch) && p.repo_labels().contains(&infra));
         assert_ne!(launch, infra);
-        assert_ne!(launch, colour("╭ far"));
+        assert_ne!(launch, colour("  far"));
         // Read whole, first too.
         h.press(KeyCode::End).await;
         h.press(KeyCode::Enter).await;
@@ -2929,6 +2937,76 @@ mod tests {
         h.press(KeyCode::Esc).await;
         let phone = render(&mut h.app, 40, 30);
         assert!(phone.contains("› docs"), "{phone}");
+    }
+
+    #[tokio::test]
+    async fn the_inbox_is_sectioned_by_how_long_ago_as_ready_is() {
+        use rakumux_sensagent::feed::FeedStatus;
+        let entries = [5, 50, 90, 200, 400, 600, 1_300, 3_000, 9_000]
+            .into_iter()
+            .enumerate()
+            .map(|(i, minutes)| {
+                reply(
+                    &format!("R{i}"),
+                    "Z",
+                    &format!("s{i}"),
+                    "lab",
+                    minutes,
+                    "Ok.",
+                )
+            })
+            .collect();
+        let mut h = feed_harness(
+            crate::app::testing::FakeAccount::with_feed(),
+            Some(feed_page(FeedStatus::Ready, entries)),
+        );
+        let screen = render(&mut h.app, 160, 60);
+        let pane = list_column(&screen, 48);
+        let at = |text: &str| {
+            pane.iter()
+                .position(|row| row.contains(text))
+                .unwrap_or_else(|| panic!("{text}: {screen}"))
+        };
+        // Each header once, over its own, with how many.
+        let mut last = 0;
+        for (period, count, first) in [
+            ("◷ last hour", 2, "s0"),
+            ("◷ last 2 hours", 1, "s2"),
+            ("◷ last 4 hours", 1, "s3"),
+            ("◷ last 8 hours", 1, "s4"),
+            ("◷ last 12 hours", 1, "s5"),
+            ("◷ last 24 hours", 1, "s6"),
+            ("◷ older", 2, "s7"),
+        ] {
+            let header = at(period);
+            assert!(header >= last, "{screen}");
+            assert!(pane[header].ends_with(&format!(" {count}")), "{screen}");
+            assert!(
+                pane[header + 1].contains(&format!("  {first}  ")),
+                "{screen}"
+            );
+            last = header;
+        }
+        // Within a day the time and how long ago; older, the date.
+        assert!(pane[at("  s0  ")].contains(" · 5m  s0"), "{screen}");
+        let old = &pane[at("  s7  ")];
+        assert!(!old.contains(" · 2d") && old.contains(':'), "{screen}");
+        // Scrolled, the first card shown still says its period; every card
+        // can be reached, the selected one whole on screen.
+        for _ in 0..9 {
+            h.press(KeyCode::Down).await;
+            let screen = render(&mut h.app, 160, 20);
+            let pane = list_column(&screen, 48);
+            assert!(pane[0].contains("◷ "), "{screen}");
+            let name = h.app.feed.selected().unwrap().session_name.clone();
+            assert!(
+                pane.iter().any(|row| row.contains(&format!("  {name}  "))),
+                "{name}: {screen}"
+            );
+        }
+        // A phone's card: the time alone.
+        let phone = render(&mut h.app, 40, 30);
+        assert!(phone.contains("◷ "), "{phone}");
     }
 
     #[tokio::test]
@@ -3078,7 +3156,8 @@ mod tests {
         let width = usize::from(crate::layout::sidebar_width(160));
         let cards = list_column(&screen, width);
         assert_eq!(cards[45], "   ❯ Sessions   ≡ Inbox   ♥ Beats", "{screen}");
-        assert!(cards[2].starts_with(" ╭ api  claude · repo ─"), "{screen}");
+        assert!(cards[1].starts_with("   ◷ last hour"), "{screen}");
+        assert!(cards[2].contains(" · 2m  api  claude · repo ─"), "{screen}");
         assert!(rows[2].chars().nth(width) == Some('│'), "{screen}");
         assert!(screen.contains("finished 2m ago"), "{screen}");
         assert!(!screen.contains("hello from the fake"), "{screen}");
