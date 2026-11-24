@@ -651,7 +651,8 @@ impl App {
             KeyCode::Enter | KeyCode::Char('i') => self.rtop_enter(),
             KeyCode::Esc => self.unfocus_drawer(),
             KeyCode::Char(
-                'p' | 'r' | 'J' | 'K' | 'd' | 'x' | 'z' | 'c' | '/' | '{' | '}' | 'w' | 'W' | 'y',
+                'p' | 'r' | 'J' | 'K' | 'd' | 'x' | 'z' | 'c' | '/' | '{' | '}' | 'e' | 'E' | 'W'
+                | 'y',
             ) => {}
             _ => return false,
         }

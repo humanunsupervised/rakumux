@@ -5721,8 +5721,8 @@ async fn ai_titles_off_for_the_account_clear_the_spinners_and_the_refresh() {
 }
 
 /// A session's repositories are one line under its name, `▸` in the gutter
-/// left of them; its places open under it with `w` for the selected one,
-/// `W` for all of them, or a click on the `▸` or the names: where it works
+/// left of them; its places open under it with `e` for the selected one,
+/// `E` for all of them, or a click on the `▸` or the names: where it works
 /// now first, then the others.
 #[tokio::test]
 async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
@@ -5775,7 +5775,7 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
 
     // Open: where it works now, then the other place, each its path, then
     // its branch and age, a step further in.
-    h.press(KeyCode::Char('w')).await;
+    h.press(KeyCode::Char('e')).await;
     let screen = screen_rows(&mut h, 160, 48);
     let text = screen.join("\n");
     assert_eq!(in_list(&screen[name + 1]), "  ▾ repo", "{text}");
@@ -5797,21 +5797,21 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
     assert_eq!(column(&screen[here], "repo"), step_in);
     assert_eq!(column(&screen[fix], "worktrees"), step_in);
     // Its app under them.
-    h.press(KeyCode::Char('w')).await;
+    h.press(KeyCode::Char('e')).await;
     assert!(!h.app.places_open(&a));
 
     // B, which changed files nowhere, opens too: where it works now.
     let b = SessionId::from_string("B");
     h.app.list.select(Selection::Session(b.clone()));
-    h.press(KeyCode::Char('w')).await;
+    h.press(KeyCode::Char('e')).await;
     assert!(h.app.places_open(&b));
-    h.press(KeyCode::Char('w')).await;
+    h.press(KeyCode::Char('e')).await;
     assert!(!h.app.places_open(&b));
 
     // W opens every session's, then closes them.
-    h.press(KeyCode::Char('W')).await;
+    h.press(KeyCode::Char('E')).await;
     assert!(h.app.places_open(&a) && h.app.places_open(&b));
-    h.press(KeyCode::Char('W')).await;
+    h.press(KeyCode::Char('E')).await;
     assert!(!h.app.places_open(&a) && !h.app.places_open(&b));
 
     // A click on A's ▸ or its names opens its places, another closes
@@ -5927,7 +5927,7 @@ async fn an_open_places_path_copies_with_y_or_a_click() {
     assert_eq!(h.app.status(), Some("Copied /repo"));
 
     // Open, where it works now comes first, then the others.
-    h.press(KeyCode::Char('w')).await;
+    h.press(KeyCode::Char('e')).await;
     h.press(KeyCode::Char('j')).await;
     assert_eq!(h.app.list.selected_id(), Some(&a));
     assert_eq!(place(&h).as_deref(), Some("/repo"));

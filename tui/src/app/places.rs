@@ -3,7 +3,7 @@
 //! row has a line naming the repositories it works in, and under it, when
 //! opened, a pair of lines for the directory it works in now, then for
 //! every other place, most recent first ([`listed_places`]). Closed by
-//! default, and per window: `w` opens or closes the selected session's, `W`
+//! default, and per window: `e` opens or closes the selected session's, `E`
 //! every one's, a click or tap on its repositories' line too. Not saved.
 //! The list keys step through the selected session's open places as if
 //! each were a row under it, and `y` copies the path of the one they are on
@@ -69,7 +69,7 @@ impl App {
         self.places_open.contains(id)
     }
 
-    /// `w`: open or close where the selected session has worked.
+    /// `e`: open or close where the selected session has worked.
     pub fn toggle_places(&mut self) {
         let Some(session) = self.list.selected_session() else {
             self.set_status("Select a session to see where it has worked.");
@@ -79,7 +79,7 @@ impl App {
         self.toggle_places_of(id);
     }
 
-    /// `W`: open where every session has worked, or close them all when
+    /// `E`: open where every session has worked, or close them all when
     /// every one is open.
     pub fn toggle_all_places(&mut self) {
         let all: Vec<SessionId> = self

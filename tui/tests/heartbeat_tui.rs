@@ -263,6 +263,13 @@ fn the_left_columns_tabs_switch_and_help_is_searched_in_the_real_tui() {
     screen.until("the menu closed", |text| {
         !text.contains("+ Add new workspace") && text.contains("+ New session")
     });
+    // So does w, and it moves nothing: W does.
+    screen.send("w", &[]);
+    screen.shows("+ Add new workspace");
+    screen.keys(&["esc"]);
+    screen.until("the menu closed", |text| {
+        !text.contains("+ Add new workspace")
+    });
     // A click on an item shows that workspace's, and the tab names it.
     screen.click(5, 46);
     let menu = screen.shows("No workspace");

@@ -1,5 +1,5 @@
-//! The workspaces menu (a click on the left column's Workspaces tab, `m`, the
-//! Tabs layout's `⊞`, Settings → Workspace; `M` to move a session), a popover
+//! The workspaces menu (a click on the left column's Workspaces tab, `w`, the
+//! Tabs layout's `⊞`, Settings → Workspace; `W` to move a session), a popover
 //! over that tab where it's on screen, else a modal in the middle: All (not when moving), every workspace, No workspace, each
 //! with its sessions' count, the one shown (or the session's) marked `✓`,
 //! then `+ Add new workspace`, which turns into the new name's field; a

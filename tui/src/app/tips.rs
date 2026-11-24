@@ -80,7 +80,7 @@ const TIPS: &[Entry] = &[
         Source::Key(KeyAction::CheckForUpdate),
     ),
     tip(
-        "w",
+        "e",
         "where it changed files",
         Source::Key(KeyAction::Places),
     ),

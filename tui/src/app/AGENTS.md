@@ -67,7 +67,7 @@ new-session flow, and code boundaries.
   `SessionList::set_workspace_view`: only its sessions are listed, the rest wait in `elsewhere`;
   saved as `sessions.workspace`), the menu
   (`AppMode::Workspaces`, `WorkspacePicker`: a click on the left column's Workspaces tab, which
-  names the view, as a popover over it; `m`, Settings → Workspace; the Tabs layout's footer has `⊞`,
+  names the view, as a popover over it; `w`, Settings → Workspace; the Tabs layout's footer has `⊞`,
   `FooterKey::Workspace`, and a button per view, `workspace_views`, `view_count`,
   `click_workspace_tab`, drawn by `components/footer.rs::fit_tabs`; `M` for the selected session,
   `WorkspacePurpose::Move`, without All), adding (`+ Add new workspace`, a name field), renaming

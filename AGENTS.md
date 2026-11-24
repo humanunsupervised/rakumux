@@ -1652,7 +1652,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 - **Workspace**: a named group of this machine's sessions (`workspace_*`); the list shows every
   session (All), one workspace's, or those in none (No workspace), picked in the menu of
   the left column's Workspaces tab.
-  `m` switches, adds, renames or deletes one; `M` moves a session.
+  `w` switches, adds, renames or deletes one; `W` moves a session.
 - **Session order**: where the user put each session in the list (drag, `J`/`K`); a TUI setting,
   not part of the registry.
 - **Git context**: a session's branch, linked worktree and repository name, read from `.git` files
@@ -1660,7 +1660,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 - **AI title**: a session's name when the account service gave it (once per session, or when
   asked with `s`/↻); a name the user gave is never replaced automatically.
 - **Place**: a git working tree (main checkout or linked worktree) where a session's agent
-  changed files, as its conversation shows; listed under the session's row (`w`).
+  changed files, as its conversation shows; listed under the session's row (`e`).
 - **Reply** (agent reply): what an agent said when it finished a turn, captured by the daemon
   only while the status service has reply capture on, for the **feed**: the replies of the
   account's machines, kept on rakumux.com 7 days (90 with Pro) for every signed-in account.
@@ -1761,8 +1761,8 @@ that no shortcut uses is ignored, so Ctrl-↑ from a phone's key bar moves and A
 folder header, a new session there), `Esc` (after cancelling a pending key or the filter) or
 `Ctrl-\` back to the session you came from (with none, as after a start or a UI reload, into the
 running session in view), `Tab` last session, `1`-`9` go into that session,
-`n` new, `N` new sessions in this folder on your Sprite or here (the `☁ Sprite` toggle), `r` rename, `s` a new AI title for the session, `w` where the session has worked (`W`
-every session's), `y` copy a place's path (below), `p` pin, `m` workspaces (below: switch, add, rename, delete), `M` move the session to another workspace, `J`/`K` move the session down/up, `x` close, `d`/`dd` delete (`H` the session history), `D` pair a browser or phone (`rakumux devices pair`), `z` full
+`n` new, `N` new sessions in this folder on your Sprite or here (the `☁ Sprite` toggle), `r` rename, `s` a new AI title for the session, `e` where the session has worked (`E`
+every session's), `y` copy a place's path (below), `p` pin, `w` workspaces (below: switch, add, rename, delete), `W` move the session to another workspace, `J`/`K` move the session down/up, `x` close, `d`/`dd` delete (`H` the session history), `D` pair a browser or phone (`rakumux devices pair`), `z` full
 screen, `b` hide Master detail's list beside the session and show it again (below), `T` the
 terminal panel where it was last placed, `|` it beside the session, `-` below (below), `P` the Folders modal (Enter on the tabs: the active tab's), `/` filter, `Ctrl-y`/`Ctrl-e`/
 PgUp/PgDn scroll the preview, `\` send `Ctrl-\` to the session, `t` rtop (below), `?` Help, `,`/`o` Settings, `a` sign in (signed in: the account dialog; in the sign-in dialog `c` copies the link to the clipboard over OSC 52), `U` Update, `R`
@@ -1881,7 +1881,7 @@ at once), `a ✓ Signed in` while signed in (a tap opens the account dialog); `C
 session mode (the label names the mode); and last, quieter, this Rakumux's version (`v0.1.37`, a
 local build's `v0.1.0`). In Rakumux mode, just left of the buttons, a **tip** (`app/tips.rs`, `App::tip`): a key and what it does (`T terminal
 panel`, `f every agent's replies`, `t rtop: what sessions use`, the Rakumux key's `session or
-Rakumux mode`, `U update (sessions stay up)`, `w where it changed files`, `v Master detail or
+Rakumux mode`, `U update (sessions stay up)`, `e where it changed files`, `v Master detail or
 Tabs`, `p pin to the top`, `Tab last session`, `a answer agents from the web` only while signed
 out, `drag copies a session's text`, `rakumux remote on pairs a phone`, `B heartbeats: tasks on a clock`), its keys bold as a
 button's, its text in the version's ink. The local date picks it, so it's the same all day and the
@@ -2034,7 +2034,7 @@ they differ while there are at most ten and every window and start agrees), by n
 context's `repo`, the `origin` remote's name, else the main checkout's folder name), each once:
 its folder's first, then the one it works in now, then its places', most recent first; no folder,
 worktree path or branch (outside any repository, the folder it works in, plain text); cut at its
-end, the last name that fits and `…` for any after it, where the age and mark above end, `▸` in the gutter left of it. `w`, `W` or a click or tap on
+end, the last name that fits and `…` for any after it, where the age and mark above end, `▸` in the gutter left of it. `e`, `E` or a click or tap on
 the `▸` or the names (`Hit::PlacesToggle`) opens them under it (`▾`; closed by default, per
 window, not saved): each place a pair of lines two columns further in, a muted rule (`─`) above
 each: first where it works now (`PlaceRef::Current`: its git context's working tree, else its
@@ -2088,7 +2088,7 @@ has no column: there `⊞` (the menu, as a modal) and a button per view (`Hit::W
 the footer's left, in the session's place
 (`components/footer.rs::fit_tabs`, `tab_styles`, after a light `workspaces` label while everything
 fits beside it, `label_tabs`); short of room the one shown stays with as many others, in order, as
-fit beside `+N`, which opens the menu. `m` or Settings → Workspace
+fit beside `+N`, which opens the menu. `w` or Settings → Workspace
 (`app/workspaces.rs`, `components/workspaces.rs`) opens the workspaces modal: All, each
 workspace, No workspace, each with its count, the one shown marked `✓`, then `+ Add new
 workspace`, which turns into a field for the new name (Enter makes it and shows it). Enter or a
@@ -2099,7 +2099,7 @@ sessions, every tab and the session tab bar with them; the others wait aside
 (`every_session`), so a session another client moves elsewhere leaves the list as it would on
 deletion. The view is saved (`sessions.workspace`: absent for All, where a first start begins,
 `unassigned`, or a workspace's id), and a saved workspace that's gone shows All. New sessions
-(`n`, a heartbeat's `Ask agent`) start in the workspace shown (in none under All and No workspace). `M` (Settings →
+(`n`, a heartbeat's `Ask agent`) start in the workspace shown (in none under All and No workspace). `W` (Settings →
 Move to workspace) opens the same modal for the selected session, without All (`Move <name>
 to`, `+ New workspace`): Enter moves it (`session_workspace`). Going into a session another view
 hides (the feed, a restore) shows All. A daemon without `workspaces` gets "restart it (S)", and

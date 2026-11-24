@@ -223,9 +223,9 @@ pub enum KeyAction {
     Pin,
     /// `s`: a new AI title of the selected session.
     Retitle,
-    /// `w`: where the selected session has worked, under its row.
+    /// `e`: where the selected session has worked, under its row.
     Places,
-    /// `W`: where every session has worked.
+    /// `E`: where every session has worked.
     AllPlaces,
     /// `y`: the path of the open place the list keys are on, else of where
     /// the selected session works now, on the clipboard.
@@ -255,9 +255,9 @@ pub enum KeyAction {
     Rtop,
     /// `H`: the session history, deleted sessions to bring back.
     SessionHistory,
-    /// `m`: the workspaces modal: show another workspace, or add one.
+    /// `w`: the workspaces menu: show another workspace, or add one.
     Workspaces,
-    /// `M`: move the selected session to another workspace.
+    /// `W`: move the selected session to another workspace.
     MoveToWorkspace,
     /// `B`: the left column's Beats, the heartbeats (tasks run on a clock).
     Beats,
@@ -511,8 +511,8 @@ impl KeyAction {
             KeyAction::Rename => plain(&["r"]),
             KeyAction::Pin => plain(&["p"]),
             KeyAction::Retitle => plain(&["s"]),
-            KeyAction::Places => plain(&["w"]),
-            KeyAction::AllPlaces => plain(&["W"]),
+            KeyAction::Places => plain(&["e"]),
+            KeyAction::AllPlaces => plain(&["E"]),
             KeyAction::CopyPlace => plain(&["y"]),
             KeyAction::MoveDown => plain(&["J"]),
             KeyAction::MoveUp => plain(&["K"]),
@@ -525,8 +525,8 @@ impl KeyAction {
             KeyAction::TerminalPanel => plain(&["T"]),
             KeyAction::TerminalPanelBeside => plain(&["|"]),
             KeyAction::TerminalPanelBelow => plain(&["-"]),
-            KeyAction::Workspaces => plain(&["m"]),
-            KeyAction::MoveToWorkspace => plain(&["M"]),
+            KeyAction::Workspaces => plain(&["w"]),
+            KeyAction::MoveToWorkspace => plain(&["W"]),
             KeyAction::Pinned => plain(&["*"]),
             KeyAction::Rtop => plain(&["t"]),
             KeyAction::Beats => plain(&["B"]),
@@ -615,7 +615,7 @@ impl KeyAction {
                 "Press d or dd; both ask before deleting. Confirm with y or Enter.".into()
             }
             KeyAction::Places | KeyAction::AllPlaces => {
-                "Each session shows the folder it works in now. w opens the list under it (W \
+                "Each session shows the folder it works in now. e opens the list under it (E \
                  every session's, a click on its ▸ too): every other git working \
                  tree where it changed files, most recent first, with its repository, branch \
                  and when. Read on this machine from what the agent did. With the Inbox \

@@ -723,7 +723,7 @@ pub enum AppMode {
     Sections(SectionPicker),
     /// The session history: deleted sessions to bring back.
     History(HistoryPicker),
-    /// The workspaces modal (`m`, `M`).
+    /// The workspaces menu (`w`, `W`).
     Workspaces(super::workspaces::WorkspacePicker),
     Renaming(RenameDialog),
     /// A new heartbeat (Beats' `n` and `+ New heartbeat`).

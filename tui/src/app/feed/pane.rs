@@ -277,7 +277,10 @@ impl App {
             KeyCode::Esc => self.feed_back(),
             // Its cards have no sides to go to.
             KeyCode::Left | KeyCode::Right | KeyCode::Char('h') => {}
-            KeyCode::Char('p' | 's' | 'J' | 'K' | 'd' | 'x' | 'z' | 'c' | '/' | '{' | '}') => {}
+            KeyCode::Char(
+                'p' | 's' | 'J' | 'K' | 'd' | 'x' | 'z' | 'c' | '/' | '{' | '}' | 'e' | 'E' | 'W'
+                | 'y',
+            ) => {}
             _ => return false,
         }
         true

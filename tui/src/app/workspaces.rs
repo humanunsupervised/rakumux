@@ -5,12 +5,12 @@
 //! start shows it again. New sessions start in the workspace shown (in none
 //! under All and No workspace).
 //!
-//! The left column's Workspaces tab names the view shown. A click on it, `m`
+//! The left column's Workspaces tab names the view shown. A click on it, `w`
 //! and Settings → Workspace open the menu of them over it (a modal where the
 //! tab isn't on screen; the Tabs layout's footer has a button per view and
 //! `⊞`, which opens it): All, every workspace, No workspace, then
 //! `+ Add new workspace`. Enter (or a click) shows the row under the cursor,
-//! or names a new workspace and shows it. `M` (Settings → Move to
+//! or names a new workspace and shows it. `W` (Settings → Move to
 //! workspace) opens it for the selected session, without All: Enter moves
 //! the session there (into a new one from `+ New workspace`). `e` renames
 //! the workspace under the cursor (its name turns into a field), and `d`
@@ -159,7 +159,7 @@ impl App {
         self.list.every_session().filter(|s| view.shows(s)).count()
     }
 
-    /// A click on the Workspaces tab, `m`, the Tabs layout's `⊞`, Settings →
+    /// A click on the Workspaces tab, `w`, the Tabs layout's `⊞`, Settings →
     /// Workspace: the menu to show another view, or
     /// add, rename or delete a workspace.
     pub fn open_workspaces(&mut self) {
@@ -177,7 +177,7 @@ impl App {
         }
     }
 
-    /// `M`, Settings → Move to workspace: move the selected session.
+    /// `W`, Settings → Move to workspace: move the selected session.
     pub fn open_move_to_workspace(&mut self) {
         if self.refuse_workspaces() {
             return;
@@ -846,7 +846,7 @@ mod tests {
     #[tokio::test]
     async fn adding_a_workspace_shows_it_and_new_sessions_start_there() {
         let mut h = with_workspaces(None);
-        h.press(KeyCode::Char('m')).await;
+        h.press(KeyCode::Char('w')).await;
         for _ in 0..3 {
             h.press(KeyCode::Down).await;
         }
@@ -881,7 +881,7 @@ mod tests {
         h.app.show_view(WorkspaceView::All);
         assert_eq!(h.app.new_session_workspace(), None);
         // A name taken says so and stays open.
-        h.press(KeyCode::Char('m')).await;
+        h.press(KeyCode::Char('w')).await;
         for _ in 0..4 {
             h.press(KeyCode::Down).await;
         }
@@ -905,7 +905,7 @@ mod tests {
         h.app
             .list
             .select(Selection::Session(SessionId::from_string("B")));
-        h.press(KeyCode::Char('M')).await;
+        h.press(KeyCode::Char('W')).await;
         let screen = draw(&mut h, 160, 40);
         assert!(screen.contains("Move api to"), "{screen}");
         assert!(screen.contains("+ New workspace"), "{screen}");
@@ -928,7 +928,7 @@ mod tests {
         h.app
             .list
             .select(Selection::Session(SessionId::from_string("A")));
-        h.press(KeyCode::Char('M')).await;
+        h.press(KeyCode::Char('W')).await;
         h.press(KeyCode::Down).await;
         h.press(KeyCode::Down).await;
         h.press(KeyCode::Enter).await;
@@ -943,7 +943,7 @@ mod tests {
     #[tokio::test]
     async fn d_twice_deletes_a_workspace_and_its_sessions_are_unassigned() {
         let mut h = with_workspaces(Some("W1"));
-        h.press(KeyCode::Char('m')).await;
+        h.press(KeyCode::Char('w')).await;
         assert_eq!(picker(&h).cursor, 1);
         h.press(KeyCode::Char('d')).await;
         assert!(draw(&mut h, 160, 40).contains("d again deletes"));
@@ -976,7 +976,7 @@ mod tests {
     #[tokio::test]
     async fn e_renames_a_workspace_in_place_and_its_tab_follows() {
         let mut h = with_workspaces(Some("W1"));
-        h.press(KeyCode::Char('m')).await;
+        h.press(KeyCode::Char('w')).await;
         let screen = draw(&mut h, 160, 40);
         assert!(screen.contains("e rename"), "{screen}");
         assert!(screen.contains("d delete"), "{screen}");
@@ -997,7 +997,7 @@ mod tests {
         h.press(KeyCode::Esc).await;
         assert!(column(&mut h, 160).join("\n").contains("▴ Ship "));
         // Esc while renaming leaves the name as it was.
-        h.press(KeyCode::Char('m')).await;
+        h.press(KeyCode::Char('w')).await;
         h.press(KeyCode::Char('e')).await;
         h.type_text(" day").await;
         h.press(KeyCode::Esc).await;
@@ -1010,7 +1010,7 @@ mod tests {
     #[tokio::test]
     async fn the_key_line_s_rename_and_delete_take_a_click() {
         let mut h = with_workspaces(Some("W1"));
-        h.press(KeyCode::Char('m')).await;
+        h.press(KeyCode::Char('w')).await;
         draw(&mut h, 160, 40);
         click(&mut h, Hit::WorkspaceDelete);
         draw(&mut h, 160, 40);
@@ -1037,7 +1037,7 @@ mod tests {
         assert!(footer(&mut h, 160).starts_with(" session: ●"));
         let row = h.app.modal_context(false).general[SettingsItem::Workspace.index()].clone();
         assert!(row.disabled);
-        h.press(KeyCode::Char('m')).await;
+        h.press(KeyCode::Char('w')).await;
         assert!(matches!(h.app.mode, AppMode::Normal));
         assert!(h
             .app

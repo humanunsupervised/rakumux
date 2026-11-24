@@ -344,7 +344,7 @@ impl App {
             KeyCode::Char('c') => self.beats_rename(),
             KeyCode::Char('d') => self.beats_delete(deleting),
             // Keys that act on the list's session do nothing here.
-            KeyCode::Char('J' | 'K' | 'x' | 'z' | '/' | '{' | '}' | 'w' | 'W' | 'y' | 's') => {}
+            KeyCode::Char('J' | 'K' | 'x' | 'z' | '/' | '{' | '}' | 'E' | 'W' | 'y' | 's') => {}
             _ => return false,
         }
         true
