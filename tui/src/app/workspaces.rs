@@ -715,7 +715,7 @@ mod tests {
         // No row of buttons: the tab names it, after a chevron.
         let rows = column(&mut h, 160);
         assert!(
-            rows[37].starts_with("▴ Workspaces · All   ≡ Inbox   ♥ Beats"),
+            rows[37].starts_with("▴ All   ≡ Inbox   ♥ Beats"),
             "{rows:#?}"
         );
         assert!(!rows.join("\n").contains("Launch"), "{rows:#?}");
@@ -724,7 +724,7 @@ mod tests {
         let tab = Hit::LeftTab(LeftTab::Sessions);
         click(&mut h, tab);
         let rows = column(&mut h, 160);
-        assert!(rows[37].starts_with("▾ Workspaces · All"), "{rows:#?}");
+        assert!(rows[37].starts_with("▾ All"), "{rows:#?}");
         let menu: Vec<String> = rows[29..36]
             .iter()
             .map(|row| {
@@ -750,7 +750,7 @@ mod tests {
         assert_eq!(shown(&h), ["A"]);
         assert_eq!(saved(&h).as_deref(), Some("W1"));
         let rows = column(&mut h, 160);
-        assert!(rows[37].starts_with("▴ Workspaces · Launch"), "{rows:#?}");
+        assert!(rows[37].starts_with("▴ Launch"), "{rows:#?}");
         // By keys too, from where it is.
         click(&mut h, tab);
         assert_eq!(picker(&h).cursor, 1);
@@ -758,7 +758,6 @@ mod tests {
         h.press(KeyCode::Enter).await;
         assert_eq!(shown(&h), ["B", "C"]);
         assert_eq!(saved(&h).as_deref(), Some("unassigned"));
-        // Short of room the name alone stays.
         let rows = column(&mut h, 160);
         assert!(
             rows[37].starts_with("▴ No workspace   ≡ Inbox"),
@@ -799,7 +798,7 @@ mod tests {
         click(&mut h, tab);
         let phone = draw(&mut h, 40, 20);
         assert!(
-            phone.contains("✓ All") && phone.contains("▾ Workspaces · All"),
+            phone.contains("✓ All") && phone.contains("▾ All"),
             "{phone}"
         );
     }
@@ -996,7 +995,7 @@ mod tests {
         assert!(picker(&h).naming.is_none(), "the modal stays open, renamed");
         assert_eq!(h.app.workspace_name(), "Ship");
         h.press(KeyCode::Esc).await;
-        assert!(column(&mut h, 160).join("\n").contains("· Ship"));
+        assert!(column(&mut h, 160).join("\n").contains("▴ Ship "));
         // Esc while renaming leaves the name as it was.
         h.press(KeyCode::Char('m')).await;
         h.press(KeyCode::Char('e')).await;

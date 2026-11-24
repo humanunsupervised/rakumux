@@ -1793,7 +1793,7 @@ those shown (`layout::render_tabs_from`, `App::tab_first`), and the ends say how
 (`‹3`, `5›`; a click goes to the nearest one).
 **The left column** (`app/left.rs`, `components/left.rs`) has three tabs fixed at its bottom, a level
 above the list tabs (`layout::left_split`: a band of `left_tabs_rows`, 3 rows or 1 on short
-columns): `▴ Workspaces · Launch   ≡ Inbox ●N   ♥ Beats` (the active one bold with a line over it, in the accent
+columns): `▴ Launch   ≡ Inbox ●N   ♥ Beats` (the first is the workspace shown; the active one bold with a line over it, in the accent
 while the column has the keys; short rows narrow the gaps, then drop the marks, then the count),
 each a click target (`Hit::LeftTab`; on the active one, what's read whole goes back to its list)
 and, beside the session, `«` at their right, which hides the column. Workspaces is the
@@ -2079,8 +2079,7 @@ hides adds that folder to the filter. Other folders, commands and startup comman
 Tabs.
 
 **Workspaces.** With a daemon that has `workspaces`, the left column's Workspaces tab names the one
-shown after a chevron (`▴ Workspaces · Launch`, `▾` while its menu is open; short of room the name
-alone, `▴ Launch`, then cut): All (every session), a workspace, or No workspace (the sessions in
+shown after a chevron, and nothing else (`▴ Launch`, `▾` while its menu is open; cut short of room): All (every session), a workspace, or No workspace (the sessions in
 none). A click on it (`App::click_left_tab`; from the Inbox, Beats or a session it shows the sessions
 too) opens the workspaces menu as a popover just over it (`components/workspaces.rs`, `popover`): a
 row each with its sessions' count, the one shown ticked; Enter or a click switches the sessions

@@ -80,18 +80,9 @@ impl Tab {
     }
 }
 
-/// How much of the Workspaces tab shows: `Workspaces · Launch`, or the
-/// workspace's name in at most so many columns.
-#[derive(Clone, Copy)]
-enum Named {
-    Whole,
-    Name(usize),
-}
-
 /// The tabs, the indent and the gap between them, as wide as fits `room`:
-/// short of it the gaps narrow, then the first tab is the workspace's name
-/// alone, then the marks of the others go, then that name is cut, then the
-/// count goes.
+/// short of it the gaps narrow, then the marks of the Inbox and Beats go,
+/// then the workspace's name is cut, then the count goes.
 fn fit(app: &App, room: usize) -> (Vec<Tab>, usize, usize) {
     let count = feed_count(app);
     let shown = app
@@ -102,17 +93,17 @@ fn fit(app: &App, room: usize) -> (Vec<Tab>, usize, usize) {
         (Some(_), AppMode::Workspaces(_)) => Some("▾"),
         (Some(_), _) => Some("▴"),
     };
-    let tabs = |named: Named, icons: bool, counts: bool| -> Vec<Tab> {
+    let tabs = |cols: usize, icons: bool, counts: bool| -> Vec<Tab> {
         LeftTab::ALL
             .into_iter()
             .map(|tab| match tab {
                 LeftTab::Sessions => Tab {
                     tab,
                     icon: chevron.or(icons.then(|| app.icons().sessions())),
-                    name: match (&shown, named) {
-                        (None, _) => tab.label().to_string(),
-                        (Some(name), Named::Whole) => format!("{} · {name}", tab.label()),
-                        (Some(name), Named::Name(cols)) => truncate(name, cols),
+                    // The workspace shown (an older daemon has none).
+                    name: match &shown {
+                        Some(name) => truncate(name, cols),
+                        None => tab.label().to_string(),
                     },
                     count: None,
                 },
@@ -131,32 +122,28 @@ fn fit(app: &App, room: usize) -> (Vec<Tab>, usize, usize) {
             })
             .collect()
     };
-    let alone = Named::Name(NAME_COLS);
     let mut tries = vec![
-        (Named::Whole, true, true, INDENT, 3),
-        (Named::Whole, true, true, INDENT, 2),
-        (Named::Whole, true, true, 1, 2),
-        (alone, true, true, INDENT, 3),
-        (alone, true, true, INDENT, 2),
-        (alone, true, true, 1, 1),
-        (alone, false, true, 1, 2),
-        (alone, false, true, 1, 1),
+        (NAME_COLS, true, true, INDENT, 3),
+        (NAME_COLS, true, true, INDENT, 2),
+        (NAME_COLS, true, true, 1, 1),
+        (NAME_COLS, false, true, 1, 2),
+        (NAME_COLS, false, true, 1, 1),
     ];
     for counts in [true, false] {
         tries.extend(
             (NAME_MIN..NAME_COLS)
                 .rev()
-                .map(|cols| (Named::Name(cols), false, counts, 1, 1)),
+                .map(|cols| (cols, false, counts, 1, 1)),
         );
     }
-    for (named, icons, counts, indent, gap) in tries {
-        let tabs = tabs(named, icons, counts);
+    for (cols, icons, counts, indent, gap) in tries {
+        let tabs = tabs(cols, icons, counts);
         let width: usize = tabs.iter().map(Tab::width).sum();
         if indent + width + gap * (tabs.len() - 1) <= room {
             return (tabs, indent, gap);
         }
     }
-    (tabs(Named::Name(NAME_MIN), false, false), 0, 1)
+    (tabs(NAME_MIN, false, false), 0, 1)
 }
 
 fn draw_left_tabs(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) {

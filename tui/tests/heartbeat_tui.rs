@@ -237,7 +237,7 @@ fn the_left_columns_tabs_switch_and_help_is_searched_in_the_real_tui() {
     let screen = start_tui(&world);
     // A start shows the sessions, over the column's tabs.
     screen.shows("+ New session");
-    let shown = screen.shows("▴ Workspaces · All   ≡ Inbox   ♥ Beats");
+    let shown = screen.shows("▴ All   ≡ Inbox   ♥ Beats");
     assert!(shown.contains("◔ Status"), "{shown}");
     // f: the Inbox in their place; Esc: the sessions.
     screen.send("f", &[]);
@@ -248,13 +248,13 @@ fn the_left_columns_tabs_switch_and_help_is_searched_in_the_real_tui() {
         text.contains("◔ Status") && !text.contains("Sign in to see")
     });
     // A click on a tab at the bottom shows it (SGR mouse: press, release).
-    screen.click(38, 46);
+    screen.click(25, 46);
     screen.shows("+ New heartbeat");
     // The Workspaces tab's shows the sessions and the menu over it; Esc
     // closes the menu.
     screen.click(5, 46);
     let menu = screen.shows("+ Add new workspace");
-    assert!(menu.contains("▾ Workspaces · All"), "{menu}");
+    assert!(menu.contains("▾ All"), "{menu}");
     assert!(
         menu.contains("✓ All") && menu.contains("No workspace"),
         "{menu}"
@@ -275,7 +275,7 @@ fn the_left_columns_tabs_switch_and_help_is_searched_in_the_real_tui() {
     screen.click(5, 46);
     screen.shows("✓ No workspace");
     screen.keys(&["up", "enter"]);
-    screen.shows("▴ Workspaces · All");
+    screen.shows("▴ All");
     // rtop is the drawer's, on the right, beside it.
     screen.send("t", &[]);
     let both = screen.shows("▥ rtop");
@@ -306,7 +306,7 @@ fn a_heartbeat_is_made_renamed_and_deleted_in_the_real_tui() {
     // Beats, empty: the row that makes one, and its form.
     screen.shows("+ New session");
     // The Workspaces tab names the one shown.
-    screen.shows("▴ Workspaces · All   ≡ Inbox   ♥ Beats");
+    screen.shows("▴ All   ≡ Inbox   ♥ Beats");
     screen.send("B", &[]);
     screen.shows("+ New heartbeat");
     screen.keys(&["enter"]);
