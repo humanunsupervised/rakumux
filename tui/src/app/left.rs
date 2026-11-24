@@ -1,6 +1,7 @@
 //! The left column's tabs, at its bottom: Workspaces (the sessions of the
 //! workspace shown, under their own tabs, Pinned, Status, Repos and Agent:
-//! `list_tabs.rs`, and over the workspaces' buttons: `workspaces.rs`), the Inbox (`feed/`) and
+//! `list_tabs.rs`; the tab names the workspace, and a click on it opens the
+//! menu of them over it: `workspaces.rs`), the Inbox (`feed/`) and
 //! Beats (`heartbeats.rs`). Master detail shows the one picked in the list's
 //! column, a phone and a stacked screen on the whole screen in Rakumux mode.
 //! Tabs has no column: the Inbox or Beats takes the session's place under
@@ -21,7 +22,7 @@ use crate::layout;
 /// The left column's tabs, in order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LeftTab {
-    /// The workspaces: the sessions of the one shown, over their buttons.
+    /// The workspaces: the sessions of the one shown.
     #[default]
     Sessions,
     /// What agents said when they finished a turn (`app/feed`).
@@ -118,12 +119,21 @@ impl App {
     /// to its list.
     pub fn click_left_tab(&mut self, tab: LeftTab) {
         match tab {
-            LeftTab::Sessions => {}
+            LeftTab::Sessions => return self.click_workspaces_tab(),
             LeftTab::Inbox if self.left_tab == tab => self.feed.reading = false,
             LeftTab::Beats if self.left_tab == tab => self.beats.reading = None,
             LeftTab::Inbox | LeftTab::Beats => {}
         }
         self.show_left_tab(tab);
+    }
+
+    /// A click on the Workspaces tab: the sessions, and the menu of the
+    /// workspaces over the tab.
+    fn click_workspaces_tab(&mut self) {
+        self.show_left_tab(LeftTab::Sessions);
+        if self.has_workspaces() {
+            self.open_workspaces();
+        }
     }
 
     /// The left column shows the sessions, with the keys in Rakumux mode.

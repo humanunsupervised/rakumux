@@ -1,5 +1,5 @@
 //! The left column (`app/left.rs`): what its tab shows (the sessions, the
-//! Inbox or Beats), and its tabs fixed at the bottom, `❯ Workspaces   ≡ Inbox
+//! Inbox or Beats), and its tabs fixed at the bottom, `▴ Launch   ≡ Inbox
 //! ●2   ♥ Beats`: a band, the active one bold with a line over it, in the
 //! accent while the column has the keys; beside the session, `«` at its right
 //! hides the column. A rail is what's left of it then.
@@ -16,11 +16,11 @@ use super::feed::draw_feed;
 use super::footer::feed_count;
 use super::heartbeats::draw_beats;
 use super::session_list::{draw_session_list, folder_item_height};
-use super::workspace_bar::draw_workspace_bar;
 use crate::app::left::LeftTab;
-use crate::app::types::Focus;
+use crate::app::types::{AppMode, Focus};
 use crate::app::{App, Hit};
-use crate::layout::{left_split, str_width};
+use crate::layout::{left_split, str_width, truncate};
+use crate::printable::printable;
 use crate::theme;
 
 /// Columns left of the first tab, as in the session list.
@@ -33,10 +33,7 @@ const HIDE_COLS: u16 = 3;
 pub fn draw_left(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) {
     let (body, tabs) = left_split(area);
     match app.left_tab() {
-        LeftTab::Sessions => {
-            let sessions = draw_workspace_bar(f, app, body, hits);
-            draw_session_list(f, app, sessions, hits);
-        }
+        LeftTab::Sessions => draw_session_list(f, app, body, hits),
         LeftTab::Inbox | LeftTab::Beats => {
             let p = theme::palette();
             f.render_widget(
@@ -62,18 +59,16 @@ fn text_row(area: Rect) -> Rect {
     }
 }
 
-fn icon(app: &App, tab: LeftTab) -> &'static str {
-    match tab {
-        LeftTab::Sessions => app.icons().sessions(),
-        LeftTab::Inbox => app.icons().feed(),
-        LeftTab::Beats => app.icons().beats(),
-    }
-}
+/// The columns a workspace's name gets on its tab.
+const NAME_COLS: usize = 16;
+/// The fewest it's cut to.
+const NAME_MIN: usize = 6;
 
 /// One tab as it's drawn: its mark (when there's room), name and count.
 struct Tab {
     tab: LeftTab,
     icon: Option<&'static str>,
+    name: String,
     count: Option<String>,
 }
 
@@ -81,38 +76,87 @@ impl Tab {
     fn width(&self) -> usize {
         let icon = self.icon.map_or(0, |icon| str_width(icon) + 1);
         let count = self.count.as_ref().map_or(0, |count| str_width(count) + 1);
-        icon + str_width(self.tab.label()) + count
+        icon + str_width(&self.name) + count
     }
 }
 
+/// How much of the Workspaces tab shows: `Workspaces · Launch`, or the
+/// workspace's name in at most so many columns.
+#[derive(Clone, Copy)]
+enum Named {
+    Whole,
+    Name(usize),
+}
+
 /// The tabs, the indent and the gap between them, as wide as fits `room`:
-/// short of it the gaps narrow, then the marks go, then the count.
+/// short of it the gaps narrow, then the first tab is the workspace's name
+/// alone, then the marks of the others go, then that name is cut, then the
+/// count goes.
 fn fit(app: &App, room: usize) -> (Vec<Tab>, usize, usize) {
     let count = feed_count(app);
-    let tabs = |icons: bool, counts: bool| -> Vec<Tab> {
+    let shown = app
+        .has_workspaces()
+        .then(|| truncate(&printable(&app.workspace_name()), NAME_COLS));
+    let chevron = match (&shown, &app.mode) {
+        (None, _) => None,
+        (Some(_), AppMode::Workspaces(_)) => Some("▾"),
+        (Some(_), _) => Some("▴"),
+    };
+    let tabs = |named: Named, icons: bool, counts: bool| -> Vec<Tab> {
         LeftTab::ALL
             .into_iter()
-            .map(|tab| Tab {
-                tab,
-                icon: icons.then(|| icon(app, tab)),
-                count: count.clone().filter(|_| counts && tab == LeftTab::Inbox),
+            .map(|tab| match tab {
+                LeftTab::Sessions => Tab {
+                    tab,
+                    icon: chevron.or(icons.then(|| app.icons().sessions())),
+                    name: match (&shown, named) {
+                        (None, _) => tab.label().to_string(),
+                        (Some(name), Named::Whole) => format!("{} · {name}", tab.label()),
+                        (Some(name), Named::Name(cols)) => truncate(name, cols),
+                    },
+                    count: None,
+                },
+                LeftTab::Inbox => Tab {
+                    tab,
+                    icon: icons.then(|| app.icons().feed()),
+                    name: tab.label().to_string(),
+                    count: count.clone().filter(|_| counts),
+                },
+                LeftTab::Beats => Tab {
+                    tab,
+                    icon: icons.then(|| app.icons().beats()),
+                    name: tab.label().to_string(),
+                    count: None,
+                },
             })
             .collect()
     };
-    for (icons, counts, indent, gap) in [
-        (true, true, INDENT, 3),
-        (true, true, INDENT, 2),
-        (true, true, 1, 1),
-        (false, true, 1, 2),
-        (false, true, 1, 1),
-    ] {
-        let tabs = tabs(icons, counts);
+    let alone = Named::Name(NAME_COLS);
+    let mut tries = vec![
+        (Named::Whole, true, true, INDENT, 3),
+        (Named::Whole, true, true, INDENT, 2),
+        (Named::Whole, true, true, 1, 2),
+        (alone, true, true, INDENT, 3),
+        (alone, true, true, INDENT, 2),
+        (alone, true, true, 1, 1),
+        (alone, false, true, 1, 2),
+        (alone, false, true, 1, 1),
+    ];
+    for counts in [true, false] {
+        tries.extend(
+            (NAME_MIN..NAME_COLS)
+                .rev()
+                .map(|cols| (Named::Name(cols), false, counts, 1, 1)),
+        );
+    }
+    for (named, icons, counts, indent, gap) in tries {
+        let tabs = tabs(named, icons, counts);
         let width: usize = tabs.iter().map(Tab::width).sum();
         if indent + width + gap * (tabs.len() - 1) <= room {
             return (tabs, indent, gap);
         }
     }
-    (tabs(false, false), 0, 1)
+    (tabs(Named::Name(NAME_MIN), false, false), 0, 1)
 }
 
 fn draw_left_tabs(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) {
@@ -160,7 +204,7 @@ fn draw_left_tabs(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hi
         if let Some(icon) = tab.icon {
             spans.push(Span::styled(format!("{icon} "), icon_style));
         }
-        spans.push(Span::styled(tab.tab.label(), name_style));
+        spans.push(Span::styled(tab.name.clone(), name_style));
         if let Some(count) = &tab.count {
             spans.push(Span::styled(
                 format!(" {count}"),

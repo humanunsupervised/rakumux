@@ -694,8 +694,8 @@ impl KeyAction {
                 .into(),
             KeyAction::Workspaces => "Groups of sessions on this machine. The list shows one \
                  workspace, or the sessions in none (No workspace); new sessions start in the \
-                 one shown, whose button is lit at the bottom of the left column's Workspaces tab \
-                 and which the next start shows again. Enter shows \
+                 one shown, which the left column's Workspaces tab names (a click on it opens this \
+                 menu) and the next start shows again. Enter shows \
                  the one under the cursor; + Add new workspace names one; e renames one; d twice \
                  deletes one, its sessions going to No workspace. Same as `rakumux workspace`."
                 .into(),
@@ -2324,8 +2324,8 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     );
     doc.text(
         "Its tabs, at the bottom, show your workspaces' sessions, the Inbox (`f`) or Beats (`B`) \
-         in it. Over them, the workspaces' buttons switch which sessions are listed; the Inbox \
-         and Beats go across every workspace.",
+         in it. The Workspaces tab names the workspace shown, and a click on it opens a menu to \
+         switch; the Inbox and Beats go across every workspace.",
     );
     doc.text(
         "`b` or the « right of those tabs hides it, so the session gets \

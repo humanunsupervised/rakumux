@@ -1,5 +1,6 @@
-//! The workspaces modal (`m`, the footer's `⊞`, Settings → Workspace; `M` to
-//! move a session): All (not when moving), every workspace, No workspace, each
+//! The workspaces menu (a click on the left column's Workspaces tab, `m`, the
+//! Tabs layout's `⊞`, Settings → Workspace; `M` to move a session), a popover
+//! over that tab where it's on screen, else a modal in the middle: All (not when moving), every workspace, No workspace, each
 //! with its sessions' count, the one shown (or the session's) marked `✓`,
 //! then `+ Add new workspace`, which turns into the new name's field; a
 //! workspace being renamed turns into one in its place.
@@ -15,7 +16,7 @@ use ratatui::{
 use super::format::truncate;
 use crate::app::workspaces::{WorkspacePicker, WorkspacePurpose, WorkspaceRow, NO_WORKSPACE};
 use crate::app::{App, Hit, WorkspaceView};
-use crate::layout::str_width;
+use crate::layout::{left_split, str_width};
 use crate::theme;
 
 /// Widest the modal gets.
@@ -23,7 +24,46 @@ const MODAL_WIDTH: u16 = 56;
 /// Most rows shown at once.
 const MAX_ROWS: u16 = 14;
 
-/// Draw the modal in the middle of `area` and record its click targets.
+/// Narrowest the popover gets.
+const POPOVER_MIN: u16 = 30;
+/// Widest the popover gets.
+const POPOVER_MAX: u16 = 44;
+
+/// Where the popover opens: just over the left column's tabs, when the
+/// column is on screen and the menu switches workspaces; `rows` of it, `names`
+/// columns its widest row.
+fn popover(app: &App, picker: &WorkspacePicker, rows: usize, names: usize) -> Option<(Rect, u16)> {
+    if picker.purpose != WorkspacePurpose::Switch {
+        return None;
+    }
+    let pane = app.screen().list?;
+    let (body, tabs) = left_split(pane);
+    // Borders and the row under the menu's.
+    let frame = 3;
+    let shown = (rows as u16).min(body.height.saturating_sub(frame));
+    // The columns a row takes besides its name and its count's: its bar and
+    // mark, a gap and the borders with a column either side.
+    let wanted = (names + 10) as u16;
+    let width = wanted
+        .clamp(POPOVER_MIN, POPOVER_MAX)
+        .min(pane.width.saturating_sub(2));
+    if shown < 3 || width < 20 {
+        return None;
+    }
+    let height = shown + frame;
+    Some((
+        Rect {
+            x: pane.x + 1,
+            y: tabs.y - height,
+            width,
+            height,
+        },
+        shown,
+    ))
+}
+
+/// Draw the menu (over its tab, or in the middle of `area`) and record its
+/// click targets.
 pub fn draw_workspaces(
     f: &mut Frame,
     app: &App,
@@ -33,25 +73,45 @@ pub fn draw_workspaces(
 ) {
     let p = theme::palette();
     let rows = app.workspace_rows();
-    let width = MODAL_WIDTH.min(area.width.saturating_sub(4));
-    // Borders, padding, rows, error, blank, keys.
-    let list_rows = (rows.len() as u16).min(MAX_ROWS);
-    let height = (list_rows + 6).min(area.height);
-    if width < 24 || height < 7 {
-        return;
-    }
-    let popup = Rect {
-        x: area.x + (area.width - width) / 2,
-        y: area.y + (area.height - height) / 3,
-        width,
-        height,
+    let widest = app
+        .workspace_views()
+        .iter()
+        .map(|view| {
+            let count = app.view_count(view).to_string();
+            str_width(&app.view_name(view)) + str_width(&count)
+        })
+        .max()
+        .unwrap_or(0);
+    let over = popover(app, picker, rows.len(), widest);
+    let (popup, list_rows) = match over {
+        Some(over) => over,
+        None => {
+            let width = MODAL_WIDTH.min(area.width.saturating_sub(4));
+            // Borders, padding, rows, error, blank, keys.
+            let list_rows = (rows.len() as u16).min(MAX_ROWS);
+            let height = (list_rows + 6).min(area.height);
+            if width < 24 || height < 7 {
+                return;
+            }
+            let popup = Rect {
+                x: area.x + (area.width - width) / 2,
+                y: area.y + (area.height - height) / 3,
+                width,
+                height,
+            };
+            (popup, list_rows)
+        }
     };
     let (title, marked) = match &picker.purpose {
+        // The tab under it names it.
+        WorkspacePurpose::Switch if over.is_some() => {
+            (String::new(), app.list.workspace_view().clone())
+        }
         WorkspacePurpose::Switch => (" Workspaces ".to_owned(), app.list.workspace_view().clone()),
         WorkspacePurpose::Move { session, name } => (
             format!(
                 " Move {} to ",
-                truncate(name, width.saturating_sub(12) as usize)
+                truncate(name, popup.width.saturating_sub(12) as usize)
             ),
             match app
                 .list
@@ -76,11 +136,12 @@ pub fn draw_workspaces(
         .style(p.base());
     let inner = block.inner(popup);
     f.render_widget(block, popup);
+    let top = u16::from(over.is_none());
     let inner = Rect {
         x: inner.x + 1,
-        y: inner.y + 1,
+        y: inner.y + top,
         width: inner.width.saturating_sub(2),
-        height: inner.height.saturating_sub(1),
+        height: inner.height.saturating_sub(top),
     };
     let row_at = |offset: u16| Rect {
         y: inner.y + offset,
@@ -220,11 +281,21 @@ pub fn draw_workspaces(
             app.workspace_rows().get(picker.cursor),
             Some(WorkspaceRow::Workspace(_))
         );
-    let mut spans: Vec<(Span, Option<Hit>)> = vec![
-        (Span::styled("⏎", key), None),
-        (Span::styled(enter, muted), None),
-        (Span::raw("  "), None),
-    ];
+    // A popover is a menu: only what isn't plain of one.
+    if over.is_some() && (picker.error.is_some() || !on_workspace) {
+        hits.push((popup, Hit::WorkspaceMenu));
+        return;
+    }
+    let mut spans: Vec<(Span, Option<Hit>)> = Vec::new();
+    if over.is_some() {
+        spans.push((Span::raw("  "), None));
+    } else {
+        spans.extend([
+            (Span::styled("⏎", key), None),
+            (Span::styled(enter, muted), None),
+            (Span::raw("  "), None),
+        ]);
+    }
     if on_workspace {
         spans.extend([
             (Span::styled("e", key), Some(Hit::WorkspaceRename)),
@@ -235,10 +306,12 @@ pub fn draw_workspaces(
             (Span::raw("  "), None),
         ]);
     }
-    spans.extend([
-        (Span::styled("Esc", key), None),
-        (Span::styled(esc, muted), None),
-    ]);
+    if over.is_none() {
+        spans.extend([
+            (Span::styled("Esc", key), None),
+            (Span::styled(esc, muted), None),
+        ]);
+    }
     let mut x = keys_row.x;
     for (span, hit) in &spans {
         let width = str_width(&span.content) as u16;

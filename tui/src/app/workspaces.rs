@@ -5,10 +5,10 @@
 //! start shows it again. New sessions start in the workspace shown (in none
 //! under All and No workspace).
 //!
-//! The buttons at the bottom of the left column's Workspaces tab (the
-//! footer's in the Tabs layout; All, each workspace, No workspace, each with its
-//! sessions' count) switch the view; its `⊞`, `m` and Settings → Workspace
-//! open the workspaces modal: All, every workspace, No workspace, then
+//! The left column's Workspaces tab names the view shown. A click on it, `m`
+//! and Settings → Workspace open the menu of them over it (a modal where the
+//! tab isn't on screen; the Tabs layout's footer has a button per view and
+//! `⊞`, which opens it): All, every workspace, No workspace, then
 //! `+ Add new workspace`. Enter (or a click) shows the row under the cursor,
 //! or names a new workspace and shows it. `M` (Settings → Move to
 //! workspace) opens it for the selected session, without All: Enter moves
@@ -159,7 +159,8 @@ impl App {
         self.list.every_session().filter(|s| view.shows(s)).count()
     }
 
-    /// `m`, the footer's `⊞`, Settings → Workspace: show another view, or
+    /// A click on the Workspaces tab, `m`, the Tabs layout's `⊞`, Settings →
+    /// Workspace: the menu to show another view, or
     /// add, rename or delete a workspace.
     pub fn open_workspaces(&mut self) {
         if self.refuse_workspaces() {
@@ -707,62 +708,100 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn all_shows_every_session_and_the_workspaces_buttons_switch() {
+    async fn the_workspaces_tab_names_the_one_shown_and_opens_its_menu() {
+        use crate::app::left::LeftTab;
         let mut h = with_workspaces(None);
         assert_eq!(shown(&h), ["A", "B", "C"]);
-        // Fixed at the bottom of the Workspaces view, just over the column's
-        // tabs; the footer names the session.
+        // No row of buttons: the tab names it, after a chevron.
         let rows = column(&mut h, 160);
-        assert_eq!(
-            rows[35], "⊞   All 3   Launch 1   No workspace 2",
+        assert!(
+            rows[37].starts_with("▴ Workspaces · All   ≡ Inbox   ♥ Beats"),
             "{rows:#?}"
         );
-        assert!(rows[37].starts_with("❯ Workspaces   ≡ Inbox"), "{rows:#?}");
-        let line = footer(&mut h, 160);
-        assert!(line.starts_with(" session: ●"), "{line:?}");
-        assert!(!line.contains("Launch"), "{line:?}");
-        // Not while the Inbox or Beats show: they're across workspaces.
-        for key in ['f', 'B'] {
-            h.press(KeyCode::Char(key)).await;
-            let rows = column(&mut h, 160);
-            assert!(!rows.join("\n").contains("Launch 1"), "{rows:#?}");
-        }
-        h.press(KeyCode::Esc).await;
-        // In session mode too, beside the session.
-        h.press(KeyCode::Enter).await;
-        assert_eq!(h.app.focus, Focus::Session);
+        assert!(!rows.join("\n").contains("Launch"), "{rows:#?}");
+        assert!(footer(&mut h, 160).starts_with(" session: ●"));
+        // A click on it: the menu, over it, a row each, the one shown ticked.
+        let tab = Hit::LeftTab(LeftTab::Sessions);
+        click(&mut h, tab);
         let rows = column(&mut h, 160);
+        assert!(rows[37].starts_with("▾ Workspaces · All"), "{rows:#?}");
+        let menu: Vec<String> = rows[29..36]
+            .iter()
+            .map(|row| {
+                let row = row.trim_matches(['│', ' ', '▎']);
+                row.split_whitespace().collect::<Vec<_>>().join(" ")
+            })
+            .collect();
+        assert!(menu[0].starts_with('┌'), "{rows:#?}");
         assert_eq!(
-            rows[35], "⊞   All 3   Launch 1   No workspace 2",
+            menu[1..5],
+            [
+                "✓ All 3",
+                "Launch 1",
+                "No workspace 2",
+                "+ Add new workspace"
+            ],
             "{rows:#?}"
         );
-        assert!(footer(&mut h, 160).contains("SESSION MODE"));
-        h.rakumux().await;
-        click(&mut h, Hit::WorkspaceTab(1));
+        assert!(menu[6].starts_with('└'), "just over the tabs: {rows:#?}");
+        // A click on an item switches, closes the menu and names the tab.
+        click(&mut h, Hit::WorkspaceRow(1));
+        assert!(matches!(h.app.mode, AppMode::Normal));
         assert_eq!(shown(&h), ["A"]);
         assert_eq!(saved(&h).as_deref(), Some("W1"));
-        footer(&mut h, 160);
-        click(&mut h, Hit::WorkspaceTab(2));
-        assert_eq!(shown(&h), ["B", "C"]);
-        assert_eq!(saved(&h).as_deref(), Some("unassigned"));
-        footer(&mut h, 160);
-        click(&mut h, Hit::WorkspaceTab(0));
-        assert_eq!(shown(&h), ["A", "B", "C"]);
-        assert_eq!(saved(&h), None);
-        // The ⊞ opens the modal: All, each workspace, No workspace, then add.
-        footer(&mut h, 160);
-        click(&mut h, Hit::FooterKey(FooterKey::Workspace));
-        let screen = draw(&mut h, 160, 40);
-        let at = |text: &str| {
-            screen
-                .find(text)
-                .unwrap_or_else(|| panic!("{text}: {screen}"))
-        };
-        assert!(at("✓ All") < at("Launch") && at("Launch") < at("No workspace"));
-        assert!(at("No workspace") < at("+ Add new workspace"));
+        let rows = column(&mut h, 160);
+        assert!(rows[37].starts_with("▴ Workspaces · Launch"), "{rows:#?}");
+        // By keys too, from where it is.
+        click(&mut h, tab);
+        assert_eq!(picker(&h).cursor, 1);
         h.press(KeyCode::Down).await;
         h.press(KeyCode::Enter).await;
-        assert_eq!(shown(&h), ["A"]);
+        assert_eq!(shown(&h), ["B", "C"]);
+        assert_eq!(saved(&h).as_deref(), Some("unassigned"));
+        // Short of room the name alone stays.
+        let rows = column(&mut h, 160);
+        assert!(
+            rows[37].starts_with("▴ No workspace   ≡ Inbox"),
+            "{rows:#?}"
+        );
+        // A click on the tab while it's open, or anywhere off it, closes it.
+        let area = h.app.hits.iter().find(|(_, hit)| *hit == tab).unwrap().0;
+        for _ in 0..2 {
+            h.app.handle_mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: area.x + 1,
+                row: area.y + 1,
+                modifiers: KeyModifiers::NONE,
+            });
+            draw(&mut h, 160, 40);
+        }
+        assert!(matches!(h.app.mode, AppMode::Normal));
+        assert_eq!(shown(&h), ["B", "C"]);
+        // From the Inbox, and from a session, it shows the sessions with it.
+        h.press(KeyCode::Char('f')).await;
+        draw(&mut h, 160, 40);
+        click(&mut h, tab);
+        assert_eq!(h.app.left_tab(), LeftTab::Sessions);
+        assert!(matches!(h.app.mode, AppMode::Workspaces(_)));
+        h.press(KeyCode::Esc).await;
+        h.press(KeyCode::Enter).await;
+        assert_eq!(h.app.focus, Focus::Session);
+        draw(&mut h, 160, 40);
+        click(&mut h, tab);
+        assert_eq!(h.app.focus, Focus::List);
+        h.press(KeyCode::Up).await;
+        h.press(KeyCode::Up).await;
+        h.press(KeyCode::Enter).await;
+        assert_eq!(shown(&h), ["A", "B", "C"]);
+        assert_eq!(saved(&h), None);
+        // On a phone, over its tab too.
+        draw(&mut h, 40, 20);
+        click(&mut h, tab);
+        let phone = draw(&mut h, 40, 20);
+        assert!(
+            phone.contains("✓ All") && phone.contains("▾ Workspaces · All"),
+            "{phone}"
+        );
     }
 
     #[tokio::test]
@@ -773,31 +812,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tabs_that_don_t_fit_fold_into_a_count_that_opens_the_modal() {
+    async fn in_the_tabs_layout_views_that_don_t_fit_fold_into_a_count() {
         let mut h = with_workspaces(Some("unassigned"));
+        h.app.set_layout(crate::layout::SessionLayout::Tabs);
         for name in ["Research", "Marketing", "Infrastructure"] {
             h.fake.workspace_create(name).unwrap();
         }
         h.app.refresh();
         h.app.process_pending();
-        // As many rows of buttons as they need on a tall column.
-        let rows = column(&mut h, 160);
-        assert_eq!(
-            rows[33..36],
-            [
-                "⊞   All 3   Launch 1   Research 0",
-                "Marketing 0   Infrastructure 0",
-                "No workspace 2"
-            ],
-            "{rows:#?}"
+        h.app
+            .on_tick(std::time::Instant::now() + std::time::Duration::from_secs(10));
+        let line = footer(&mut h, 200);
+        assert!(
+            line.contains("Infrastructure 0   No workspace 2"),
+            "{line:?}"
         );
-        // One on a short screen: the one shown stays, the rest in +N.
-        let short = draw(&mut h, 160, 20);
-        assert!(short.contains("No workspace 2"), "{short}");
-        assert!(!short.contains("Infrastructure 0"), "{short}");
-        assert!(short.contains(" +3 "), "{short}");
+        let narrow = footer(&mut h, 110);
+        assert!(
+            narrow.contains("No workspace 2"),
+            "the one shown stays: {narrow:?}"
+        );
+        assert!(narrow.contains('+'), "{narrow:?}");
+        assert!(!narrow.contains("Infrastructure"), "{narrow:?}");
+        // A button switches; ⊞ opens the menu, in the middle there.
+        click(&mut h, Hit::WorkspaceTab(0));
+        assert_eq!(shown(&h), ["A", "B", "C"]);
+        draw(&mut h, 110, 40);
         click(&mut h, Hit::FooterKey(FooterKey::Workspace));
         assert!(matches!(h.app.mode, AppMode::Workspaces(_)));
+        let screen = draw(&mut h, 110, 40);
+        assert!(screen.contains(" Workspaces "), "{screen}");
     }
 
     #[tokio::test]
@@ -952,7 +996,7 @@ mod tests {
         assert!(picker(&h).naming.is_none(), "the modal stays open, renamed");
         assert_eq!(h.app.workspace_name(), "Ship");
         h.press(KeyCode::Esc).await;
-        assert!(column(&mut h, 160).join("\n").contains("Ship 1"));
+        assert!(column(&mut h, 160).join("\n").contains("· Ship"));
         // Esc while renaming leaves the name as it was.
         h.press(KeyCode::Char('m')).await;
         h.press(KeyCode::Char('e')).await;
@@ -1020,8 +1064,6 @@ mod tests {
         h.app.process_pending();
         assert_eq!(shown(&h), ["C"]);
         assert_eq!(h.app.view_count(&WorkspaceView::In(launch().id)), 2);
-        let rows = column(&mut h, 160);
-        assert!(rows[35].contains("Launch 2   No workspace 1"), "{rows:#?}");
         // The Tabs layout has no column: they're in its footer, the session's
         // place, labelled.
         h.app.set_layout(crate::layout::SessionLayout::Tabs);

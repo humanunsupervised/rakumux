@@ -25,5 +25,4 @@ pub mod sprite;
 pub mod terminal_panel;
 pub mod utils;
 pub mod welcome;
-pub mod workspace_bar;
 pub mod workspaces;

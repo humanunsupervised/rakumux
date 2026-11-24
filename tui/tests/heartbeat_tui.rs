@@ -235,30 +235,51 @@ fn start_tui(world: &World) -> Screen {
 fn the_left_columns_tabs_switch_and_help_is_searched_in_the_real_tui() {
     let world = World::new();
     let screen = start_tui(&world);
-    // A start shows the workspaces' sessions, over their buttons and the
-    // column's tabs; only there.
+    // A start shows the sessions, over the column's tabs.
     screen.shows("+ New session");
-    let shown = screen.shows("❯ Workspaces   ≡ Inbox   ♥ Beats");
+    let shown = screen.shows("▴ Workspaces · All   ≡ Inbox   ♥ Beats");
     assert!(shown.contains("◔ Status"), "{shown}");
-    screen.shows("⊞   All 0   No workspace 0");
     // f: the Inbox in their place; Esc: the sessions.
     screen.send("f", &[]);
     let inbox = screen.shows("Sign in to see your inbox");
     assert!(!inbox.contains("◔ Status"), "{inbox}");
-    assert!(!inbox.contains("All 0"), "{inbox}");
     screen.keys(&["esc"]);
     screen.until("the sessions", |text| {
         text.contains("◔ Status") && !text.contains("Sign in to see")
     });
     // A click on a tab at the bottom shows it (SGR mouse: press, release).
-    for (column, what) in [(31, "+ New heartbeat"), (5, "+ New session")] {
-        screen.click(column, 46);
-        screen.shows(what);
-    }
+    screen.click(38, 46);
+    screen.shows("+ New heartbeat");
+    // The Workspaces tab's shows the sessions and the menu over it; Esc
+    // closes the menu.
+    screen.click(5, 46);
+    let menu = screen.shows("+ Add new workspace");
+    assert!(menu.contains("▾ Workspaces · All"), "{menu}");
+    assert!(
+        menu.contains("✓ All") && menu.contains("No workspace"),
+        "{menu}"
+    );
+    screen.keys(&["esc"]);
+    screen.until("the menu closed", |text| {
+        !text.contains("+ Add new workspace") && text.contains("+ New session")
+    });
+    // A click on an item shows that workspace's, and the tab names it.
+    screen.click(5, 46);
+    let menu = screen.shows("No workspace");
+    let row = menu
+        .lines()
+        .position(|line| line.contains("No workspace"))
+        .unwrap();
+    screen.click(8, row as u16 + 1);
+    screen.shows("▴ No workspace   ≡ Inbox   ♥ Beats");
+    screen.click(5, 46);
+    screen.shows("✓ No workspace");
+    screen.keys(&["up", "enter"]);
+    screen.shows("▴ Workspaces · All");
     // rtop is the drawer's, on the right, beside it.
     screen.send("t", &[]);
     let both = screen.shows("▥ rtop");
-    assert!(both.contains("❯ Workspaces   ≡ Inbox   ♥ Beats"), "{both}");
+    assert!(both.contains("≡ Inbox   ♥ Beats"), "{both}");
     screen.send("t", &[]);
     screen.until("rtop hidden", |text| !text.contains("▥ rtop"));
     screen.send("?", &[]);
@@ -284,8 +305,8 @@ fn a_heartbeat_is_made_renamed_and_deleted_in_the_real_tui() {
 
     // Beats, empty: the row that makes one, and its form.
     screen.shows("+ New session");
-    // The workspaces' buttons, at the bottom of their view.
-    screen.shows("⊞   All 0   No workspace 0");
+    // The Workspaces tab names the one shown.
+    screen.shows("▴ Workspaces · All   ≡ Inbox   ♥ Beats");
     screen.send("B", &[]);
     screen.shows("+ New heartbeat");
     screen.keys(&["enter"]);

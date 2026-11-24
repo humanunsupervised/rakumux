@@ -120,10 +120,10 @@ fn feed_button(app: &App) -> Button {
 
 /// A workspace tab: what it's called, its sessions' count, whether it's
 /// the one shown.
-pub(super) struct WorkspaceTab {
-    pub name: String,
-    pub count: usize,
-    pub selected: bool,
+struct WorkspaceTab {
+    name: String,
+    count: usize,
+    selected: bool,
 }
 
 impl WorkspaceTab {
@@ -132,9 +132,8 @@ impl WorkspaceTab {
     }
 }
 
-/// The workspace tabs: All, each workspace, No workspace (the footer's in
-/// the Tabs layout, the left column's elsewhere).
-pub(super) fn workspace_tabs(app: &App) -> Vec<WorkspaceTab> {
+/// The Tabs layout's workspace tabs: All, each workspace, No workspace.
+fn workspace_tabs(app: &App) -> Vec<WorkspaceTab> {
     let shown = app.list.workspace_view();
     app.workspace_views()
         .iter()

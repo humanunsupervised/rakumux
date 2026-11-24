@@ -134,8 +134,8 @@ Tabs across the top of the list group your sessions:
 
 Inside a repository or an app, sessions are listed by status.
 
-The left column has three tabs at its bottom: **Workspaces** (your sessions, with a button per
-workspace), **Inbox** and **Beats** (across every workspace).
+The left column has three tabs at its bottom: **Workspaces** (your sessions; a click
+opens the menu of workspaces), **Inbox** and **Beats** (across every workspace).
 
 `f` (or a click on its tab) shows the **Inbox**: your agents' replies, newest first (needs an
 account). `Enter` reads a reply, again goes into its session; `Esc` or `f` goes back to the

@@ -65,12 +65,11 @@ new-session flow, and code boundaries.
 - `workspaces.rs`: workspaces (`App::workspaces`, read with each sync; capability `workspaces`):
   the view the list shows (`WorkspaceView`: All, `Unassigned` (shown as No workspace) or one workspace;
   `SessionList::set_workspace_view`: only its sessions are listed, the rest wait in `elsewhere`;
-  saved as `sessions.workspace`), their buttons (`workspace_views`, `view_count`,
-  `click_workspace_tab`; drawn by `components/workspace_bar.rs` at the bottom of the left column's
-  Workspaces tab, and in the Tabs layout by `components/footer.rs::fit_tabs` in the session's
-  place), the
-  workspaces modal (`AppMode::Workspaces`, `WorkspacePicker`: `m`, their `⊞`
-  (`FooterKey::Workspace`), Settings → Workspace; `M` for the selected session,
+  saved as `sessions.workspace`), the menu
+  (`AppMode::Workspaces`, `WorkspacePicker`: a click on the left column's Workspaces tab, which
+  names the view, as a popover over it; `m`, Settings → Workspace; the Tabs layout's footer has `⊞`,
+  `FooterKey::Workspace`, and a button per view, `workspace_views`, `view_count`,
+  `click_workspace_tab`, drawn by `components/footer.rs::fit_tabs`; `M` for the selected session,
   `WorkspacePurpose::Move`, without All), adding (`+ Add new workspace`, a name field), renaming
   (`e`: the row turns into the field, `renaming`), deleting (`d` twice; `forget_workspace` frees
   its sessions at once) and moving a session (`AppEvent::WorkspaceSet`). New sessions start in
