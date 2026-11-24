@@ -1638,8 +1638,9 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
   bar on a background of its own; a click or tap on it, or Space on it, collapses its sessions
   under it and opens them again.
 - **Left column** (`app/left.rs`, `LeftTab`): Master detail's column, with three tabs fixed at its
-  bottom, a level above the list tabs: **Sessions** (the list with its own tabs), **Inbox** and
-  **Beats**. What its tab shows has Rakumux mode's keys. Every start shows Sessions.
+  bottom, a level above the list tabs: **Workspaces** (`LeftTab::Sessions`: the list with its own
+  tabs, over the workspaces' buttons), **Inbox** and **Beats**, which go across workspaces. What its
+  tab shows has Rakumux mode's keys. Every start shows Workspaces.
 - **Drawer** (`app/drawer.rs`): rtop, beside the sessions: a pane on the right in Master detail, a
   tab in Tabs, the screen on a phone. It takes Rakumux mode's keys from the left column while
   focused. Hidden at every start; never opens by itself.
@@ -1649,7 +1650,8 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 - **Pin**: a user mark that lists a session in the list's Pinned tab (and shows `★` before its
   name in the list).
 - **Workspace**: a named group of this machine's sessions (`workspace_*`); the list shows every
-  session (All), one workspace's, or those in none (No workspace), picked with the footer's tabs.
+  session (All), one workspace's, or those in none (No workspace), picked with the buttons at the bottom of
+  the left column's Workspaces tab.
   `m` switches, adds, renames or deletes one; `M` moves a session.
 - **Session order**: where the user put each session in the list (drag, `J`/`K`); a TUI setting,
   not part of the registry.
@@ -1791,11 +1793,12 @@ those shown (`layout::render_tabs_from`, `App::tab_first`), and the ends say how
 (`‹3`, `5›`; a click goes to the nearest one).
 **The left column** (`app/left.rs`, `components/left.rs`) has three tabs fixed at its bottom, a level
 above the list tabs (`layout::left_split`: a band of `left_tabs_rows`, 3 rows or 1 on short
-columns): `❯ Sessions   ≡ Inbox ●N   ♥ Beats` (the active one bold with a line over it, in the accent
+columns): `❯ Workspaces   ≡ Inbox ●N   ♥ Beats` (the active one bold with a line over it, in the accent
 while the column has the keys; short rows narrow the gaps, then drop the marks, then the count),
 each a click target (`Hit::LeftTab`; on the active one, what's read whole goes back to its list)
-and, beside the session, `«` at their right, which hides the column. Sessions is the list with its
-own tabs over it; the Inbox (`f`, or Settings; `app/feed/pane.rs`) and Beats (`B`, or Settings;
+and, beside the session, `«` at their right, which hides the column. Workspaces is the
+sessions of the workspace shown, the list with its own tabs over it and the workspaces' buttons
+under it (below); the Inbox (`f`, or Settings; `app/feed/pane.rs`) and Beats (`B`, or Settings;
 below) show in its place, with nothing over them but a `‹` row while one thing is read whole
 (`Hit::FeedBack`, `Hit::BeatBack`). What the tab shows has Rakumux mode's keys
 (`App::keys_panel`, `drawer::Panel`; `App::panel_key`) unless the drawer has them; `f` (`B`) again,
@@ -1803,7 +1806,7 @@ or `Esc` (after a pending key and from a reply or heartbeat read whole), goes ba
 (`App::show_sessions_tab`, as picking a grouping, a folder or a workspace does). Session mode leaves
 the tab as it is: going into a session from the Inbox, the Inbox is there when Rakumux mode comes
 back. With the column hidden `f` and `B` show it, and the keys move the sessions otherwise. The tab
-is this window's, never saved: every start shows Sessions. Only what's on screen works: the feed
+is this window's, never saved: every start shows Workspaces. Only what's on screen works: the feed
 and the heartbeats are read every 2 s while theirs shows. On a phone each fills the screen over the
 tabs, and on a stacked window the Inbox and Beats do (`PaneSizes::left_panel`). Tabs has no column:
 the Inbox or Beats takes the session's place under the tab bar in Rakumux mode (`Screen::panel`),
@@ -2075,15 +2078,17 @@ hides adds that folder to the filter. Other folders, commands and startup comman
 **Layouts.** Settings → Layout or `v` in Rakumux mode switches between Master detail and
 Tabs.
 
-**Workspaces.** With a daemon that has `workspaces`, the footer's left holds the workspace tabs
-in place of the session's name (`components/footer.rs::fit_tabs`): a light `workspaces` label
-(`label_tabs`: only while every tab, button, message and the version fit beside it; a click opens
-the modal), `⊞` (the workspaces modal), then `All N` (every session), each workspace's `Name N` and `No workspace N` (the sessions in none),
-N each one's sessions, each a button (`tab_styles`: the footer buttons' chip, a column apart; the
-one shown lit, dark on the orange bar, in the accent on the blue one); a click switches
-(`Hit::WorkspaceTab`).
-Short of room the one shown stays with as many others, in order, as fit beside `+N`, which opens
-the modal; they give way where the session's name did. `m` or Settings → Workspace
+**Workspaces.** With a daemon that has `workspaces`, the left column's Workspaces tab has their
+buttons fixed at the bottom of its view, over the column's tabs
+(`components/workspace_bar.rs`): `⊞` (the workspaces modal),
+then `All N` (every session), each workspace's `Name N` and `No workspace N` (the sessions in none),
+N each one's sessions (the one shown lit, in the accent); a click switches the sessions listed
+(`Hit::WorkspaceTab`). They wrap to as many rows as the column spares (1 to 3); past those the one
+shown stays with as many others, in order, as fit beside `+N`, which opens
+the modal. The Inbox and Beats go across workspaces and show no buttons. The Tabs layout has no
+column: there they're in the footer's left, in the session's place
+(`components/footer.rs::fit_tabs`, `tab_styles`, after a light `workspaces` label while everything
+fits beside it, `label_tabs`). `m` or Settings → Workspace
 (`app/workspaces.rs`, `components/workspaces.rs`) opens the workspaces modal: All, each
 workspace, No workspace, each with its count, the one shown marked `✓`, then `+ Add new
 workspace`, which turns into a field for the new name (Enter makes it and shows it). Enter or a

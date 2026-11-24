@@ -1,5 +1,5 @@
 //! The left column (`app/left.rs`): what its tab shows (the sessions, the
-//! Inbox or Beats), and its tabs fixed at the bottom, `❯ Sessions   ≡ Inbox
+//! Inbox or Beats), and its tabs fixed at the bottom, `❯ Workspaces   ≡ Inbox
 //! ●2   ♥ Beats`: a band, the active one bold with a line over it, in the
 //! accent while the column has the keys; beside the session, `«` at its right
 //! hides the column. A rail is what's left of it then.
@@ -16,6 +16,7 @@ use super::feed::draw_feed;
 use super::footer::feed_count;
 use super::heartbeats::draw_beats;
 use super::session_list::{draw_session_list, folder_item_height};
+use super::workspace_bar::draw_workspace_bar;
 use crate::app::left::LeftTab;
 use crate::app::types::Focus;
 use crate::app::{App, Hit};
@@ -32,7 +33,10 @@ const HIDE_COLS: u16 = 3;
 pub fn draw_left(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) {
     let (body, tabs) = left_split(area);
     match app.left_tab() {
-        LeftTab::Sessions => draw_session_list(f, app, body, hits),
+        LeftTab::Sessions => {
+            let sessions = draw_workspace_bar(f, app, body, hits);
+            draw_session_list(f, app, sessions, hits);
+        }
         LeftTab::Inbox | LeftTab::Beats => {
             let p = theme::palette();
             f.render_widget(

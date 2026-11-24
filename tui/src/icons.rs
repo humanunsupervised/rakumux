@@ -74,7 +74,7 @@ impl Icons {
         }
     }
 
-    /// The footer's workspace tabs, before them: the workspaces modal.
+    /// Before the workspaces' buttons: the workspaces modal.
     pub fn workspace(self) -> &'static str {
         match self {
             Icons::Plain => "⊞",

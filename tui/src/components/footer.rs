@@ -50,7 +50,7 @@ use super::format::{activity_badge, status_glyph};
 use super::utils::get_spinner_char;
 use crate::app::types::{AccountStatus, AppMode, Focus};
 use crate::app::{App, Connection, FooterKey, Hit};
-use crate::layout::{str_width, truncate};
+use crate::layout::{str_width, truncate, SessionLayout};
 use crate::theme;
 
 /// Columns a message keeps before buttons make way for it.
@@ -120,10 +120,10 @@ fn feed_button(app: &App) -> Button {
 
 /// A workspace tab: what it's called, its sessions' count, whether it's
 /// the one shown.
-struct WorkspaceTab {
-    name: String,
-    count: usize,
-    selected: bool,
+pub(super) struct WorkspaceTab {
+    pub name: String,
+    pub count: usize,
+    pub selected: bool,
 }
 
 impl WorkspaceTab {
@@ -132,8 +132,9 @@ impl WorkspaceTab {
     }
 }
 
-/// The footer's workspace tabs: All, each workspace, No workspace.
-fn workspace_tabs(app: &App) -> Vec<WorkspaceTab> {
+/// The workspace tabs: All, each workspace, No workspace (the footer's in
+/// the Tabs layout, the left column's elsewhere).
+pub(super) fn workspace_tabs(app: &App) -> Vec<WorkspaceTab> {
     let shown = app.list.workspace_view();
     app.workspace_views()
         .iter()
@@ -614,8 +615,10 @@ fn footer_on(app: &App, width: usize, day: i32) -> (Line<'static>, Vec<FooterTar
     let mode_width = str_width(&mode.content);
     let message = message(app);
     let buttons = buttons(app);
-    // With workspaces, their tabs take the session's place at the left.
-    let tabs = app.has_workspaces().then(|| workspace_tabs(app));
+    // In the Tabs layout, which has no left column for them, the workspaces'
+    // tabs take the session's place at the left.
+    let tabs = (app.session_layout() == SessionLayout::Tabs && app.has_workspaces())
+        .then(|| workspace_tabs(app));
     // The version at the far right, while everything else keeps its place:
     // every button, the session and the message whole, and the label
     // between them, a column clear on either side (centred or not).

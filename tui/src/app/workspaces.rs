@@ -5,7 +5,8 @@
 //! start shows it again. New sessions start in the workspace shown (in none
 //! under All and No workspace).
 //!
-//! The footer's tabs (All, each workspace, No workspace, each with its
+//! The buttons at the bottom of the left column's Workspaces tab (the
+//! footer's in the Tabs layout; All, each workspace, No workspace, each with its
 //! sessions' count) switch the view; its `⊞`, `m` and Settings → Workspace
 //! open the workspaces modal: All, every workspace, No workspace, then
 //! `+ Add new workspace`. Enter (or a click) shows the row under the cursor,
@@ -675,6 +676,19 @@ mod tests {
         draw(h, cols, 40).lines().last().unwrap().to_owned()
     }
 
+    /// The left column's rows on a `cols` × 40 screen, each trimmed.
+    fn column(h: &mut Harness, cols: u16) -> Vec<String> {
+        let screen = draw(h, cols, 40);
+        let width = usize::from(h.app.left_pane().expect("the column").width);
+        screen
+            .lines()
+            .map(|line| {
+                let row: String = line.chars().take(width).collect();
+                row.trim().to_owned()
+            })
+            .collect()
+    }
+
     fn click(h: &mut Harness, hit: Hit) {
         let area = h
             .app
@@ -693,24 +707,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn all_shows_every_session_and_the_footer_s_tabs_switch() {
+    async fn all_shows_every_session_and_the_workspaces_buttons_switch() {
         let mut h = with_workspaces(None);
         assert_eq!(shown(&h), ["A", "B", "C"]);
-        let line = footer(&mut h, 160);
-        assert!(
-            line.starts_with(" workspaces  ⊞   All 3   Launch 1   No workspace 2  "),
-            "{line:?}"
+        // Fixed at the bottom of the Workspaces view, just over the column's
+        // tabs; the footer names the session.
+        let rows = column(&mut h, 160);
+        assert_eq!(
+            rows[35], "⊞   All 3   Launch 1   No workspace 2",
+            "{rows:#?}"
         );
-        assert!(!line.contains("session:"), "{line:?}");
-        // In session mode too, on the blue bar.
+        assert!(rows[37].starts_with("❯ Workspaces   ≡ Inbox"), "{rows:#?}");
+        let line = footer(&mut h, 160);
+        assert!(line.starts_with(" session: ●"), "{line:?}");
+        assert!(!line.contains("Launch"), "{line:?}");
+        // Not while the Inbox or Beats show: they're across workspaces.
+        for key in ['f', 'B'] {
+            h.press(KeyCode::Char(key)).await;
+            let rows = column(&mut h, 160);
+            assert!(!rows.join("\n").contains("Launch 1"), "{rows:#?}");
+        }
+        h.press(KeyCode::Esc).await;
+        // In session mode too, beside the session.
         h.press(KeyCode::Enter).await;
         assert_eq!(h.app.focus, Focus::Session);
-        let line = footer(&mut h, 160);
-        assert!(
-            line.starts_with(" workspaces  ⊞   All 3   Launch 1 "),
-            "{line:?}"
+        let rows = column(&mut h, 160);
+        assert_eq!(
+            rows[35], "⊞   All 3   Launch 1   No workspace 2",
+            "{rows:#?}"
         );
-        assert!(line.contains("SESSION MODE"), "{line:?}");
+        assert!(footer(&mut h, 160).contains("SESSION MODE"));
         h.rakumux().await;
         click(&mut h, Hit::WorkspaceTab(1));
         assert_eq!(shown(&h), ["A"]);
@@ -754,18 +780,22 @@ mod tests {
         }
         h.app.refresh();
         h.app.process_pending();
-        let line = footer(&mut h, 160);
-        assert!(
-            line.contains("Infrastructure 0   No workspace 2"),
-            "{line:?}"
+        // As many rows of buttons as they need on a tall column.
+        let rows = column(&mut h, 160);
+        assert_eq!(
+            rows[33..36],
+            [
+                "⊞   All 3   Launch 1   Research 0",
+                "Marketing 0   Infrastructure 0",
+                "No workspace 2"
+            ],
+            "{rows:#?}"
         );
-        let narrow = footer(&mut h, 110);
-        assert!(
-            narrow.contains("No workspace 2"),
-            "the one shown stays: {narrow:?}"
-        );
-        assert!(narrow.contains('+'), "{narrow:?}");
-        assert!(!narrow.contains("Infrastructure"), "{narrow:?}");
+        // One on a short screen: the one shown stays, the rest in +N.
+        let short = draw(&mut h, 160, 20);
+        assert!(short.contains("No workspace 2"), "{short}");
+        assert!(!short.contains("Infrastructure 0"), "{short}");
+        assert!(short.contains(" +3 "), "{short}");
         click(&mut h, Hit::FooterKey(FooterKey::Workspace));
         assert!(matches!(h.app.mode, AppMode::Workspaces(_)));
     }
@@ -922,7 +952,7 @@ mod tests {
         assert!(picker(&h).naming.is_none(), "the modal stays open, renamed");
         assert_eq!(h.app.workspace_name(), "Ship");
         h.press(KeyCode::Esc).await;
-        assert!(footer(&mut h, 160).contains("Ship 1"));
+        assert!(column(&mut h, 160).join("\n").contains("Ship 1"));
         // Esc while renaming leaves the name as it was.
         h.press(KeyCode::Char('m')).await;
         h.press(KeyCode::Char('e')).await;
@@ -990,6 +1020,17 @@ mod tests {
         h.app.process_pending();
         assert_eq!(shown(&h), ["C"]);
         assert_eq!(h.app.view_count(&WorkspaceView::In(launch().id)), 2);
-        assert!(footer(&mut h, 160).contains("Launch 2   No workspace 1"));
+        let rows = column(&mut h, 160);
+        assert!(rows[35].contains("Launch 2   No workspace 1"), "{rows:#?}");
+        // The Tabs layout has no column: they're in its footer, the session's
+        // place, labelled.
+        h.app.set_layout(crate::layout::SessionLayout::Tabs);
+        h.app
+            .on_tick(std::time::Instant::now() + std::time::Duration::from_secs(10));
+        let line = footer(&mut h, 160);
+        assert!(
+            line.starts_with(" workspaces  ⊞   All 3   Launch 2   No workspace 1  "),
+            "{line:?}"
+        );
     }
 }

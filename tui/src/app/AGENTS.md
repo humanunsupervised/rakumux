@@ -65,9 +65,11 @@ new-session flow, and code boundaries.
 - `workspaces.rs`: workspaces (`App::workspaces`, read with each sync; capability `workspaces`):
   the view the list shows (`WorkspaceView`: All, `Unassigned` (shown as No workspace) or one workspace;
   `SessionList::set_workspace_view`: only its sessions are listed, the rest wait in `elsewhere`;
-  saved as `sessions.workspace`), the footer's tabs (`workspace_views`, `view_count`,
-  `click_workspace_tab`; drawn by `components/footer.rs::fit_tabs` in the session's place), the
-  workspaces modal (`AppMode::Workspaces`, `WorkspacePicker`: `m`, the footer's `⊞`
+  saved as `sessions.workspace`), their buttons (`workspace_views`, `view_count`,
+  `click_workspace_tab`; drawn by `components/workspace_bar.rs` at the bottom of the left column's
+  Workspaces tab, and in the Tabs layout by `components/footer.rs::fit_tabs` in the session's
+  place), the
+  workspaces modal (`AppMode::Workspaces`, `WorkspacePicker`: `m`, their `⊞`
   (`FooterKey::Workspace`), Settings → Workspace; `M` for the selected session,
   `WorkspacePurpose::Move`, without All), adding (`+ Add new workspace`, a name field), renaming
   (`e`: the row turns into the field, `renaming`), deleting (`d` twice; `forget_workspace` frees
@@ -117,8 +119,8 @@ new-session flow, and code boundaries.
   `components::feed::turn_lines` (`›` prompts, quiet reasoning, `●` tool calls with the first
   lines of their output). `components/feed.rs::draw_feed` draws the cards, or
   the reply under a `‹` row.
-- `left.rs`: the left column's tabs (`LeftTab`: Sessions, Inbox, Beats; `App::left_tab`, this
-  window's, Sessions at every start) and `keys_panel`, what has Rakumux mode's keys instead of the
+- `left.rs`: the left column's tabs (`LeftTab`: Sessions, shown as Workspaces, Inbox, Beats; `App::left_tab`, this
+  window's, Workspaces at every start) and `keys_panel`, what has Rakumux mode's keys instead of the
   sessions (`drawer::Panel`: the drawer, else the column's Inbox or Beats on screen). `left_pane` is
   the column (`Screen::list`, or the Tabs layout's `Screen::panel`), `left_body` it without its tabs
   (`layout::left_split`). `show_left_tab` (a click, with the keys; shows a hidden column),

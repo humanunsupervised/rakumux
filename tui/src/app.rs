@@ -245,7 +245,7 @@ pub enum Hit {
     WorkspaceMenu,
     /// A row of the workspaces modal.
     WorkspaceRow(usize),
-    /// The footer's workspace tab `n` (`App::workspace_views`' order).
+    /// The workspace button `n` (`App::workspace_views`' order).
     WorkspaceTab(usize),
     /// The workspaces modal's `e rename`: the workspace under the cursor.
     WorkspaceRename,

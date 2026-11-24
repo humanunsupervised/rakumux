@@ -1,5 +1,6 @@
-//! The left column's tabs, at its bottom: the sessions (with their own tabs,
-//! Pinned, Status, Repos and Agent: `list_tabs.rs`), the Inbox (`feed/`) and
+//! The left column's tabs, at its bottom: Workspaces (the sessions of the
+//! workspace shown, under their own tabs, Pinned, Status, Repos and Agent:
+//! `list_tabs.rs`, and over the workspaces' buttons: `workspaces.rs`), the Inbox (`feed/`) and
 //! Beats (`heartbeats.rs`). Master detail shows the one picked in the list's
 //! column, a phone and a stacked screen on the whole screen in Rakumux mode.
 //! Tabs has no column: the Inbox or Beats takes the session's place under
@@ -20,6 +21,7 @@ use crate::layout;
 /// The left column's tabs, in order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LeftTab {
+    /// The workspaces: the sessions of the one shown, over their buttons.
     #[default]
     Sessions,
     /// What agents said when they finished a turn (`app/feed`).
@@ -33,7 +35,7 @@ impl LeftTab {
 
     pub fn label(self) -> &'static str {
         match self {
-            LeftTab::Sessions => "Sessions",
+            LeftTab::Sessions => "Workspaces",
             LeftTab::Inbox => "Inbox",
             LeftTab::Beats => "Beats",
         }

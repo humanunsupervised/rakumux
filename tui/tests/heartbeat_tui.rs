@@ -235,27 +235,30 @@ fn start_tui(world: &World) -> Screen {
 fn the_left_columns_tabs_switch_and_help_is_searched_in_the_real_tui() {
     let world = World::new();
     let screen = start_tui(&world);
-    // A start shows the sessions, over the column's tabs.
+    // A start shows the workspaces' sessions, over their buttons and the
+    // column's tabs; only there.
     screen.shows("+ New session");
-    let shown = screen.shows("❯ Sessions   ≡ Inbox   ♥ Beats");
+    let shown = screen.shows("❯ Workspaces   ≡ Inbox   ♥ Beats");
     assert!(shown.contains("◔ Status"), "{shown}");
+    screen.shows("⊞   All 0   No workspace 0");
     // f: the Inbox in their place; Esc: the sessions.
     screen.send("f", &[]);
     let inbox = screen.shows("Sign in to see your inbox");
     assert!(!inbox.contains("◔ Status"), "{inbox}");
+    assert!(!inbox.contains("All 0"), "{inbox}");
     screen.keys(&["esc"]);
     screen.until("the sessions", |text| {
         text.contains("◔ Status") && !text.contains("Sign in to see")
     });
     // A click on a tab at the bottom shows it (SGR mouse: press, release).
-    for (column, what) in [(27, "+ New heartbeat"), (5, "+ New session")] {
+    for (column, what) in [(31, "+ New heartbeat"), (5, "+ New session")] {
         screen.click(column, 46);
         screen.shows(what);
     }
     // rtop is the drawer's, on the right, beside it.
     screen.send("t", &[]);
     let both = screen.shows("▥ rtop");
-    assert!(both.contains("❯ Sessions   ≡ Inbox   ♥ Beats"), "{both}");
+    assert!(both.contains("❯ Workspaces   ≡ Inbox   ♥ Beats"), "{both}");
     screen.send("t", &[]);
     screen.until("rtop hidden", |text| !text.contains("▥ rtop"));
     screen.send("?", &[]);
@@ -281,8 +284,8 @@ fn a_heartbeat_is_made_renamed_and_deleted_in_the_real_tui() {
 
     // Beats, empty: the row that makes one, and its form.
     screen.shows("+ New session");
-    // The footer says what its tabs are.
-    screen.shows("workspaces  ⊞   All 0   No workspace 0");
+    // The workspaces' buttons, at the bottom of their view.
+    screen.shows("⊞   All 0   No workspace 0");
     screen.send("B", &[]);
     screen.shows("+ New heartbeat");
     screen.keys(&["enter"]);

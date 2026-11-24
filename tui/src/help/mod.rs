@@ -694,7 +694,8 @@ impl KeyAction {
                 .into(),
             KeyAction::Workspaces => "Groups of sessions on this machine. The list shows one \
                  workspace, or the sessions in none (No workspace); new sessions start in the \
-                 one shown, which the footer names and the next start shows again. Enter shows \
+                 one shown, whose button is lit at the bottom of the left column's Workspaces tab \
+                 and which the next start shows again. Enter shows \
                  the one under the cursor; + Add new workspace names one; e renames one; d twice \
                  deletes one, its sessions going to No workspace. Same as `rakumux workspace`."
                 .into(),
@@ -1875,7 +1876,7 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     doc.bullet("Detail: the session's terminal screen, updating as the program runs.");
     doc.bullet(
         "The inbox (`f`): what your agents said when they finished a turn, on every machine of \
-         your account: the left column's Inbox tab, beside Sessions and Beats (your heartbeats, \
+         your account: the left column's Inbox tab, beside Workspaces and Beats (your heartbeats, \
          `B`) at its bottom; `f` again goes back to the sessions.",
     );
     doc.bullet(format!(
@@ -2004,7 +2005,7 @@ fn mouse(doc: &mut Doc) {
          to show everything, or outside it to close it.",
     );
     doc.bullet(
-        "Click Sessions, Inbox or Beats at the bottom of the left column to show it there. Click \
+        "Click Workspaces, Inbox or Beats at the bottom of the left column to show it there. Click \
          a reply, a heartbeat or an rtop row to select it, again to read it or go into its \
          session; click either side to give it the keys. Drag the line left of rtop to resize it.",
     );
@@ -2321,7 +2322,11 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     doc.text(
         "The session list sits in a column on the left; the selected session fills the right.",
     );
-    doc.text("Its tabs, at the bottom, show the sessions, the Inbox (`f`) or Beats (`B`) in it.");
+    doc.text(
+        "Its tabs, at the bottom, show your workspaces' sessions, the Inbox (`f`) or Beats (`B`) \
+         in it. Over them, the workspaces' buttons switch which sessions are listed; the Inbox \
+         and Beats go across every workspace.",
+    );
     doc.text(
         "`b` or the « right of those tabs hides it, so the session gets \
          its columns; the keys still move through the sessions. `b` again, or a click on the » \

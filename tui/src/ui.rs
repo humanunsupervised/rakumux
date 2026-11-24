@@ -818,7 +818,7 @@ mod tests {
         tap(&mut h, Hit::HideList);
         let screen = render(&mut h.app, 160, 48);
         let rows: Vec<&str> = screen.lines().collect();
-        assert!(!screen.contains("❯ Sessions"), "{screen}");
+        assert!(!screen.contains("❯ Workspaces"), "{screen}");
         assert!(!screen.contains("◔ Status"), "{screen}");
         // A column of the list pane with `»` where the button was, the
         // divider's line, then the session from the third column.
@@ -845,7 +845,7 @@ mod tests {
         // A click anywhere on the rail shows the list again.
         tap_at(&mut h, 1, 20);
         let screen = render(&mut h.app, 160, 48);
-        assert!(screen.contains("❯ Sessions"), "{screen}");
+        assert!(screen.contains("❯ Workspaces"), "{screen}");
         assert!(screen.contains("◔ Status"), "{screen}");
         assert_eq!(h.app.screen().terminal, Some(beside));
     }
@@ -2596,14 +2596,14 @@ mod tests {
         assert_eq!(screen.detail.unwrap().right(), 160);
         // The column's tabs at its bottom, the Inbox's in the accent.
         assert_eq!(
-            pane[45], "   ❯ Sessions   ≡ Inbox   ♥ Beats             «",
+            pane[45], "   ❯ Workspaces   ≡ Inbox   ♥ Beats           «",
             "{wide}"
         );
-        assert_eq!(pane[44], "                ▔▔▔▔▔▔▔", "{wide}");
+        assert_eq!(pane[44], "                  ▔▔▔▔▔▔▔", "{wide}");
         let mut terminal = Terminal::new(TestBackend::new(160, 48)).unwrap();
         terminal.draw(|f| draw(f, &mut h.app)).unwrap();
         let p = crate::theme::palette();
-        let mark = terminal.backend().buffer().get(16, 45).fg;
+        let mark = terminal.backend().buffer().get(18, 45).fg;
         assert_eq!(mark, p.accent_primary);
         // Under its time period, the newest first, each a card: when, its
         // session, agent and folder (no branch known) on the top border,
@@ -2657,7 +2657,7 @@ mod tests {
         assert!(h.app.screen().divider.is_none());
         assert!(narrow.contains("api  claude · repo"), "{narrow}");
         assert!(
-            narrow.contains("❯ Sessions   ≡ Inbox   ♥ Beats"),
+            narrow.contains("❯ Workspaces   ≡ Inbox   ♥ Beats"),
             "{narrow}"
         );
         assert!(!narrow.contains("«"), "{narrow}");
@@ -3079,7 +3079,7 @@ mod tests {
         h.app.process_pending();
         let screen = render(&mut h.app, 160, 48);
         assert!(
-            screen.contains("❯ Sessions   ≡ Inbox ●1   ♥ Beats"),
+            screen.contains("❯ Workspaces   ≡ Inbox ●1   ♥ Beats"),
             "{screen}"
         );
         let phone = render(&mut h.app, 40, 20);
@@ -3105,7 +3105,7 @@ mod tests {
         let phone = render(&mut h.app, 45, 40);
         assert_eq!(
             phone.lines().nth(37).unwrap().trim_end(),
-            "   ❯ Sessions   ≡ Inbox   ♥ Beats",
+            "   ❯ Workspaces   ≡ Inbox   ♥ Beats",
             "{phone}"
         );
         assert!(phone.contains("nightly-build"), "{phone}");
@@ -3155,7 +3155,7 @@ mod tests {
         // over the left column's tabs.
         let width = usize::from(crate::layout::sidebar_width(160));
         let cards = list_column(&screen, width);
-        assert_eq!(cards[45], "   ❯ Sessions   ≡ Inbox   ♥ Beats", "{screen}");
+        assert_eq!(cards[45], "   ❯ Workspaces   ≡ Inbox   ♥ Beats", "{screen}");
         assert!(cards[1].starts_with("   ◷ last hour"), "{screen}");
         assert!(cards[2].contains(" · 2m  api  claude · repo ─"), "{screen}");
         assert!(rows[2].chars().nth(width) == Some('│'), "{screen}");
@@ -3389,7 +3389,7 @@ mod tests {
                 let row = list_column(&screen, pane.width.into())
                     [usize::from(tabs.y + tabs.height / 2)]
                 .clone();
-                for label in ["Sessions", "Inbox", "Beats"] {
+                for label in ["Workspaces", "Inbox", "Beats"] {
                     assert!(row.contains(label), "{width}x{height}: {row:?}");
                 }
                 // Only the sessions have their own tabs over them.
