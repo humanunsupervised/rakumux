@@ -1,4 +1,4 @@
-//! Tips in the footer: one key (or gesture, or command) and what it does, a
+//! Tips in the footer: one key (or gesture) and what it does, a
 //! different one each day (the local date picks it), so it's the same all
 //! day. A click on it shows the next one. Nothing is fetched or stored but
 //! the setting that turns them off (`sessions.tips`); the clicks are this
@@ -32,8 +32,6 @@ impl Tip {
 enum Source {
     /// A Rakumux mode action: its keys are among Settings' keys for it.
     Key(KeyAction),
-    /// A `rakumux` command line.
-    Command(&'static str),
     /// Dragging over a session's terminal.
     Drag,
 }
@@ -99,9 +97,9 @@ const TIPS: &[Entry] = &[
     },
     tip("drag", "copies a session's text", Source::Drag),
     tip(
-        "rakumux remote on",
-        "pairs a phone",
-        Source::Command("remote on"),
+        "D",
+        "pair a browser to write back",
+        Source::Key(KeyAction::PairDevice),
     ),
     tip(
         "B",
@@ -264,8 +262,7 @@ mod tests {
 
     /// Every tip's keys do what it says: a Rakumux mode key is among
     /// Settings' keys for its action (the table the key handlers follow;
-    /// `app::tests` checks the handlers), a command parses, and a drag
-    /// copies (`app::tests`' `a_drag_over_a_session_copies_its_text_and_a_click_goes_in`).
+    /// `app::tests` checks the handlers), and a drag copies (`app::tests`' `a_drag_over_a_session_copies_its_text_and_a_click_goes_in`).
     #[test]
     fn every_tip_s_keys_are_real() {
         let h = harness(vec![view("A", "api", 10)]);
@@ -282,10 +279,6 @@ mod tests {
                         table.split(", ").any(|key| key == keys),
                         "{keys:?} isn't among {action:?}'s keys {table:?}"
                     );
-                }
-                Source::Command(line) => {
-                    assert_eq!(keys, format!("rakumux {line}"));
-                    assert!(crate::cli::is_command(line), "{line:?}");
                 }
                 Source::Drag => assert_eq!(keys, "drag"),
             }

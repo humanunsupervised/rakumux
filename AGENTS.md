@@ -1884,7 +1884,7 @@ local build's `v0.1.0`). In Rakumux mode, just left of the buttons, a **tip** (`
 panel`, `f every agent's replies`, `t rtop: what sessions use`, the Rakumux key's `session or
 Rakumux mode`, `U update (sessions stay up)`, `e where it changed files`, `v Master detail or
 Tabs`, `p pin to the top`, `Tab last session`, `a answer agents from the web` only while signed
-out, `drag copies a session's text`, `rakumux remote on pairs a phone`, `B heartbeats: tasks on a clock`), its keys bold as a
+out, `drag copies a session's text`, `D pair a browser to write back`, `B heartbeats: tasks on a clock`), its keys bold as a
 button's, its text in the version's ink. The local date picks it, so it's the same all day and the
 next day shows the next one; a click or tap on it (`Hit::FooterTip`) shows the next one (this
 window's, memory only), never runs it. None in session mode (those keys aren't Rakumux's there),
@@ -1908,8 +1908,9 @@ sliver of the column with `»` at its bottom and the divider's line (`Hit::ShowL
 shows the list again, as `b` does). Keys still move through the sessions while it's hidden. The session on screen takes the new pane size at once (`sync_terminal_size`, as a dragged
 divider does). Stacked and phone screens and Tabs show no button and ignore it (`b` says so);
 the state is this window's, never saved, and comes back when the window widens again.
-When Tailscale runs on the machine and phone access was never set up (no `remote.json`), Rakumux
-asks once, in Rakumux mode with no other dialog open (so after the tour), "Use Rakumux from your
+Once a phone app that connects over Tailscale is out (`remote_access::PHONE_APP_RELEASED`, false:
+the native app goes through rakumux.com), when Tailscale runs on the machine and phone access was
+never set up (no `remote.json`), Rakumux asks once, in Rakumux mode with no other dialog open (so after the tour), "Use Rakumux from your
 phone?" (`AppMode::PhoneOffer`; `sessions.phone_offer_seen`): `y` turns it on and opens the pairing
 dialog (`AppMode::Pairing`: the QR code of the `rakumux://connect` link, the URL and the token;
 `x` turns phone access off), `n` leaves it off. After that, `rakumux remote on|off|pair`

@@ -133,10 +133,19 @@ pub fn is_enabled(layout: &Layout) -> bool {
         .is_some_and(|config| config.enabled)
 }
 
-/// Whether to offer phone access: it was never set up (no `remote.json`;
-/// once the user turned it on or off, they decided) and Tailscale runs on
-/// this machine.
+/// A phone app that connects over Tailscale can be installed. None can yet
+/// (the native app goes through rakumux.com), so "Use Rakumux from your
+/// phone?" isn't asked, nor recorded as asked.
+const PHONE_APP_RELEASED: bool = false;
+
+/// Whether to offer phone access: there's an app to pair, it was never set
+/// up (no `remote.json`; once the user turned it on or off, they decided)
+/// and Tailscale runs on this machine.
 pub fn worth_offering(layout: &Layout) -> bool {
+    PHONE_APP_RELEASED && never_set_up_with_tailscale(layout)
+}
+
+fn never_set_up_with_tailscale(layout: &Layout) -> bool {
     matches!(RemoteConfig::load(layout), Ok(None))
         && !tailscale::addresses().unwrap_or_default().is_empty()
 }
@@ -586,11 +595,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let layout = Layout::with_home(dir.path().to_path_buf());
         let tailscale_here = !tailscale::addresses().unwrap_or_default().is_empty();
-        assert_eq!(worth_offering(&layout), tailscale_here);
+        assert_eq!(never_set_up_with_tailscale(&layout), tailscale_here);
+        // With no app to pair it's never offered, Tailscale here or not.
+        assert_eq!(
+            worth_offering(&layout),
+            PHONE_APP_RELEASED && tailscale_here
+        );
         assert!(!is_enabled(&layout));
         // Turned off (or only a token printed): the user decided.
         RemoteConfig::new().unwrap().save(&layout).unwrap();
-        assert!(!worth_offering(&layout));
+        assert!(!never_set_up_with_tailscale(&layout));
         assert!(!is_enabled(&layout));
         // Off: no pairing, and nothing is started.
         assert_eq!(pairing(&layout, None).unwrap(), None);

@@ -2,7 +2,7 @@
 
 **A terminal multiplexer for coding agents.**
 
-[rakumux.com](https://rakumux.com) · [Docs](https://docs.rakumux.com) · [Sign up](https://rakumux.com/sign-up) · [Releases](https://github.com/humanunsupervised/rakumux/releases) · [Pricing](https://rakumux.com/pricing)
+[rakumux.com](https://rakumux.com) · [Docs](https://docs.rakumux.com) · [Join the waitlist](https://rakumux.com/sign-up) · [Releases](https://github.com/humanunsupervised/rakumux/releases) · [Pricing](https://rakumux.com/pricing)
 
 楽 (*raku*) means easy, and read *gaku* it means music: tmux, made easy.
 
@@ -18,7 +18,7 @@ sessions keep running when you close the window, lose SSH or reboot.
   `Ctrl-\`, switches to Rakumux.
 - **Sessions outlive the UI.** One background server owns every terminal. After a crash or a
   reboot, agents resume their conversation.
-- **Answer from anywhere** (optional [free account](https://rakumux.com/sign-up)). Read your agents' replies on rakumux.com in
+- **Answer from anywhere** (optional free account, [by invitation for now](https://rakumux.com/sign-up)). Read your agents' replies on rakumux.com in
   any browser, including your phone's, and write back. No VPN or open port.
 - **Scriptable.** A CLI, a local HTTP API and an MCP server, so agents can drive sessions too.
 
@@ -236,8 +236,8 @@ For the other agents and session identity, see the [MCP guide](mcp/README.md).
 Everything above works without an account.
 
 **Sign up** at [rakumux.com/sign-up](https://rakumux.com/sign-up) (early access, through a
-waitlist for now), then **sign in** with `a` in Rakumux mode, or `rakumux account login`. Everything below is then on,
-with nothing to turn on.
+waitlist for now), then **sign in** with `a` in Rakumux mode, or `rakumux account login`. Everything
+below is then on; only acting from rakumux.com needs your browser paired.
 
 **AI session titles** name each agent session after what it's doing. A name you give (`r`)
 stays. Press `s`, or the `↻` after a hovered name, for a new title.
@@ -247,7 +247,13 @@ stays. Press `s`, or the `↻` after a hovered name, for a new title.
 - in Rakumux's Inbox (`f`);
 - at [rakumux.com/inbox](https://rakumux.com/inbox), with your sessions by status, folder and app.
 
-**Writing back:** you can answer an agent from rakumux.com or another machine. Rakumux types your
+**Pair your browser:** rakumux.com shows your sessions as soon as you sign in. To write back, start
+sessions or change anything from it, pair the browser with each machine once: press `D` in Rakumux
+mode (or run `rakumux devices pair`), open the link it shows in that browser, check the fingerprint
+and press `y`. A machine carries out only what a paired device signed. `rakumux devices ls`, `rm` and
+`log` list devices, forget one and show what was accepted or refused.
+
+**Writing back:** you can answer an agent from rakumux.com. Rakumux types your
 message into the session once the agent is waiting for you, or while it works when it's Claude
 Code, Codex, OpenCode, Pi, GitHub Copilot, Grok or Kimi Code, which take it at their next step
 or turn, and never into a permission prompt or question.
@@ -261,7 +267,7 @@ sessions use.
 
 **Privacy:** your machine only ever calls out to rakumux.com. Nothing calls in. Before uploading,
 Rakumux masks text that looks like a key, a credential or a token. Private sessions are never
-sent. Being signed in is what lets rakumux.com reach a machine's sessions:
+sent. Being signed in, with a device you paired, is what lets rakumux.com reach a machine's sessions:
 `rakumux account logout` stops it and revokes that machine's sign-in, and **Sign out all
 terminals** on [rakumux.com/account](https://rakumux.com/account) ends every machine's.
 
@@ -274,9 +280,7 @@ The free plan covers all of this and keeps 7 days of history; Pro keeps 90. See
   back.
 - **SSH:** the app fits phone-width terminals. Tap a session to go in. `Ctrl-\`, or a tap on the
   `SESSION` badge, goes back to the list.
-- **iPhone and Android apps (coming soon):** the iPhone app connects over
-  [Tailscale](https://tailscale.com). Run `rakumux remote on`, then `rakumux remote pair` to show
-  its QR code.
+- **iPhone and Android apps:** coming soon.
 
 ## Configuration and data
 

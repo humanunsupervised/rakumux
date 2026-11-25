@@ -2488,22 +2488,27 @@ fn agents_and_cli(doc: &mut Doc) {
 
     doc.heading("On your phone");
     doc.text(
-        "The Rakumux app shows your sessions on a phone and types into them, over Tailscale. \
-         It's off until you turn it on: `rakumux remote on`, or the question Rakumux \
-         asks once when it sees Tailscale running. Only devices on your tailnet that have the \
-         pairing code get in, and Rakumux listens only on Tailscale's own addresses.",
+        "Sign in at rakumux.com in your phone's browser to see your sessions, their chats and \
+         the Inbox. To write back, answer a question or start a session from it, pair it with \
+         this machine once: press `D` here and open the link it shows in that browser.",
     );
     doc.command(
-        "rakumux remote on|off",
-        "Turn phone access on (it stays on) or off.",
+        "rakumux devices pair|ls|rm|log",
+        "Pair a browser, list or forget paired ones, or see what they asked of this machine.",
+    );
+    doc.heading("Over Tailscale");
+    doc.text(
+        "Rakumux can also listen on this machine's Tailscale addresses, for your other machines \
+         and your own clients of its API. It's off until you turn it on, and only devices on \
+         your tailnet that have its token get in.",
     );
     doc.command(
-        "rakumux remote pair",
-        "Show the URL, the pairing code and a QR code to scan with the app.",
+        "rakumux remote on|off|pair|status",
+        "Turn it on (it stays on) or off, show its URL and token, or check it.",
     );
     doc.command(
-        "rakumux remote status, rakumux remote token --rotate",
-        "Check it, or make a new pairing code (paired phones need the new one).",
+        "rakumux remote token --rotate",
+        "Make a new token (whatever used the old one needs the new one).",
     );
 
     doc.heading("For agents and scripts");
