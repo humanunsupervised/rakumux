@@ -688,7 +688,7 @@ impl KeyAction {
                  runs its command, an agent with its arguments and the prompt; earlier runs that wait are \
                  ended. Enter shows one whole (its prompt, command and runs; Enter there goes \
                  into a run), e approves or enables it (one an agent made or changed waits for \
-                 you, marked ?), p pauses, r runs it now, c renames it, d twice deletes it. n or + \
+                 you, marked ?), p pauses, r runs it now, c edits it (Ctrl-S saves), d twice deletes it. n or + \
                  New heartbeat makes one: its schedule, folder, agent, arguments and prompt. An \
                  agent's arguments start as those with which it doesn't stop to ask \
                  (claude --dangerously-skip-permissions: it runs whatever it decides to, so \

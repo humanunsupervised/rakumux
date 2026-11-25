@@ -78,7 +78,7 @@ new-session flow, and code boundaries.
   `FakeState::keeps_workspaces`.
 - `heartbeats.rs`: the left column's Heartbeats tab (`BeatsView`, `BeatAction`: the selected heartbeat's
   buttons; `+ New heartbeat`, `Hit::BeatNew`); `heartbeat_form.rs`: the New heartbeat form
-  (`AppMode::NewHeartbeat(HeartbeatForm)`, its keys, clicks (`FormHit`) and what it makes);
+  (`AppMode::NewHeartbeat(HeartbeatForm)`, its keys, clicks (`FormHit`) and what it makes or, opened on a heartbeat, changes (`Editing`));
   `argument_suggest.rs`: the arguments it suggests, from `session_core::commands`.
   Drawing in `components/heartbeats.rs` and `components/heartbeat_form.rs`.
 - `path_complete.rs`: the folders that complete a typed path (`suggest`: folders and links to

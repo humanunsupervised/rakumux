@@ -7,8 +7,7 @@
 //! selected heartbeat whole (its prompt, command and runs; there `↑`/`↓` pick
 //! a run and `Enter` goes into it), `e` approves or enables (from the list it
 //! first shows the heartbeat whole, so its prompt and command are read before
-//! they run), `p` pauses, `r` runs it now, `c` changes its name, `d` twice
-//! deletes it, `n` (or Enter or a click on `+ New heartbeat`, the list's last
+//! they run), `p` pauses, `r` runs it now, `c` edits it, `d` twice deletes it, `n` (or Enter or a click on `+ New heartbeat`, the list's last
 //! row) opens the New heartbeat form (`heartbeat_form.rs`), `Esc` goes back.
 //! The selected heartbeat shows these as buttons ([`BeatAction`]). `B` (or
 //! Settings) shows the tab.
@@ -24,8 +23,7 @@ use session_core::model::SessionView;
 use super::drawer::Panel;
 use super::left::LeftTab;
 use super::runtime::AppEvent;
-use super::types::{AppMode, RenameDialog, RenameTarget};
-use super::{App, TextInput};
+use super::App;
 
 /// How often the tab reads the heartbeats while it's on screen.
 const EVERY: Duration = Duration::from_secs(2);
@@ -37,7 +35,7 @@ pub enum BeatAction {
     /// Approve or enable it, or (from the list) show it whole first.
     Enable,
     Pause,
-    Rename,
+    Edit,
     Delete,
 }
 
@@ -53,7 +51,7 @@ impl BeatAction {
         } else if heartbeat.is_complete() {
             actions.push(BeatAction::Enable);
         }
-        actions.extend([BeatAction::Rename, BeatAction::Delete]);
+        actions.extend([BeatAction::Edit, BeatAction::Delete]);
         actions
     }
 
@@ -64,7 +62,7 @@ impl BeatAction {
             BeatAction::Enable if heartbeat.awaiting_approval => ("e", "approve"),
             BeatAction::Enable => ("e", "enable"),
             BeatAction::Pause => ("p", "pause"),
-            BeatAction::Rename => ("c", "rename"),
+            BeatAction::Edit => ("c", "edit"),
             BeatAction::Delete => ("d", "delete"),
         }
     }
@@ -274,33 +272,6 @@ impl App {
         view.due = None;
     }
 
-    /// A rename came back: the dialog closes, or says why not.
-    pub(super) fn on_heartbeat_renamed(
-        &mut self,
-        id: HeartbeatId,
-        result: Result<Heartbeat, ApiError>,
-    ) {
-        let target = RenameTarget::Heartbeat(id);
-        let in_dialog = matches!(&self.mode, AppMode::Renaming(d) if d.target == target && d.busy);
-        match result {
-            Ok(heartbeat) => {
-                if in_dialog {
-                    self.mode = AppMode::Normal;
-                }
-                self.set_status(format!("Renamed to {}", heartbeat.name));
-                self.beats_take_changed(&heartbeat);
-            }
-            Err(error) => match &mut self.mode {
-                AppMode::Renaming(dialog) if in_dialog => {
-                    dialog.busy = false;
-                    dialog.error_message = Some(error.to_string());
-                }
-                _ => self.set_status(format!("Rename failed: {error}")),
-            },
-        }
-        self.reread_heartbeats();
-    }
-
     /// A change this window asked for came back: say so and read again.
     pub(super) fn on_heartbeat_done(&mut self, result: Result<String, ApiError>) {
         match result {
@@ -341,7 +312,7 @@ impl App {
             KeyCode::Char('p') => self.beats_set_enabled(false),
             KeyCode::Char('r') => self.beats_run(),
             KeyCode::Char('n') => self.new_heartbeat(),
-            KeyCode::Char('c') => self.beats_rename(),
+            KeyCode::Char('c') => self.beats_edit(),
             KeyCode::Char('d') => self.beats_delete(deleting),
             // Keys that act on the list's session do nothing here.
             KeyCode::Char('J' | 'K' | 'x' | 'z' | '/' | '{' | '}' | 'E' | 'W' | 'y' | 's') => {}
@@ -457,18 +428,11 @@ impl App {
         });
     }
 
-    /// `c`: change its name, in the rename dialog.
-    pub fn beats_rename(&mut self) {
-        let Some(heartbeat) = self.beats_target() else {
-            return;
-        };
-        self.mode = AppMode::Renaming(RenameDialog {
-            target: RenameTarget::Heartbeat(heartbeat.id),
-            current_name: heartbeat.name.clone(),
-            input: TextInput::new(heartbeat.name),
-            error_message: None,
-            busy: false,
-        });
+    /// `c`: change it, in the form.
+    pub fn beats_edit(&mut self) {
+        if let Some(heartbeat) = self.beats_target() {
+            self.edit_heartbeat(heartbeat);
+        }
     }
 
     /// A click on one of the selected (or read) heartbeat's buttons.
@@ -479,7 +443,7 @@ impl App {
             BeatAction::Run => self.beats_run(),
             BeatAction::Enable => self.beats_enable(),
             BeatAction::Pause => self.beats_set_enabled(false),
-            BeatAction::Rename => self.beats_rename(),
+            BeatAction::Edit => self.beats_edit(),
             BeatAction::Delete => self.beats_delete(deleting),
         }
     }
@@ -612,7 +576,7 @@ mod tests {
             [
                 BeatAction::Run,
                 BeatAction::Pause,
-                BeatAction::Rename,
+                BeatAction::Edit,
                 BeatAction::Delete
             ]
         );
@@ -620,7 +584,7 @@ mod tests {
         let waiting = heartbeat("b", true);
         assert_eq!(
             BeatAction::of(&waiting),
-            [BeatAction::Enable, BeatAction::Rename, BeatAction::Delete]
+            [BeatAction::Enable, BeatAction::Edit, BeatAction::Delete]
         );
         assert_eq!(BeatAction::Enable.label(&waiting), ("e", "approve"));
         let mut empty = heartbeat("c", false);
@@ -628,7 +592,7 @@ mod tests {
         empty.prompt.clear();
         assert_eq!(
             BeatAction::of(&empty),
-            [BeatAction::Rename, BeatAction::Delete]
+            [BeatAction::Edit, BeatAction::Delete]
         );
     }
 

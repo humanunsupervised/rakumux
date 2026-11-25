@@ -2151,14 +2151,16 @@ sends no heartbeat events), two lines each: a mark (`?` waiting for approval, or
 `○` paused or empty), the name and when it runs next (`in 25m`, `approve?`, `paused`, `empty`),
 then its schedule, folder and last run; those waiting for approval first, then by folder and
 name. Under the selected one its buttons (`BeatAction`: `r run`, `p pause` or `e enable`/`approve`,
-`c rename`, `d delete`; short of room rename and delete stay), each a click target, and under
+`c edit`, `d delete`; short of room edit and delete stay), each a click target, and under
 them all `+ New heartbeat`, a row to select like them (`BeatsView::on_new`; the only one when
 there are none). `↑`/`↓` (`j`/`k`) select; `Enter` shows one whole (its
 buttons, how it runs, its command and prompt in full, then its runs, newest first: `↑`/`↓` pick
 one, `Enter` goes into it); `e` from the list shows it whole first, and there approves or enables
 it, so nothing an agent wrote runs unread (one waiting for approval has no `r run` button); `p`
-pauses; `r` runs it now; `c` renames it (the rename dialog, `RenameTarget::Heartbeat`; a rename
-doesn't pause it); `d` twice (or two clicks) deletes it (its runs stay). `n`, `Enter` on
+pauses; `r` runs it now; `c` edits it (the form below on it, `HeartbeatForm::edit`, the keys in its name:
+`Save` sends `heartbeat_update` only what was changed there, so an untouched command of any shape
+(`FOO=1 ~/bin/claude --x`, `cd web && claude`) or a newer schedule stays; it runs on, or waits for
+approval, as before; its folder can't change); `d` twice (or two clicks) deletes it (its runs stay). `n`, `Enter` on
 `+ New heartbeat` or one click on it opens the **New heartbeat form** (`AppMode::NewHeartbeat`,
 `app/heartbeat_form.rs`, `components/heartbeat_form.rs`): Name (the generated one when empty),
 Runs (`Every` an interval, 1h; `Daily` at a time; `Days`, Monday to Friday until ticked
@@ -2171,7 +2173,7 @@ while there's room. On the agent or its arguments a list over the rows under the
 agent takes (`app/argument_suggest.rs`): typing narrows it, or lists the values of the argument
 before the cursor; a half-typed word's best is picked, `↑`/`↓` pick another, `Tab`, `Enter` or a
 click takes it, `Esc` leaves what's typed. `Tab`, `Enter` and `↑`/`↓` go through them, `←`/`→` choose, `Space` ticks a day, `Esc`
-closes (a click off it doesn't, so nothing written is lost). `Create` needs the prompt and a
+closes (a click off it doesn't, so nothing written is lost), `Ctrl-S` creates (or saves) from any field. `Create` needs the prompt and a
 schedule, and arguments a shell reads as one command's (`commands::problem`), makes it enabled (the user wrote it) and shows it whole; what's wrong, the daemon's
 refusal too, is said in the form. `Ask agent` makes it paused, with the prompt and schedule when
 a prompt was written, and a session in its folder running its command whose first input, typed once the agent's prompt shows and not

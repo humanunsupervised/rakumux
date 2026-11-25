@@ -454,16 +454,28 @@ impl SessionApi for FakeApi {
     ) -> Result<session_core::heartbeat::Heartbeat> {
         self.take_failure("heartbeat_update")?;
         let mut state = self.state.lock().unwrap();
-        let name = edit.name.unwrap_or_default();
+        let said = edit.name.clone().unwrap_or_default();
         state
             .calls
-            .push(format!("heartbeat_update {} {name}", edit.id));
+            .push(format!("heartbeat_update {} {said}", edit.id));
         let heartbeat = state
             .heartbeats
             .iter_mut()
             .find(|h| h.id == edit.id)
             .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "no heartbeat"))?;
-        heartbeat.name = name;
+        if let Some(name) = edit.name {
+            heartbeat.name = name;
+        }
+        if let Some(command) = edit.fields.command {
+            heartbeat.command = command;
+            heartbeat.agent = edit.fields.agent;
+        }
+        if let Some(prompt) = edit.fields.prompt {
+            heartbeat.prompt = prompt;
+        }
+        if let Some(schedule) = edit.fields.schedule {
+            heartbeat.schedule = Some(schedule);
+        }
         Ok(heartbeat.clone())
     }
 

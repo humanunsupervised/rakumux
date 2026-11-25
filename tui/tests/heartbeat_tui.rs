@@ -1,6 +1,6 @@
 //! The real TUI in a real terminal (a session of one daemon), with a daemon
 //! of its own in a temp home. A heartbeat is made in Heartbeats' New heartbeat
-//! form, renamed and deleted from the list, and the CLI sees each; the left
+//! form, edited and deleted from the list, and the CLI sees each; the left
 //! column's tabs switch what it shows, and Help is searched.
 #![cfg(target_os = "linux")]
 
@@ -327,7 +327,7 @@ fn the_left_columns_tabs_switch_and_help_is_searched_in_the_real_tui() {
 }
 
 #[test]
-fn a_heartbeat_is_made_renamed_and_deleted_in_the_real_tui() {
+fn a_heartbeat_is_made_edited_and_deleted_in_the_real_tui() {
     let world = World::new();
     let screen = start_tui(&world);
 
@@ -369,7 +369,7 @@ fn a_heartbeat_is_made_renamed_and_deleted_in_the_real_tui() {
     screen.send("Run the tests.", &[]);
     screen.shows("$ claude --dangerously-skip-permissions --effort medium -- \"Run the tests.\"");
     screen.keys(&["tab", "enter"]);
-    let shown = screen.shows("c rename");
+    let shown = screen.shows("c edit");
     assert!(shown.contains("● nightly"), "{shown}");
     assert!(shown.contains("Run the tests."), "{shown}");
     let made = world.heartbeats();
@@ -401,16 +401,66 @@ fn a_heartbeat_is_made_renamed_and_deleted_in_the_real_tui() {
     screen.keys(&["esc"]);
     screen.until("the form closed", |text| !text.contains("Ask agent"));
 
-    // Back to the list; c renames it, on its schedule still.
+    // Back to the list; c edits it: its name alone, on its schedule still.
     screen.keys(&["esc"]);
     screen.shows("+ New heartbeat");
+    let next = made[0]["next_run_at"].clone();
     screen.send("c", &[]);
-    screen.shows("Rename heartbeat");
-    screen.send("-run", &["enter"]);
+    screen.shows("Edit heartbeat");
+    screen.send("-run", &["ctrl+s"]);
     screen.shows("● nightly-run");
     let renamed = world.heartbeats();
     assert_eq!(renamed[0]["name"], "nightly-run");
     assert_eq!(renamed[0]["enabled"], true);
+    assert_eq!(renamed[0]["next_run_at"], next);
+    assert_eq!(renamed[0]["command"], made[0]["command"]);
+    // Its arguments, prompt and time; it runs with them, at the new one.
+    screen.send("c", &["tab", "tab"]);
+    screen.shows("Edit heartbeat");
+    screen.keys(&["backspace"]);
+    screen.send("5", &["tab", "tab"]);
+    screen.send(" --verb", &["tab", "tab"]);
+    screen.send(" Then stop.", &["tab", "enter"]);
+    screen.until("it saved", |text| !text.contains("Edit heartbeat"));
+    let edited = world.heartbeats();
+    assert_eq!(edited[0]["schedule"]["at"], "02:35");
+    assert_ne!(edited[0]["next_run_at"], next);
+    assert_eq!(edited[0]["enabled"], true);
+    assert_eq!(edited[0]["awaiting_approval"], false);
+    assert_eq!(
+        edited[0]["command"],
+        "claude --dangerously-skip-permissions --effort medium --verbose"
+    );
+    assert_eq!(edited[0]["prompt"], "Run the tests. Then stop.");
+    // One the CLI made, its command more than the form makes: kept as it is.
+    world.ok(
+        "inner",
+        &[
+            "heartbeat",
+            "add",
+            "wrapped",
+            "--every",
+            "1h",
+            "--command",
+            "cd . && A=1 claude --x",
+            "--prompt",
+            "Go.",
+            "--paused",
+        ],
+    );
+    screen.shows("wrapped");
+    screen.send("", &["down"]);
+    screen.send("c", &[]);
+    screen.shows("&& A=1 claude --x");
+    screen.send("-up", &["ctrl+s"]);
+    screen.shows("wrapped-up");
+    let kept = world.heartbeats();
+    let kept = kept.iter().find(|h| h["name"] == "wrapped-up").unwrap();
+    assert_eq!(kept["command"], "cd . && A=1 claude --x");
+    assert_eq!(kept["enabled"], false);
+    screen.send("d", &["d"]);
+    screen.until("it gone", |text| !text.contains("wrapped-up"));
+    screen.keys(&["up"]);
 
     // d, then d again, deletes it.
     screen.send("d", &[]);

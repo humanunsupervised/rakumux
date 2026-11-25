@@ -92,8 +92,12 @@ pub fn draw_heartbeat_form(
         width,
         height,
     };
+    let title = match form.editing {
+        Some(_) => "Edit heartbeat",
+        None => "New heartbeat",
+    };
     let inner = padded(
-        dialog_frame(f, popup, "New heartbeat", p.accent_primary),
+        dialog_frame(f, popup, title, p.accent_primary),
         pad_x,
         pad_y,
     );
@@ -223,7 +227,7 @@ pub fn draw_heartbeat_form(
         .unwrap_or_default();
     let agent = form
         .choice()
-        .map(|choice| choice.command.label.to_string())
+        .map(|choice| choice.program.clone())
         .unwrap_or_default();
     for (text, field, value) in [
         ("Folder", FormField::Folder, folder),
@@ -241,6 +245,12 @@ pub fn draw_heartbeat_form(
                 &printable(&value),
                 usize::from(cell.width.saturating_sub(4)),
             );
+            // Its folder is where it was made.
+            if field == FormField::Folder && form.editing.is_some() {
+                f.render_widget(Paragraph::new(Span::styled(value, plain)), cell);
+                y += 1;
+                continue;
+            }
             let arrow = if focused { lit } else { muted };
             let width = str_width(&value) as u16;
             f.render_widget(
@@ -350,19 +360,23 @@ pub fn draw_heartbeat_form(
         );
     }
     let mut x = inner.x;
-    for (text, focused, hit) in [
-        (
-            " Create ",
-            on(FormField::Create),
-            FormHit::Field(FormField::Create),
-        ),
-        (
+    let mut buttons = vec![(
+        match form.editing {
+            Some(_) => " Save ",
+            None => " Create ",
+        },
+        on(FormField::Create),
+        FormHit::Field(FormField::Create),
+    )];
+    if form.editing.is_none() {
+        buttons.push((
             " Ask agent ",
             on(FormField::AskAgent),
             FormHit::Field(FormField::AskAgent),
-        ),
-        (" Esc cancel", false, FormHit::Cancel),
-    ] {
+        ));
+    }
+    buttons.push((" Esc cancel", false, FormHit::Cancel));
+    for (text, focused, hit) in buttons {
         let width = (str_width(text) as u16).min(inner.right().saturating_sub(x));
         if width == 0 {
             break;

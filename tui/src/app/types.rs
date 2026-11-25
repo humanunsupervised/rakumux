@@ -75,26 +75,9 @@ pub enum SpriteState {
     },
 }
 
-/// What a rename renames.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RenameTarget {
-    Session(SessionId),
-    Heartbeat(session_core::ids::HeartbeatId),
-}
-
-impl RenameTarget {
-    /// What it is, as the dialog says it.
-    pub fn noun(&self) -> &'static str {
-        match self {
-            RenameTarget::Session(_) => "session",
-            RenameTarget::Heartbeat(_) => "heartbeat",
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct RenameDialog {
-    pub target: RenameTarget,
+    pub session_id: SessionId,
     pub current_name: String,
     pub input: TextInput,
     pub error_message: Option<String>,

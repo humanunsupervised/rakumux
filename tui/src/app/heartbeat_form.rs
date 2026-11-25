@@ -4,7 +4,11 @@
 //! schedule, and Heartbeats shows it whole; `Ask agent` makes it paused and
 //! opens a session whose agent is asked to fill it in.
 //!
-//! `Tab`, `Enter` and `↑`/`↓` go through the fields (in a prompt of several
+//! Heartbeats' `c` opens it on a heartbeat (`Editing`): `Save` changes what
+//! was changed in it, and nothing else, so what an agent changed meanwhile
+//! stays and waits for approval. Its folder can't change.
+//!
+//! Ctrl-S saves (or creates) from any field. `Tab`, `Enter` and `↑`/`↓` go through the fields (in a prompt of several
 //! rows `↑`/`↓` go through those first; Alt-Enter or Ctrl-J starts a new
 //! line), `←`/`→` choose, Space ticks a day, Esc closes.
 //!
@@ -17,7 +21,9 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use session_core::api::{ApiError, CreateSession, ErrorCode, FirstInput};
 use session_core::commands::{self, AgentCommand};
-use session_core::heartbeat::{Heartbeat, HeartbeatFields, HeartbeatSpec, Schedule, Weekday};
+use session_core::heartbeat::{
+    Heartbeat, HeartbeatEdit, HeartbeatFields, HeartbeatSpec, Schedule, Weekday,
+};
 use session_core::model::ScopeRoot;
 
 use super::argument_suggest::{suggest, Suggestions};
@@ -44,6 +50,16 @@ pub enum FormField {
     Prompt,
     Create,
     AskAgent,
+}
+
+/// What the form was sent for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Submit {
+    Create,
+    /// Made paused, for a session's agent to fill in.
+    AskAgent,
+    /// A heartbeat's changes.
+    Save,
 }
 
 /// How a heartbeat repeats.
@@ -85,26 +101,59 @@ pub enum FormHit {
 /// An agent and the arguments written for it.
 #[derive(Debug, Clone)]
 pub struct AgentChoice {
-    pub command: &'static AgentCommand,
+    /// What starts it: the agent's own program, or as an edited heartbeat's
+    /// command has it (`FOO=1 ~/bin/claude`, `my-agent`).
+    pub program: String,
+    /// The agent, when Rakumux knows it.
+    pub command: Option<&'static AgentCommand>,
     pub arguments: TextInput,
 }
 
 impl AgentChoice {
     fn new(command: &'static AgentCommand) -> Self {
         Self {
-            command,
+            program: command.program().to_string(),
+            command: Some(command),
             arguments: TextInput::new(command.unattended),
+        }
+    }
+
+    /// The choice that makes `line`: what comes before its arguments is its
+    /// first word and the environment assignments before that.
+    fn of(line: &str) -> Self {
+        let line = line.trim();
+        let mut end = 0;
+        for word in line.split_whitespace() {
+            end += line[end..].find(word).unwrap_or(0) + word.len();
+            if !word.contains('=') {
+                break;
+            }
+        }
+        let (program, arguments) = line.split_at(end);
+        Self {
+            program: program.to_string(),
+            command: commands::agent_of(program),
+            arguments: TextInput::new(arguments.trim_start()),
         }
     }
 
     /// The agent's command line, its prompt left out.
     pub fn line(&self) -> String {
-        let program = self.command.program();
+        let program = &self.program;
         match self.arguments.value().trim() {
-            "" => program.to_string(),
+            "" => program.clone(),
             arguments => format!("{program} {arguments}"),
         }
     }
+}
+
+/// The heartbeat being edited, with what the form showed of it at first.
+#[derive(Debug, Clone)]
+pub struct Editing {
+    pub heartbeat: Heartbeat,
+    schedule: Result<Schedule, String>,
+    line: String,
+    prompt: String,
 }
 
 /// The form as it's filled in.
@@ -131,6 +180,8 @@ pub struct HeartbeatForm {
     pub error: Option<String>,
     /// Being made.
     pub busy: bool,
+    /// The heartbeat it changes; None makes a new one.
+    pub editing: Option<Editing>,
 }
 
 impl HeartbeatForm {
@@ -151,7 +202,49 @@ impl HeartbeatForm {
             field: FormField::Name,
             error: None,
             busy: false,
+            editing: None,
         }
+    }
+
+    /// The form on `heartbeat`, `agents` its other choices.
+    fn edit(heartbeat: Heartbeat, agents: Vec<AgentChoice>) -> Self {
+        let mut form = Self::new(vec![heartbeat.scope.clone()], 0, agents);
+        form.name.set(heartbeat.name.clone());
+        form.prompt.insert_str(&heartbeat.prompt);
+        if !heartbeat.command.trim().is_empty() {
+            let own = AgentChoice::of(&heartbeat.command);
+            let same = |choice: &AgentChoice| choice.program == own.program;
+            match form.agents.iter().position(same) {
+                Some(at) => {
+                    form.agent = at;
+                    form.agents[at] = own;
+                }
+                None => form.agents.insert(0, own),
+            }
+        }
+        match &heartbeat.schedule {
+            Some(every @ Schedule::Every { .. }) => {
+                let text = every.to_string();
+                form.every.set(text.trim_start_matches("every "));
+            }
+            Some(Schedule::Daily { at }) => {
+                form.repeat = Repeat::Daily;
+                form.at.set(at.clone());
+            }
+            Some(Schedule::Weekdays { days, at }) => {
+                form.repeat = Repeat::Days;
+                form.days = Weekday::ALL.map(|day| days.contains(&day));
+                form.at.set(at.clone());
+            }
+            Some(Schedule::Unknown) | None => {}
+        }
+        form.editing = Some(Editing {
+            schedule: form.schedule(),
+            line: form.choice().map(AgentChoice::line).unwrap_or_default(),
+            prompt: form.prompt.value().to_string(),
+            heartbeat,
+        });
+        form
     }
 
     /// The fields the keys go through, in order.
@@ -160,14 +253,18 @@ impl HeartbeatForm {
         if self.repeat == Repeat::Days {
             fields.push(FormField::Days);
         }
+        if self.editing.is_none() {
+            fields.push(FormField::Folder);
+        }
         fields.extend([
-            FormField::Folder,
             FormField::Agent,
             FormField::Arguments,
             FormField::Prompt,
             FormField::Create,
-            FormField::AskAgent,
         ]);
+        if self.editing.is_none() {
+            fields.push(FormField::AskAgent);
+        }
         fields
     }
 
@@ -180,10 +277,11 @@ impl HeartbeatForm {
     /// arguments.
     pub fn suggestions(&self) -> Option<Suggestions> {
         let choice = self.choice()?;
+        let command = choice.command?;
         match self.field {
-            FormField::Agent => Some(suggest(choice.command, " ", 1)),
+            FormField::Agent => Some(suggest(command, " ", 1)),
             FormField::Arguments => Some(suggest(
-                choice.command,
+                command,
                 choice.arguments.value(),
                 choice.arguments.cursor(),
             )),
@@ -283,7 +381,7 @@ impl HeartbeatForm {
             FormField::Days => self.day = step(self.day, self.days.len()),
             FormField::Folder => self.folder = step(self.folder, self.folders.len()),
             FormField::Agent => self.agent = step(self.agent, self.agents.len()),
-            FormField::Create => self.field = FormField::AskAgent,
+            FormField::Create if self.editing.is_none() => self.field = FormField::AskAgent,
             FormField::AskAgent => self.field = FormField::Create,
             _ => {}
         }
@@ -388,7 +486,7 @@ impl HeartbeatForm {
             scope: self.folders.get(self.folder).cloned(),
             name: (!name.is_empty()).then(|| name.to_string()),
             fields: HeartbeatFields {
-                agent: self.choice().map(|choice| choice.command.label.to_string()),
+                agent: self.agent_label(),
                 command,
                 prompt: (!prompt.is_empty()).then(|| prompt.to_string()),
                 schedule,
@@ -396,6 +494,53 @@ impl HeartbeatForm {
             },
             enabled: !setup,
         })
+    }
+
+    /// The agent chosen, as Rakumux names it.
+    fn agent_label(&self) -> Option<String> {
+        Some(self.choice()?.command?.label.to_string())
+    }
+
+    /// What's changed of `editing`; None when nothing is, else the field
+    /// that's wrong and why.
+    fn changes(&self, editing: &Editing) -> Result<Option<HeartbeatEdit>, (FormField, String)> {
+        let heartbeat = &editing.heartbeat;
+        let mut fields = HeartbeatFields::default();
+        let name = self.name.value().trim();
+        if name.is_empty() {
+            return Err((FormField::Name, "Write its name".into()));
+        }
+        // One without a schedule gets the one shown.
+        let schedule = self.schedule();
+        if heartbeat.schedule.is_none() || schedule != editing.schedule {
+            fields.schedule = Some(schedule.map_err(|error| (FormField::When, error))?);
+        }
+        let line = self.choice().map(AgentChoice::line).unwrap_or_default();
+        if line != editing.line {
+            // One the daemon types the prompt into may be more than one
+            // command; it may stay so.
+            if let (Some(problem), None) =
+                (commands::problem(&line), commands::problem(&editing.line))
+            {
+                return Err((FormField::Arguments, format!("Arguments: {problem}")));
+            }
+            fields.agent = self.agent_label();
+            fields.command = Some(line);
+        }
+        if self.prompt.value() != editing.prompt {
+            let prompt = self.prompt.value().trim();
+            if prompt.is_empty() {
+                return Err((FormField::Prompt, "Write the prompt".into()));
+            }
+            fields.prompt = Some(prompt.to_string());
+        }
+        let name = (name != heartbeat.name).then(|| name.to_string());
+        let changed = name.is_some() || fields.changes_runs();
+        Ok(changed.then(|| HeartbeatEdit {
+            id: heartbeat.id.clone(),
+            name,
+            fields,
+        }))
     }
 }
 
@@ -405,6 +550,12 @@ fn capitalized(text: &str) -> String {
         Some(first) => first.to_uppercase().chain(chars).collect(),
         None => String::new(),
     }
+}
+
+/// What the form asks the daemon for.
+enum Asked {
+    Make(HeartbeatSpec),
+    Edit(HeartbeatEdit),
 }
 
 impl App {
@@ -436,6 +587,16 @@ impl App {
         self.mode = AppMode::NewHeartbeat(HeartbeatForm::new(folders, folder, agents));
     }
 
+    /// `c` on Heartbeats: the form on `heartbeat`.
+    pub(super) fn edit_heartbeat(&mut self, heartbeat: Heartbeat) {
+        if self.api().is_none() {
+            self.set_status("Not connected to the daemon.");
+            return;
+        }
+        let agents = self.heartbeat_agents(&heartbeat.scope);
+        self.mode = AppMode::NewHeartbeat(HeartbeatForm::edit(heartbeat, agents));
+    }
+
     /// The agents, those used most recently first: in `folder`, then
     /// anywhere.
     fn heartbeat_agents(&self, folder: &ScopeRoot) -> Vec<AgentChoice> {
@@ -451,7 +612,7 @@ impl App {
             .into_iter()
             .filter_map(|s| commands::agent(&s.agent.as_ref()?.kind));
         for agent in used.chain(commands::AGENTS) {
-            if !agents.iter().any(|known| known.command == agent) {
+            if !agents.iter().any(|known| known.command == Some(agent)) {
                 agents.push(AgentChoice::new(agent));
             }
         }
@@ -476,6 +637,7 @@ impl App {
             (KeyCode::Esc, _) => self.mode = AppMode::Normal,
             (KeyCode::Enter, FormField::Prompt) if alt || shift => form.prompt.newline(),
             (KeyCode::Char('j'), FormField::Prompt) if ctrl => form.prompt.newline(),
+            (KeyCode::Char('s'), _) if ctrl => self.submit_heartbeat(false),
             (KeyCode::Enter, FormField::Create) => self.submit_heartbeat(false),
             (KeyCode::Enter, FormField::AskAgent) => self.submit_heartbeat(true),
             (KeyCode::Up, FormField::Prompt) if form.prompt.move_rows(-1, cols) => {}
@@ -553,14 +715,22 @@ impl App {
         }
     }
 
-    /// `Create`, or `Ask agent` (`setup`).
+    /// `Create` (`Save`), or `Ask agent` (`setup`).
     fn submit_heartbeat(&mut self, setup: bool) {
         let api = self.api();
         let AppMode::NewHeartbeat(form) = &mut self.mode else {
             return;
         };
-        let spec = match form.spec(setup) {
-            Ok(spec) => spec,
+        let asked = match &form.editing {
+            Some(editing) => form.changes(editing).map(|edit| edit.map(Asked::Edit)),
+            None => form.spec(setup).map(|spec| Some(Asked::Make(spec))),
+        };
+        let asked = match asked {
+            Ok(Some(asked)) => asked,
+            Ok(None) => {
+                self.mode = AppMode::Normal;
+                return;
+            }
             Err((field, error)) => {
                 form.focus(field);
                 form.error = Some(error);
@@ -573,15 +743,29 @@ impl App {
         };
         form.busy = true;
         form.error = None;
-        self.exec.job(move || AppEvent::HeartbeatMade {
-            setup,
-            result: api.heartbeat_create(spec),
+        self.exec.job(move || match asked {
+            Asked::Make(spec) => AppEvent::HeartbeatForm {
+                submit: if setup {
+                    Submit::AskAgent
+                } else {
+                    Submit::Create
+                },
+                result: api.heartbeat_create(spec),
+            },
+            Asked::Edit(edit) => AppEvent::HeartbeatForm {
+                submit: Submit::Save,
+                result: api.heartbeat_update(edit),
+            },
         });
     }
 
-    /// The heartbeat the form asked for: Heartbeats shows it whole, or (`setup`)
-    /// its agent's session is started.
-    pub(super) fn on_heartbeat_made(&mut self, setup: bool, result: Result<Heartbeat, ApiError>) {
+    /// The heartbeat the form made or changed: Heartbeats shows it (a new one
+    /// whole), or its agent's session is started.
+    pub(super) fn on_heartbeat_form(
+        &mut self,
+        submit: Submit,
+        result: Result<Heartbeat, ApiError>,
+    ) {
         let heartbeat = match result {
             Ok(heartbeat) => heartbeat,
             Err(error) => {
@@ -605,12 +789,17 @@ impl App {
             self.mode = AppMode::Normal;
         }
         self.beats_take_changed(&heartbeat);
-        if setup {
-            self.set_up_heartbeat(heartbeat);
-            return;
+        match submit {
+            Submit::AskAgent => {
+                self.set_up_heartbeat(heartbeat);
+                return;
+            }
+            Submit::Create => {
+                self.beats.show(&heartbeat.id);
+                self.set_status(format!("Made {}: it runs on its schedule", heartbeat.name));
+            }
+            Submit::Save => self.set_status(format!("Saved {}", heartbeat.name)),
         }
-        self.beats.show(&heartbeat.id);
-        self.set_status(format!("Made {}: it runs on its schedule", heartbeat.name));
         self.reread_heartbeats();
     }
 
@@ -743,6 +932,104 @@ mod tests {
         let (field, error) = form.spec(false).unwrap_err();
         assert_eq!(field, FormField::Arguments);
         assert_eq!(error, "Arguments: a quote isn't closed");
+    }
+
+    fn heartbeat(command: &str, schedule: Option<Schedule>) -> Heartbeat {
+        let json = serde_json::json!({
+            "id": "hb_01", "scope": "/w", "name": "deps", "command": command,
+            "prompt": "Update them.", "schedule": schedule, "enabled": true,
+            "created_by": {"kind": "user"}, "created_at": 1, "updated_at": 1
+        });
+        serde_json::from_value(json).unwrap()
+    }
+
+    fn edit(command: &str, schedule: Option<Schedule>) -> HeartbeatForm {
+        HeartbeatForm::edit(heartbeat(command, schedule), form().agents)
+    }
+
+    fn changes(form: &HeartbeatForm) -> Option<HeartbeatEdit> {
+        form.changes(form.editing.as_ref().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn editing_changes_only_what_was_changed() {
+        let every = |minutes| Some(Schedule::Every { minutes });
+        for schedule in [
+            Schedule::Every { minutes: 90 },
+            Schedule::Every { minutes: 2880 },
+            Schedule::Daily { at: "07:15".into() },
+            Schedule::Weekdays {
+                days: vec![Weekday::Tue, Weekday::Sun],
+                at: "22:00".into(),
+            },
+        ] {
+            let form = edit("claude --model opus", Some(schedule.clone()));
+            assert_eq!(form.schedule(), Ok(schedule));
+            assert_eq!(changes(&form), None);
+        }
+        // A command of any shape shows, and stays, as it is.
+        for command in [
+            "pi",
+            "claude --x 'a b'",
+            "FOO=1 ~/bin/claude --x",
+            "opencode2 --auto",
+            "my-agent --x",
+            "cd web && claude",
+        ] {
+            let form = edit(command, every(60));
+            assert_eq!(form.choice().unwrap().line(), command);
+            assert_eq!(changes(&form), None, "{command}");
+        }
+        let mut form = edit("FOO=1 ~/bin/claude --x", every(60));
+        form.focus(FormField::Arguments);
+        assert!(form.suggestions().is_some());
+        write(&mut form, " --verbose");
+        let edit_of = changes(&form).unwrap();
+        assert_eq!((edit_of.name, edit_of.fields.prompt), (None, None));
+        assert_eq!(edit_of.fields.schedule, None);
+        assert_eq!(edit_of.fields.agent.as_deref(), Some("claude"));
+        assert_eq!(
+            edit_of.fields.command.as_deref(),
+            Some("FOO=1 ~/bin/claude --x --verbose")
+        );
+        assert!(!edit_of.fields.by_agent);
+        // Another agent's, with its own arguments, and back.
+        form.step_choice(FormField::Agent, 1);
+        assert_eq!(
+            changes(&form).unwrap().fields.command.as_deref(),
+            Some("claude --dangerously-skip-permissions")
+        );
+        form.step_choice(FormField::Agent, -1);
+        assert_eq!(arguments(&form), "--x --verbose");
+        // One Rakumux doesn't know suggests nothing.
+        let mut form = edit("my-agent --x", every(60));
+        form.focus(FormField::Arguments);
+        assert!(form.suggestions().is_none());
+        write(&mut form, " --y");
+        let fields = changes(&form).unwrap().fields;
+        assert_eq!(
+            (fields.agent, fields.command.as_deref()),
+            (None, Some("my-agent --x --y"))
+        );
+        // Its schedule is the one shown once it has none; one from a newer
+        // Rakumux stays until it's changed.
+        assert_eq!(
+            changes(&edit("pi", None)).unwrap().fields.schedule,
+            every(60)
+        );
+        assert_eq!(changes(&edit("pi", Some(Schedule::Unknown))), None);
+        // What can't be.
+        let mut form = edit("pi", every(60));
+        form.prompt.set("");
+        let error = |form: &HeartbeatForm| form.changes(form.editing.as_ref().unwrap());
+        assert_eq!(error(&form).unwrap_err().0, FormField::Prompt);
+        form.name.set(" ");
+        assert_eq!(error(&form).unwrap_err().0, FormField::Name);
+        // Nor its folder, nor asking an agent.
+        assert!(!form.fields().contains(&FormField::Folder));
+        assert!(!form.fields().contains(&FormField::AskAgent));
+        form.step_choice(FormField::Create, 1);
+        assert_ne!(form.field, FormField::AskAgent);
     }
 
     #[test]

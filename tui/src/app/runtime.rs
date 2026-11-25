@@ -227,15 +227,9 @@ pub enum AppEvent {
     HeartbeatDone {
         result: Result<String, ApiError>,
     },
-    /// The new heartbeat the form asked for; `setup`: a session of its
-    /// agent is started to fill it in.
-    HeartbeatMade {
-        setup: bool,
-        result: Result<session_core::heartbeat::Heartbeat, ApiError>,
-    },
-    /// A heartbeat was renamed.
-    HeartbeatRenamed {
-        id: session_core::ids::HeartbeatId,
+    /// The heartbeat the form made or changed.
+    HeartbeatForm {
+        submit: super::heartbeat_form::Submit,
         result: Result<session_core::heartbeat::Heartbeat, ApiError>,
     },
     /// A background job panicked or couldn't run.

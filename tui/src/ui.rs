@@ -2081,14 +2081,13 @@ mod tests {
             return;
         }
         use crate::app::types::{
-            ConfirmAction, ConfirmDialog, DaemonRestartDialog, RenameDialog, RenameTarget,
-            UpgradeDialog,
+            ConfirmAction, ConfirmDialog, DaemonRestartDialog, RenameDialog, UpgradeDialog,
         };
         use crate::app::TextInput;
         let id = session_core::ids::SessionId::from_string("A");
         h.app.mode = match which {
             "rename" => AppMode::Renaming(RenameDialog {
-                target: RenameTarget::Session(id),
+                session_id: id,
                 current_name: "api".into(),
                 input: TextInput::new("api"),
                 error_message: None,
@@ -3922,24 +3921,76 @@ mod tests {
         assert!(screen.contains("● nightly"), "{screen}");
         assert!(screen.contains("Fix what fails."), "{screen}");
         assert!(
-            screen.contains("r run  p pause  c rename  d delete"),
+            screen.contains("r run  p pause  c edit  d delete"),
             "{screen}"
         );
 
-        // c renames it; an empty name isn't one.
+        // c edits it: the form as it is, its folder fixed. An empty name
+        // isn't one; Ctrl-S saves from any field, only what changed.
         h.press(KeyCode::Char('c')).await;
         let screen = render(&mut h.app, 160, 48);
-        assert!(screen.contains("Rename heartbeat"), "{screen}");
+        for text in [
+            "Edit heartbeat",
+            "18:30",
+            "‹ codex ›",
+            "--sandbox read-only --search",
+            "Fix what fails.",
+            " Save ",
+        ] {
+            assert!(screen.contains(text), "{text}: {screen}");
+        }
+        for text in ["Ask agent", "‹ repo ›", " Create "] {
+            assert!(!screen.contains(text), "{text}: {screen}");
+        }
         h.ctrl('u').await;
-        h.press(KeyCode::Enter).await;
+        h.ctrl('s').await;
         let screen = render(&mut h.app, 160, 48);
-        assert!(
-            screen.contains("Heartbeat name cannot be empty"),
-            "{screen}"
-        );
+        assert!(screen.contains("Write its name"), "{screen}");
         h.type_text("evening").await;
-        h.press(KeyCode::Enter).await;
+        h.ctrl('s').await;
         assert!(matches!(h.app.mode, AppMode::Normal));
+        let saved = h.fake.state.lock().unwrap().heartbeats[0].clone();
+        assert_eq!(
+            (&saved.command, &saved.prompt, &saved.schedule),
+            (&made.command, &made.prompt, &made.schedule)
+        );
+        // Its schedule, agent and prompt, by the keys; Save.
+        h.press(KeyCode::Char('c')).await;
+        h.press(KeyCode::Tab).await;
+        h.press(KeyCode::Left).await;
+        h.press(KeyCode::Tab).await;
+        h.ctrl('u').await;
+        h.type_text("2h").await;
+        h.press(KeyCode::Tab).await;
+        h.press(KeyCode::Left).await;
+        h.press(KeyCode::Tab).await;
+        h.press(KeyCode::Tab).await;
+        h.ctrl('u').await;
+        h.type_text("Only this: ").await;
+        // A refusal keeps the form.
+        h.fake.fail_next(
+            "heartbeat_update",
+            ApiError::new(ErrorCode::InvalidArgument, "no such luck"),
+        );
+        click_text(&mut h, 160, 48, " Save ");
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("No such luck"), "{screen}");
+        click_text(&mut h, 160, 48, " Save ");
+        assert!(matches!(h.app.mode, AppMode::Normal));
+        let saved = h.fake.state.lock().unwrap().heartbeats[0].clone();
+        assert_eq!(saved.name, "evening");
+        assert_eq!(saved.schedule.unwrap().to_string(), "every 2h");
+        assert_eq!(saved.agent.as_deref(), Some("claude"));
+        assert_eq!(saved.command, "claude --dangerously-skip-permissions");
+        assert!(saved.prompt.starts_with("Only this:"), "{}", saved.prompt);
+        // Nothing changed: nothing asked of the daemon.
+        let asked = h.fake.calls().len();
+        h.press(KeyCode::Char('c')).await;
+        h.ctrl('s').await;
+        assert!(matches!(h.app.mode, AppMode::Normal));
+        assert!(!h.fake.calls()[asked..]
+            .iter()
+            .any(|call| call.starts_with("heartbeat_update")));
         let screen = render(&mut h.app, 160, 48);
         assert!(screen.contains("● evening"), "{screen}");
         assert!(h
@@ -3952,13 +4003,13 @@ mod tests {
         h.press(KeyCode::Esc).await;
         let screen = render(&mut h.app, 160, 48);
         assert!(
-            screen.contains("r run  p pause  c rename  d delete"),
+            screen.contains("r run  p pause  c edit  d delete"),
             "{screen}"
         );
         h.press(KeyCode::Char('j')).await;
         let screen = render(&mut h.app, 160, 48);
-        assert!(!screen.contains("c rename"), "{screen}");
-        // Nothing to rename or delete on that row.
+        assert!(!screen.contains("c edit"), "{screen}");
+        // Nothing to edit or delete on that row.
         h.press(KeyCode::Char('c')).await;
         h.press(KeyCode::Char('d')).await;
         assert!(matches!(h.app.mode, AppMode::Normal));
@@ -3967,10 +4018,10 @@ mod tests {
         h.press(KeyCode::Esc).await;
         assert!(matches!(h.app.mode, AppMode::Normal));
 
-        // Clicks: the row selects it, a click renames, two delete it.
+        // Clicks: the row selects it, a click edits, two delete it.
         click_text(&mut h, 160, 48, "● evening");
-        click_text(&mut h, 160, 48, "c rename");
-        assert!(matches!(h.app.mode, AppMode::Renaming(_)));
+        click_text(&mut h, 160, 48, "c edit");
+        assert!(matches!(h.app.mode, AppMode::NewHeartbeat(_)));
         h.press(KeyCode::Esc).await;
         click_text(&mut h, 160, 48, "d delete");
         assert_eq!(h.fake.state.lock().unwrap().heartbeats.len(), 1);
@@ -4027,7 +4078,7 @@ mod tests {
             );
             let screen = render(&mut h.app, width, height);
             assert!(screen.contains("● Heartbeat"), "{screen}");
-            assert!(screen.contains("c rename"), "{screen}");
+            assert!(screen.contains("c edit"), "{screen}");
         }
     }
 }
