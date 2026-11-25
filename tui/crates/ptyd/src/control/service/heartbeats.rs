@@ -1,6 +1,6 @@
 //! Heartbeats in the control layer: the `heartbeat_*` requests, the
 //! scheduler that starts a run when one is due, and a new session's
-//! [`FirstInput`], which gives a run's agent its task once its prompt shows.
+//! [`FirstInput`], typed once its agent's prompt shows.
 //!
 //! - **Approval.** What a session caller makes or changes (or anything that
 //!   says `by_agent`, as `rakumux-mcp` does) waits for the user, paused:
@@ -8,8 +8,11 @@
 //!   `awaiting_approval` and pauses it. Only the user enables it.
 //! - **Runs.** At a due time the daemon starts `<name> #<n>` in the
 //!   heartbeat's folder, as the user would: a login shell that types the
-//!   heartbeat's command, then its prompt once the agent waits at its
-//!   prompt. Earlier runs whose agent waits (idle, done, or back at its
+//!   heartbeat's command with its prompt as an argument (`claude --x --
+//!   "$RAKUMUX_PROMPT"`: the shell's environment has it, so its length,
+//!   newlines and quotes never meet the shell's line editor). An agent that
+//!   takes no prompt as it starts has it typed once it waits at its own
+//!   ([`commands::with_prompt`]). Earlier runs whose agent waits (idle, done, or back at its
 //!   shell) are ended first, so their final screens stay and Enter resumes
 //!   them; while one is at work or asking something (or still starting) the
 //!   due time is skipped. The newest [`RUNS_KEPT`] runs stay listed; older
@@ -21,6 +24,7 @@ use super::{
     host_error, invalid, limit_exceeded, registry_of, validate_scope, Caller, Inner, State,
 };
 use crate::control::audit::{self, Decision};
+use crate::control::env;
 use crate::control::names;
 use crate::control::policy::{self, Op};
 use crate::control::registry::RunRow;
@@ -30,6 +34,7 @@ use session_core::api::{
     ApiError, CallerInfo, CreateSession, ErrorCode, FirstInput, Response, FIRST_INPUT_TIMEOUT_MS,
     MAX_FIRST_INPUT_BYTES,
 };
+use session_core::commands;
 use session_core::heartbeat::{
     Heartbeat, HeartbeatEdit, HeartbeatFields, HeartbeatRun, HeartbeatRunRef, HeartbeatSpec,
     RunOutcome, MAX_COMMAND_BYTES, MAX_HEARTBEATS, MAX_PROMPT_BYTES, RUNS_KEPT,
@@ -44,21 +49,6 @@ use std::time::Duration;
 const NEW_HEARTBEAT: &str = "Heartbeat";
 /// The command of a heartbeat whose folder never ran an agent and names none.
 const DEFAULT_AGENT: &str = "claude";
-/// The agents a heartbeat's command is known to start, by the word that
-/// starts them (`opencode2` is OpenCode's).
-const AGENTS: &[&str] = &[
-    "claude",
-    "codex",
-    "opencode",
-    "copilot",
-    "cursor-agent",
-    "pi",
-    "grok",
-    "kimi",
-    "droid",
-    "amp",
-    "aider",
-];
 /// How long a first input waits after its agent's screen went quiet: an
 /// agent whose prompt detection reads is at it once it shows; one whose
 /// screen shows none (Cursor, Droid, Amp) reads idle as soon as it draws
@@ -70,7 +60,9 @@ const FIRST_INPUT_QUIET: Duration = Duration::from_secs(2);
 
 /// A new session's [`FirstInput`] while it waits for its agent's prompt.
 pub(super) struct PendingInput {
-    text: String,
+    /// None for a run whose command has its prompt: only its agent's start
+    /// is waited for.
+    text: Option<String>,
     submit: bool,
     /// When the session started (Unix milliseconds).
     since: i64,
@@ -81,8 +73,18 @@ pub(super) struct PendingInput {
 impl PendingInput {
     pub(super) fn new(input: FirstInput, now: i64) -> Self {
         Self {
-            text: input.text,
+            text: Some(input.text),
             submit: input.submit,
+            since: now,
+            agent_since: None,
+        }
+    }
+
+    /// The agent's start, its prompt in its command.
+    fn in_command(now: i64) -> Self {
+        Self {
+            text: None,
+            submit: true,
             since: now,
             agent_since: None,
         }
@@ -650,6 +652,13 @@ impl Inner {
                 &result,
             );
         }
+        // The prompt as an argument, where its agent and the shell take it.
+        let shell = env::login_shell(&self.inherited_env(state, &caller, &[]));
+        let word = format!("\"${}\"", session_core::env::PROMPT);
+        let command = env::expands_variables(&shell)
+            .then(|| commands::with_prompt(&heartbeat.command, &word))
+            .flatten();
+        let typed = command.is_none();
         let run = heartbeat.runs.saturating_add(1);
         let name = run_name(state, &heartbeat, run).map_err(NotStarted::Failed)?;
         let request = CreateSession {
@@ -657,19 +666,20 @@ impl Inner {
             name: Some(name.clone()),
             cwd: None,
             argv: None,
-            startup_cmds: vec![heartbeat.command.clone()],
+            startup_cmds: vec![command.unwrap_or_else(|| heartbeat.command.clone())],
             env: Vec::new(),
             cols: 0,
             rows: 0,
             machine: None,
             prefill: None,
-            first_input: Some(FirstInput {
+            first_input: typed.then(|| FirstInput {
                 text: heartbeat.prompt.clone(),
                 submit: true,
             }),
             workspace: None,
         };
-        let created = self.create_session(state, &caller, request);
+        let prompt = (!typed).then_some(heartbeat.prompt.as_str());
+        let created = self.create_session(state, &caller, request, prompt);
         self.audit_outcome(
             state,
             &caller,
@@ -702,10 +712,20 @@ impl Inner {
                 run,
             },
         );
+        if let (false, Some(live)) = (typed, state.live.get_mut(&view.id)) {
+            live.first_input = Some(PendingInput::in_command(now));
+        }
         self.refresh(state, &view.id);
         let view = state.views.get(&view.id).cloned().unwrap_or(view);
         self.trim_runs(state, id);
         Ok((view, run))
+    }
+
+    /// The prompt of the heartbeat `session` is a run of.
+    pub(super) fn run_prompt(&self, state: &State, session: &SessionId) -> Option<String> {
+        let run = state.runs.get(session)?;
+        let heartbeat = state.heartbeats.get(&run.heartbeat)?;
+        Some(heartbeat.prompt.clone())
     }
 
     /// Runs of `id` past the newest [`RUNS_KEPT`] that have ended go to the
@@ -811,14 +831,13 @@ impl Inner {
                 return;
             };
             if now.saturating_sub(input.since) >= FIRST_INPUT_TIMEOUT_MS {
+                let detail = match input.text {
+                    Some(_) => "its agent never showed its prompt",
+                    None => "its agent never started",
+                };
                 live.first_input = None;
-                crate::log_info!("control: first input for {id} dropped: no agent prompt");
-                self.note_first_input(
-                    &mut state,
-                    id,
-                    RunOutcome::NoAgent,
-                    Some("its agent never showed its prompt".into()),
-                );
+                crate::log_info!("control: first input for {id} dropped: {detail}");
+                self.note_first_input(&mut state, id, RunOutcome::NoAgent, Some(detail.into()));
                 return;
             }
             let agent = detection.as_ref().and_then(|d| d.agent.clone());
@@ -828,6 +847,14 @@ impl Inner {
                 }
                 None => input.agent_since = None,
             }
+            let Some(text) = input.text.clone() else {
+                // Its command gave it the prompt.
+                if agent.is_some() {
+                    live.first_input = None;
+                    self.note_first_input(&mut state, id, RunOutcome::TaskGiven, None);
+                }
+                return;
+            };
             let settle = match agent
                 .as_deref()
                 .is_some_and(crate::detect::knows_its_prompt)
@@ -845,7 +872,7 @@ impl Inner {
             if agent.is_none() || !at_prompt || busy || !settled {
                 return;
             }
-            (input.text.clone(), input.submit, agent.unwrap_or_default())
+            (text, input.submit, agent.unwrap_or_default())
         };
         let written = match submit {
             true => self.host.submit_checked(
@@ -1033,17 +1060,9 @@ fn run_name(state: &State, heartbeat: &Heartbeat, run: u32) -> Result<String, Ap
 }
 
 /// The agent a command starts (`claude --x` → `claude`), when it's one
-/// Rakumux knows: the first word that isn't an environment assignment.
+/// Rakumux knows.
 fn agent_of(command: &str) -> Option<String> {
-    let word = command
-        .split_whitespace()
-        .find(|word| !word.contains('='))?;
-    let program = word.rsplit('/').next().unwrap_or(word);
-    let program = match program {
-        "opencode2" => "opencode",
-        other => other,
-    };
-    AGENTS.contains(&program).then(|| program.to_owned())
+    commands::agent_of(command).map(|agent| agent.label.to_owned())
 }
 
 /// `argv` as a shell command line.

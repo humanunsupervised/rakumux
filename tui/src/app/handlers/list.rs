@@ -3,7 +3,7 @@
 //! move (←/→ switch the list's tabs); Enter (or `i`) goes into a session;
 //! Esc cancels what's pending, then goes back to the session Rakumux mode
 //! was entered from. `f` shows the left column's Inbox with the keys and
-//! `B` its Beats (again: back to the sessions), `t` the drawer, rtop, with
+//! `B` its Heartbeats (again: back to the sessions), `t` the drawer, rtop, with
 //! the keys (again: hides it); with them, the moves go through the Inbox's
 //! cards, the heartbeats or rtop's rows, Enter reads a reply or goes into a
 //! row's session and Esc gives them back (`App::panel_key`).

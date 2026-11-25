@@ -259,7 +259,7 @@ pub enum KeyAction {
     Workspaces,
     /// `W`: move the selected session to another workspace.
     MoveToWorkspace,
-    /// `B`: the left column's Beats, the heartbeats (tasks run on a clock).
+    /// `B`: the left column's Heartbeats (tasks run on a clock).
     Beats,
     Help,
     Settings,
@@ -450,7 +450,7 @@ impl KeyAction {
             KeyAction::MoveToWorkspace => "Move to workspace",
             KeyAction::Pinned => "Pinned sessions",
             KeyAction::Rtop => "rtop (show, focus or hide)",
-            KeyAction::Beats => "Beats: heartbeats (show, or back to the sessions)",
+            KeyAction::Beats => "Heartbeats (show, or back to the sessions)",
             KeyAction::SessionHistory => "Session history",
             KeyAction::Help => "Help",
             KeyAction::Settings => "Settings",
@@ -683,13 +683,17 @@ impl KeyAction {
                  Network counts each process's TCP connections to other machines (Linux; the \
                  machine's total everywhere). Nothing is recorded."
                 .into(),
-            KeyAction::Beats => "Heartbeats: tasks Rakumux runs on a clock: the Beats tab at \
-                 the bottom of the left column. At each due time a new session (♥) starts in the heartbeat's folder \
-                 and its agent gets the task once its prompt shows; earlier runs that wait are \
+            KeyAction::Beats => "Commands Rakumux runs on a clock: the Heartbeats tab at \
+                 the bottom of the left column. At each due time a new session (♥) in the heartbeat's folder \
+                 runs its command, an agent with its arguments and the prompt; earlier runs that wait are \
                  ended. Enter shows one whole (its prompt, command and runs; Enter there goes \
                  into a run), e approves or enables it (one an agent made or changed waits for \
                  you, marked ?), p pauses, r runs it now, c renames it, d twice deletes it. n or + \
-                 New heartbeat makes one: its task, schedule, folder and agent; Ask agent starts \
+                 New heartbeat makes one: its schedule, folder, agent, arguments and prompt. An \
+                 agent's arguments start as those with which it doesn't stop to ask \
+                 (claude --dangerously-skip-permissions: it runs whatever it decides to, so \
+                 change them if that's too much), and what else it takes is listed as you \
+                 type: Tab takes one. Ask agent starts \
                  the agent instead, asked to fill it in with you."
                 .into(),
             KeyAction::Workspaces => "Groups of sessions on this machine. The list shows one \
@@ -1876,7 +1880,7 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     doc.bullet("Detail: the session's terminal screen, updating as the program runs.");
     doc.bullet(
         "The inbox (`f`): what your agents said when they finished a turn, on every machine of \
-         your account: the left column's Inbox tab, beside Workspaces and Beats (your heartbeats, \
+         your account: the left column's Inbox tab, beside Workspaces and Heartbeats (\
          `B`) at its bottom; `f` again goes back to the sessions.",
     );
     doc.bullet(format!(
@@ -2005,7 +2009,7 @@ fn mouse(doc: &mut Doc) {
          to show everything, or outside it to close it.",
     );
     doc.bullet(
-        "Click Workspaces, Inbox or Beats at the bottom of the left column to show it there. Click \
+        "Click Workspaces, Inbox or Heartbeats at the bottom of the left column to show it there. Click \
          a reply, a heartbeat or an rtop row to select it, again to read it or go into its \
          session; click either side to give it the keys. Drag the line left of rtop to resize it.",
     );
@@ -2020,7 +2024,7 @@ fn mouse(doc: &mut Doc) {
     doc.bullet(
         "Click the workspace's name in the middle of the footer: in a session it switches to \
          Rakumux mode, in Rakumux mode it does what Esc does (back to the session you came from; while the Inbox, \
-         Beats or rtop has the keys, Esc there). Click a button on the right of the footer (`? Help`, \
+         Heartbeats or rtop has the keys, Esc there). Click a button on the right of the footer (`? Help`, \
          `, Settings`, or in a session the Rakumux key) to do what it says. Phones send taps \
          as clicks, so all of this works there too.",
     );
@@ -2323,9 +2327,9 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
         "The session list sits in a column on the left; the selected session fills the right.",
     );
     doc.text(
-        "Its tabs, at the bottom, show your workspaces' sessions, the Inbox (`f`) or Beats (`B`) \
+        "Its tabs, at the bottom, show your workspaces' sessions, the Inbox (`f`) or Heartbeats (`B`) \
          in it. The Workspaces tab names the workspace shown, and a click on it opens a menu to \
-         switch; the Inbox and Beats go across every workspace.",
+         switch; the Inbox and Heartbeats go across every workspace.",
     );
     doc.text(
         "`b` or the « right of those tabs hides it, so the session gets \
@@ -2373,7 +2377,7 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
           Master detail layout."
     ));
 
-    doc.heading("Inbox and Beats");
+    doc.heading("Inbox and Heartbeats");
     doc.text(
         "`f` shows the inbox and `B` your heartbeats, in the left column's place for the sessions; \
          its tabs at the bottom switch between the three, and `Esc` goes back to the sessions. On a \
@@ -3756,7 +3760,7 @@ mod tests {
         // How it works, from the action's note; no tab strip.
         let text = buffer_text(&draw(100, 40, &state, &context));
         assert!(text.contains("⌕ Heartbeat█"), "{text}");
-        assert!(text.contains("tasks Rakumux runs on a clock"), "{text}");
+        assert!(text.contains("Commands Rakumux runs on a clock"), "{text}");
         assert!(!text.contains("Agents & CLI"), "{text}");
         assert!(text.contains("Esc end search"), "{text}");
         // Esc ends the search, then closes.

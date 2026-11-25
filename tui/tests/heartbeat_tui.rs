@@ -1,5 +1,5 @@
 //! The real TUI in a real terminal (a session of one daemon), with a daemon
-//! of its own in a temp home. A heartbeat is made in Beats' New heartbeat
+//! of its own in a temp home. A heartbeat is made in Heartbeats' New heartbeat
 //! form, renamed and deleted from the list, and the CLI sees each; the left
 //! column's tabs switch what it shows, and Help is searched.
 #![cfg(target_os = "linux")]
@@ -242,7 +242,7 @@ fn the_left_columns_tabs_switch_and_help_is_searched_in_the_real_tui() {
     let screen = start_tui(&world);
     // A start shows the sessions, over the column's tabs.
     screen.shows("+ New session");
-    let shown = screen.shows("▴ All   ≡ Inbox   ♥ Beats");
+    let shown = screen.shows("▴ All   ≡ Inbox   ♥ Heartbeats");
     assert!(shown.contains("◔ Status"), "{shown}");
     // f: the Inbox in their place; Esc: the sessions.
     screen.send("f", &[]);
@@ -283,7 +283,7 @@ fn the_left_columns_tabs_switch_and_help_is_searched_in_the_real_tui() {
         .position(|line| line.contains("No workspace"))
         .unwrap();
     screen.click(8, row as u16 + 1);
-    screen.shows("▴ No workspace   ≡ Inbox   ♥ Beats");
+    screen.shows("▴ No workspace   ≡ Inbox   ♥ Heartbeats");
     // The middle of the footer names it too, and no mode.
     screen.until("the footer's workspace", |text| {
         footer(text).contains(" No workspace ") && !footer(text).contains("MODE")
@@ -295,7 +295,7 @@ fn the_left_columns_tabs_switch_and_help_is_searched_in_the_real_tui() {
     // rtop is the drawer's, on the right, beside it.
     screen.send("t", &[]);
     let both = screen.shows("▥ rtop");
-    assert!(both.contains("≡ Inbox   ♥ Beats"), "{both}");
+    assert!(both.contains("≡ Inbox   ♥ Heartbeats"), "{both}");
     screen.send("t", &[]);
     screen.until("rtop hidden", |text| !text.contains("▥ rtop"));
     screen.send("?", &[]);
@@ -331,16 +331,15 @@ fn a_heartbeat_is_made_renamed_and_deleted_in_the_real_tui() {
     let world = World::new();
     let screen = start_tui(&world);
 
-    // Beats, empty: the row that makes one, and its form.
+    // Heartbeats, empty: the row that makes one, and its form.
     screen.shows("+ New session");
     // The Workspaces tab names the one shown.
-    screen.shows("▴ All   ≡ Inbox   ♥ Beats");
+    screen.shows("▴ All   ≡ Inbox   ♥ Heartbeats");
     screen.send("B", &[]);
     screen.shows("+ New heartbeat");
     screen.keys(&["enter"]);
     screen.shows("Ask agent");
     screen.send("nightly", &["enter"]);
-    screen.send("Run the tests.", &["tab"]);
     // Daily, at 02:30.
     screen.keys(&["right", "tab"]);
     screen.keys(&[
@@ -351,8 +350,25 @@ fn a_heartbeat_is_made_renamed_and_deleted_in_the_real_tui() {
         "backspace",
     ]);
     screen.send("02:30", &["tab"]);
-    // Folder, agent, Create.
-    screen.keys(&["tab", "tab", "enter"]);
+    // The folder; the agent, what it takes listed, and another's.
+    screen.keys(&["tab"]);
+    screen.shows("--permission-mode <mode>");
+    screen.keys(&["right"]);
+    screen.until("another agent's arguments", |text| {
+        text.contains("--sandbox <mode>") && !text.contains("--permission-mode")
+    });
+    screen.keys(&["left", "tab"]);
+    // Its arguments: one typed in part and taken, its value picked.
+    screen.shows("--dangerously-skip-permissions");
+    screen.send(" eff", &[]);
+    screen.until("what's typed", |text| !text.contains("--add-dir"));
+    screen.keys(&["tab"]);
+    screen.shows("xhigh");
+    screen.keys(&["down", "down", "enter", "tab"]);
+    screen.until("the list closed", |text| !text.contains("xhigh"));
+    screen.send("Run the tests.", &[]);
+    screen.shows("$ claude --dangerously-skip-permissions --effort medium -- \"Run the tests.\"");
+    screen.keys(&["tab", "enter"]);
     let shown = screen.shows("c rename");
     assert!(shown.contains("● nightly"), "{shown}");
     assert!(shown.contains("Run the tests."), "{shown}");
@@ -364,15 +380,21 @@ fn a_heartbeat_is_made_renamed_and_deleted_in_the_real_tui() {
     assert_eq!(made[0]["awaiting_approval"], false);
     assert_eq!(made[0]["schedule"]["kind"], "daily");
     assert_eq!(made[0]["schedule"]["at"], "02:30");
-    assert_eq!(made[0]["command"], "claude");
+    assert_eq!(made[0]["agent"], "claude");
+    assert_eq!(
+        made[0]["command"],
+        "claude --dangerously-skip-permissions --effort medium"
+    );
     assert!(made[0]["next_run_at"].is_number(), "{made:?}");
 
     // A second of that name is refused in the form, which keeps its text.
     screen.send("n", &[]);
     screen.shows("Ask agent");
     screen.send("nightly", &["tab"]);
+    // Runs, when, folder, agent, arguments.
+    screen.keys(&["tab", "tab", "tab", "tab", "tab"]);
     screen.send("Again.", &["tab"]);
-    screen.keys(&["tab", "tab", "tab", "tab", "enter"]);
+    screen.keys(&["enter"]);
     let refused = screen.shows("✕");
     assert!(refused.contains("Again."), "{refused}");
     assert_eq!(world.heartbeats().len(), 1);

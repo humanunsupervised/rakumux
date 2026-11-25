@@ -715,7 +715,7 @@ mod tests {
         // No row of buttons: the tab names it, after a chevron.
         let rows = column(&mut h, 160);
         assert!(
-            rows[37].starts_with("▴ All   ≡ Inbox   ♥ Beats"),
+            rows[37].starts_with("▴ All   ≡ Inbox   ♥ Heartbeats"),
             "{rows:#?}"
         );
         assert!(!rows.join("\n").contains("Launch"), "{rows:#?}");

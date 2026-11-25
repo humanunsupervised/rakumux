@@ -13,7 +13,7 @@
 //! terminal panel drop them.
 //!
 //! What has the keys instead of the sessions, the drawer or the left
-//! column's Inbox or Beats (`left.rs`), is a [`Panel`], and handles them
+//! column's Inbox or Heartbeats (`left.rs`), is a [`Panel`], and handles them
 //! ([`App::panel_key`]).
 
 use std::time::Instant;
@@ -29,7 +29,7 @@ pub enum Panel {
     /// column's Inbox.
     Feed,
     /// The heartbeats: tasks run on a clock (`app/heartbeats.rs`): the left
-    /// column's Beats.
+    /// column's Heartbeats.
     Beats,
     /// What this machine, Rakumux and every session use now
     /// (`app/rtop.rs`): the drawer.
@@ -42,7 +42,7 @@ impl Panel {
     pub fn label(self) -> &'static str {
         match self {
             Panel::Feed => "Inbox",
-            Panel::Beats => "Beats",
+            Panel::Beats => "Heartbeats",
             Panel::Rtop => "rtop",
         }
     }
@@ -71,7 +71,7 @@ impl App {
     }
 
     /// The panels with a tab in the Tabs layout's bar, before the sessions':
-    /// the Inbox or Beats while the left column's tab, and the drawer while
+    /// the Inbox or Heartbeats while the left column's tab, and the drawer while
     /// it's shown (phones show no tab bar in Rakumux mode).
     pub fn bar_panels(&self) -> Vec<Panel> {
         if self.session_layout() != SessionLayout::Tabs || self.phone() {

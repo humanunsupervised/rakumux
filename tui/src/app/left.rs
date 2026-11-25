@@ -2,13 +2,13 @@
 //! workspace shown, under their own tabs, Pinned, Status, Repos and Agent:
 //! `list_tabs.rs`; the tab names the workspace, and a click on it opens the
 //! menu of them over it: `workspaces.rs`), the Inbox (`feed/`) and
-//! Beats (`heartbeats.rs`). Master detail shows the one picked in the list's
+//! Heartbeats (`heartbeats.rs`). Master detail shows the one picked in the list's
 //! column, a phone and a stacked screen on the whole screen in Rakumux mode.
-//! Tabs has no column: the Inbox or Beats takes the session's place under
+//! Tabs has no column: the Inbox or Heartbeats takes the session's place under
 //! the tab bar in Rakumux mode, with a tab of its own there.
 //!
 //! The tab shown has Rakumux mode's keys (unless the drawer, rtop, has them:
-//! [`App::keys_panel`]). `f` shows the Inbox and `B` Beats; again, or Esc,
+//! [`App::keys_panel`]). `f` shows the Inbox and `B` Heartbeats; again, or Esc,
 //! goes back to the sessions. Session mode leaves the tab as it is. Every
 //! start shows the sessions.
 
@@ -38,7 +38,7 @@ impl LeftTab {
         match self {
             LeftTab::Sessions => "Workspaces",
             LeftTab::Inbox => "Inbox",
-            LeftTab::Beats => "Beats",
+            LeftTab::Beats => "Heartbeats",
         }
     }
 
@@ -59,7 +59,7 @@ impl App {
     }
 
     /// The left column, tabs included, where it's on screen (the Tabs
-    /// layout's Inbox or Beats).
+    /// layout's Inbox or Heartbeats).
     pub fn left_pane(&self) -> Option<Rect> {
         let screen = self.screen();
         screen.list.or(screen.panel)
@@ -76,7 +76,7 @@ impl App {
     }
 
     /// What has Rakumux mode's keys instead of the sessions: the drawer, else
-    /// the Inbox or Beats on screen.
+    /// the Inbox or Heartbeats on screen.
     pub fn keys_panel(&self) -> Option<Panel> {
         if self.focus != Focus::List {
             return None;

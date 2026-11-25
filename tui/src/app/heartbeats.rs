@@ -1,4 +1,4 @@
-//! The left column's Beats tab: the user's heartbeats, tasks the daemon runs on a
+//! The left column's Heartbeats tab: the user's heartbeats, tasks the daemon runs on a
 //! clock (each run a new session given the task). Read from the daemon
 //! (`heartbeat_list`, off the UI thread) every 2 s while the tab is on
 //! screen; the daemon sends no heartbeat events.
@@ -70,7 +70,7 @@ impl BeatAction {
     }
 }
 
-/// What the Beats tab keeps for this window.
+/// What the Heartbeats tab keeps for this window.
 #[derive(Debug, Default)]
 pub struct BeatsView {
     /// The heartbeats as last read, in the tab's order.
@@ -183,23 +183,23 @@ pub fn setup_prompt(heartbeat: &Heartbeat) -> String {
 }
 
 impl App {
-    /// The Beats tab is on screen.
+    /// The Heartbeats tab is on screen.
     pub fn beats_shown(&self) -> bool {
         self.left_tab_shown(LeftTab::Beats)
     }
 
-    /// The Beats tab has Rakumux mode's keys.
+    /// The Heartbeats tab has Rakumux mode's keys.
     pub fn beats_has_keys(&self) -> bool {
         self.keys_panel() == Some(Panel::Beats)
     }
 
-    /// `B` or Settings: the left column's Beats with the keys, or back to the
+    /// `B` or Settings: the left column's Heartbeats with the keys, or back to the
     /// sessions while it has them.
     pub fn toggle_beats(&mut self) {
         self.toggle_left_tab(LeftTab::Beats);
     }
 
-    /// The tick's Beats work: coming on screen it reads at once, then every
+    /// The tick's Heartbeats work: coming on screen it reads at once, then every
     /// [`EVERY`] while on screen; leaving it drops answers in flight.
     pub(super) fn beats_timers(&mut self, now: Instant) {
         let shown = self.beats_shown();
@@ -322,7 +322,7 @@ impl App {
         runs
     }
 
-    /// Rakumux mode keys while Beats has them; `false` leaves the key to the
+    /// Rakumux mode keys while Heartbeats has them; `false` leaves the key to the
     /// list's handler (`f`, `t`, `B` among them).
     pub fn beats_key(&mut self, key: KeyEvent) -> bool {
         if key.modifiers.contains(KeyModifiers::CONTROL) {
@@ -510,7 +510,7 @@ impl App {
         });
     }
 
-    /// The session the footer names while Beats has the keys: the selected
+    /// The session the footer names while Heartbeats has the keys: the selected
     /// run's, reading a heartbeat whole.
     pub fn beats_session(&self) -> Option<&SessionView> {
         let id = self.beats.reading.as_ref()?;
@@ -521,7 +521,7 @@ impl App {
         self.list.get(&run?)
     }
 
-    /// A click on row `index` (a heartbeat, or reading one, a run): Beats
+    /// A click on row `index` (a heartbeat, or reading one, a run): Heartbeats
     /// gets the keys and it's selected; again (a tap on a phone), Enter.
     pub fn click_beat_row(&mut self, index: usize) {
         let again = self.beats_has_keys()

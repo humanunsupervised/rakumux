@@ -1,7 +1,7 @@
 //! Heartbeats: tasks Rakumux runs on a clock. A heartbeat is a folder, an
 //! agent command, a task prompt and a schedule; each time it's due the daemon
-//! starts a new session (a **run**) in that folder, runs the command and
-//! gives the agent the task once its prompt shows (capability
+//! starts a new session (a **run**) in that folder that runs the command with
+//! the prompt ([`with_prompt`](crate::commands::with_prompt); capability
 //! [`CAPABILITY_HEARTBEATS`](crate::api::CAPABILITY_HEARTBEATS)).
 //!
 //! A heartbeat an agent made or changed (a session caller, or anything that
@@ -39,11 +39,11 @@ pub struct Heartbeat {
     /// `cursor-agent`, …), when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
-    /// What each run types into its login shell to start the agent, flags
-    /// included. Empty until set.
+    /// What starts the agent, flags included; each run's login shell runs it
+    /// with the prompt. Empty until set.
     #[serde(default)]
     pub command: String,
-    /// The task given to the agent once its prompt shows. Empty until set.
+    /// The task the agent is given. Empty until set.
     #[serde(default)]
     pub prompt: String,
     /// When it runs. None until set.
@@ -109,9 +109,10 @@ pub struct HeartbeatRun {
 pub enum RunOutcome {
     /// Its session started; the agent hasn't had the task yet.
     Started,
-    /// The task was typed into the agent and sent.
+    /// The agent has the task: its command started it with it, or it was
+    /// typed into it and sent.
     TaskGiven,
-    /// The agent never showed its prompt; the task wasn't typed.
+    /// The agent never started, or never showed its prompt.
     NoAgent,
     /// Not started: the previous run was still at work or asking something.
     Skipped,
@@ -364,7 +365,7 @@ pub struct HeartbeatFields {
     /// flags that shape a session kept), else the agent's name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
-    /// What a run types into its shell to start the agent.
+    /// What a run's shell runs, with the prompt, to start the agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

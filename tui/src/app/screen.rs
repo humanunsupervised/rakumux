@@ -54,7 +54,7 @@ pub struct Screen {
     pub terminal_panel_divider: Option<Rect>,
     /// The panel is right of the detail (its divider is a column).
     pub terminal_panel_beside: bool,
-    /// The Tabs layout's Inbox or Beats, under the tab bar in Rakumux mode
+    /// The Tabs layout's Inbox or Heartbeats, under the tab bar in Rakumux mode
     /// (Master detail's are in the list's column).
     pub panel: Option<Rect>,
     /// The drawer (rtop): a docked pane on the right (Master detail), the

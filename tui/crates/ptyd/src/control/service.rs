@@ -1013,7 +1013,7 @@ impl Inner {
         }
         let requested_scope = request.scope.clone();
         let detail = request.name.as_deref().map(audit::clip);
-        let result = self.create_session(&mut state, caller, request);
+        let result = self.create_session(&mut state, caller, request, None);
         let (scope, target) = match &result {
             Ok(view) => (Some(view.scope.clone()), Some(view.id.clone())),
             Err(_) => (requested_scope.or_else(|| own_scope(caller).cloned()), None),
@@ -1035,6 +1035,7 @@ impl Inner {
         state: &mut State,
         caller: &Caller,
         request: CreateSession,
+        prompt: Option<&str>,
     ) -> Result<SessionView, ApiError> {
         let CreateSession {
             scope,
@@ -1141,6 +1142,7 @@ impl Inner {
         let start = Start {
             resume: None,
             prefill: prefill.as_deref(),
+            prompt,
         };
         if let Err(error) = self.start_terminal(state, &record, argv, base_env, cols, rows, start) {
             if let Err(e) = registry_of(state).and_then(|r| r.delete(&id).map_err(Into::into)) {
@@ -1625,9 +1627,11 @@ impl Inner {
             Some(argv) => argv.clone(),
             None => env::login_shell(&base_env),
         };
+        let prompt = self.run_prompt(state, &record.id);
         let start = Start {
             resume,
             prefill: None,
+            prompt: prompt.as_deref(),
         };
         self.start_terminal(state, record, argv, base_env, cols, rows, start)?;
         registry(&state.registry)?.mark_revived(&record.id, used.then(now_ms))?;
@@ -3387,9 +3391,13 @@ impl Inner {
         rows: u16,
         start: Start<'_>,
     ) -> Result<(), ApiError> {
-        let Start { resume, prefill } = start;
+        let Start {
+            resume,
+            prefill,
+            prompt,
+        } = start;
         let token = state.tokens.issue(&record.id);
-        let child_env = env::child_env(
+        let mut child_env = env::child_env(
             &base_env,
             &Identity {
                 session_id: &record.id,
@@ -3398,6 +3406,9 @@ impl Inner {
                 rakumux_bin: self.config.rakumux_bin.as_deref(),
             },
         );
+        if let Some(prompt) = prompt {
+            child_env.push((session_core::env::PROMPT.into(), prompt.into()));
+        }
         let spec = SpawnSpec {
             session_id: record.id.clone(),
             argv,
@@ -4071,6 +4082,8 @@ fn validate_scope(scope: Option<ScopeRoot>) -> Result<ScopeRoot, ApiError> {
 struct Start<'a> {
     resume: Option<&'a ResumeSpec>,
     prefill: Option<&'a str>,
+    /// A heartbeat run's prompt, which its startup command names.
+    prompt: Option<&'a str>,
 }
 
 /// Sessions on other machines (capability `machines`) aren't served yet.

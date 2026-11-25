@@ -13,6 +13,8 @@
 pub mod activity;
 pub mod api;
 pub mod client;
+#[path = "../../../../integrations/commands.rs"]
+pub mod commands;
 pub mod frame;
 pub mod heartbeat;
 pub mod ids;
@@ -42,4 +44,6 @@ pub mod env {
     pub const HOME: &str = "RAKUMUX_HOME";
     /// Explicit path to the `rakumux-ptyd` binary.
     pub const PTYD_BIN: &str = "RAKUMUX_PTYD_BIN";
+    /// A heartbeat run's prompt, which the command its shell types names.
+    pub const PROMPT: &str = "RAKUMUX_PROMPT";
 }

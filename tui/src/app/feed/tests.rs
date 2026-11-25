@@ -334,7 +334,7 @@ async fn f_shows_the_inbox_in_the_left_column_and_esc_and_f_go_back_to_the_sessi
     assert!(h.app.feed_has_keys());
     h.press(KeyCode::Char('f')).await;
     assert_eq!(h.app.left_tab(), LeftTab::Sessions);
-    // From Beats it goes to the Inbox, and B back to Beats.
+    // From Heartbeats it goes to the Inbox, and B back to Heartbeats.
     h.press(KeyCode::Char('B')).await;
     assert!(h.app.beats_has_keys());
     h.press(KeyCode::Char('f')).await;

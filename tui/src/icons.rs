@@ -84,7 +84,7 @@ impl Icons {
         }
     }
 
-    /// The left column's Beats tab (heartbeats), and a heartbeat's runs.
+    /// The left column's Heartbeats tab (heartbeats), and a heartbeat's runs.
     pub fn beats(self) -> &'static str {
         match self {
             Icons::Plain => "♥",

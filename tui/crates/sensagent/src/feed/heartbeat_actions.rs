@@ -7,7 +7,7 @@
 //! `done`, or `failed` with why. `enable` (approving or turning one on) and `run` are refused without
 //! asking the daemon: whoever can write to rakumux.com could otherwise have a
 //! command run on this machine, so a heartbeat is approved, turned on and run
-//! only here (the TUI's Beats tab, `rakumux heartbeat`).
+//! only here (the TUI's Heartbeats tab, `rakumux heartbeat`).
 //!
 //! Each action is carried out at most once: its id is kept as handled before
 //! the daemon is asked, and with the reports rakumux.com hasn't taken yet,

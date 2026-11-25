@@ -1,19 +1,23 @@
 //! The New heartbeat form (`app/heartbeat_form.rs`): a label and its value a
 //! row, the text ones on a surface of their own, the schedule's and the
-//! agent's choices side by side or between `‹` and `›`, then the buttons.
+//! agent's choices side by side or between `‹` and `›`, the command they
+//! make, then the buttons. On the agent or its arguments what the agent takes
+//! is listed over the rows under them.
 
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{Clear, Paragraph},
     Frame,
 };
+use session_core::commands;
 use session_core::heartbeat::Weekday;
 
 use super::dialogs::{dialog_frame, error_line, padded, padding};
 use super::format::truncate;
 use super::utils::get_spinner_char;
+use crate::app::argument_suggest::Suggestions;
 use crate::app::heartbeat_form::{FormField, FormHit, HeartbeatForm, Repeat};
 use crate::app::{App, Hit, TextInput};
 use crate::layout::str_width;
@@ -21,11 +25,15 @@ use crate::printable::printable;
 use crate::theme;
 
 /// Widest the form gets.
-const WIDTH: u16 = 76;
+const WIDTH: u16 = 92;
 /// The labels' column.
-const LABEL: u16 = 8;
-/// The task's rows, while the screen has them.
-const TASK_ROWS: u16 = 6;
+const LABEL: u16 = 10;
+/// The prompt's rows, while the screen has them.
+const PROMPT_ROWS: u16 = 8;
+/// Fewer than these and the blank rows and the command go.
+const PROMPT_MIN_ROWS: u16 = 3;
+/// The rows of the command they make.
+const COMMAND_ROWS: u16 = 2;
 /// Columns of the interval or time.
 const WHEN_COLS: u16 = 7;
 
@@ -34,8 +42,8 @@ fn popup_cols(width: u16) -> u16 {
     WIDTH.min(width.saturating_sub(2))
 }
 
-/// The columns the task is written in on a screen `width` columns wide.
-pub fn task_cols(width: u16) -> usize {
+/// The columns the prompt is written in on a screen `width` columns wide.
+pub fn prompt_cols(width: u16) -> usize {
     let popup = Rect {
         width: popup_cols(width).saturating_sub(2),
         height: 20,
@@ -64,15 +72,17 @@ pub fn draw_heartbeat_form(
 ) {
     let p = theme::palette();
     let (pad_x, pad_y) = padding(area);
-    // Name, the task, runs, its days, folder, agent, the message, the
-    // buttons; blank rows between them while there's room.
-    let fixed = 7;
+    // Name, runs, its days, folder, agent, arguments, the prompt, the
+    // message, the buttons; while there's room a blank row over the agent
+    // and the prompt, and the command under a third.
+    let fixed = 8;
     let borders = 2 + 2 * pad_y;
     let room = area.height.saturating_sub(fixed + borders);
-    let task_rows = TASK_ROWS.min(room).max(1);
-    let gap = u16::from(room >= task_rows + 2);
+    let spare = 3 + COMMAND_ROWS;
+    let gap = u16::from(room >= PROMPT_MIN_ROWS + spare);
+    let prompt_rows = PROMPT_ROWS.min(room.saturating_sub(spare * gap)).max(1);
     let width = popup_cols(area.width);
-    let height = (fixed + borders + task_rows + 2 * gap).min(area.height);
+    let height = (fixed + borders + prompt_rows + spare * gap).min(area.height);
     if width < 24 || height < 6 {
         return;
     }
@@ -137,32 +147,7 @@ pub fn draw_heartbeat_form(
         }
         hits.push((rect, form_hit(FormHit::Field(FormField::Name))));
     }
-    y += 1 + gap;
-
-    // The task, word-wrapped, the cursor's row in view.
-    if let Some(rect) = row(y, task_rows) {
-        label(f, rect, "Task", on(FormField::Task));
-        let cell = value_of(rect);
-        let cols = usize::from(cell.width).max(1);
-        let rows = form.task.rows(cols);
-        let (cursor_row, cursor_col) = form.task.cursor_at(cols);
-        let first = (cursor_row + 1).saturating_sub(usize::from(cell.height));
-        let lines: Vec<Line> = rows
-            .iter()
-            .skip(first)
-            .take(usize::from(cell.height))
-            .map(|range| Line::from(form.task.value()[range.clone()].to_string()))
-            .collect();
-        f.render_widget(Paragraph::new(lines).style(field_bg), cell);
-        if on(FormField::Task) {
-            f.set_cursor(
-                cell.x + cursor_col as u16,
-                cell.y + (cursor_row - first) as u16,
-            );
-        }
-        hits.push((rect, form_hit(FormHit::Field(FormField::Task))));
-    }
-    y += task_rows + gap;
+    y += 1;
 
     // How it repeats, and how often or when.
     if let Some(rect) = row(y, 1) {
@@ -236,11 +221,18 @@ pub fn draw_heartbeat_form(
         .get(form.folder)
         .map(|folder| app.folders.name_of(folder))
         .unwrap_or_default();
-    let agent = form.agents.get(form.agent).cloned().unwrap_or_default();
+    let agent = form
+        .choice()
+        .map(|choice| choice.command.label.to_string())
+        .unwrap_or_default();
     for (text, field, value) in [
         ("Folder", FormField::Folder, folder),
         ("Agent", FormField::Agent, agent),
     ] {
+        // The command starts with its agent.
+        if field == FormField::Agent {
+            y += gap;
+        }
         if let Some(rect) = row(y, 1) {
             let focused = on(field);
             label(f, rect, text, focused);
@@ -270,6 +262,67 @@ pub fn draw_heartbeat_form(
             hits.push((rect, form_hit(FormHit::Field(field))));
         }
         y += 1;
+    }
+
+    // Its arguments.
+    let arguments_y = y;
+    if let (Some(rect), Some(choice)) = (row(y, 1), form.choice()) {
+        label(f, rect, "Arguments", on(FormField::Arguments));
+        let cell = value_of(rect);
+        let (text, cursor) = shown(&choice.arguments, usize::from(cell.width).max(1));
+        f.render_widget(Paragraph::new(text).style(field_bg), cell);
+        if on(FormField::Arguments) {
+            f.set_cursor(cell.x + cursor as u16, cell.y);
+        }
+        hits.push((rect, form_hit(FormHit::Field(FormField::Arguments))));
+    }
+    y += 1 + gap;
+    // The suggestions are over what's under them, for clicks too.
+    let under = hits.len();
+
+    // The prompt, word-wrapped, the cursor's row in view.
+    if let Some(rect) = row(y, prompt_rows) {
+        label(f, rect, "Prompt", on(FormField::Prompt));
+        let cell = value_of(rect);
+        let cols = usize::from(cell.width).max(1);
+        let rows = form.prompt.rows(cols);
+        let (cursor_row, cursor_col) = form.prompt.cursor_at(cols);
+        let first = (cursor_row + 1).saturating_sub(usize::from(cell.height));
+        let lines: Vec<Line> = rows
+            .iter()
+            .skip(first)
+            .take(usize::from(cell.height))
+            .map(|range| Line::from(form.prompt.value()[range.clone()].to_string()))
+            .collect();
+        f.render_widget(Paragraph::new(lines).style(field_bg), cell);
+        if on(FormField::Prompt) {
+            f.set_cursor(
+                cell.x + cursor_col as u16,
+                cell.y + (cursor_row - first) as u16,
+            );
+        }
+        hits.push((rect, form_hit(FormHit::Field(FormField::Prompt))));
+    }
+    y += prompt_rows + gap;
+
+    // The command a run is, as much of it as two rows hold.
+    if let (1, Some(rect)) = (gap, row(y, COMMAND_ROWS)) {
+        let cell = value_of(rect);
+        let room = usize::from(cell.width) * usize::from(cell.height);
+        let command = format!("$ {}", command_line(form));
+        let mut command = TextInput::new(truncate(&printable(&command), room));
+        let mut rows = command.rows(usize::from(cell.width));
+        // Wrapped at its words it may take more: cut it again.
+        while rows.len() > usize::from(cell.height) {
+            let cols = str_width(command.value()).saturating_sub(2);
+            command.set(truncate(command.value(), cols));
+            rows = command.rows(usize::from(cell.width));
+        }
+        let lines: Vec<Line> = rows
+            .into_iter()
+            .map(|range| Line::from(command.value()[range].to_string()))
+            .collect();
+        f.render_widget(Paragraph::new(lines).style(muted), cell);
     }
 
     // What's wrong, then the buttons on the last row.
@@ -330,4 +383,114 @@ pub fn draw_heartbeat_form(
         x += width + 2;
     }
     hits.push((popup, form_hit(FormHit::Inside)));
+
+    if let (Some(found), false) = (form.suggestions(), form.busy) {
+        let top = arguments_y + 1;
+        let list = Rect {
+            y: top,
+            height: last.saturating_sub(top),
+            ..value_of(inner)
+        };
+        let rows = draw_suggestions(f, &found, form.pick, list);
+        hits.splice(under..under, rows);
+    }
+}
+
+/// The command the form makes: its prompt where its agent takes it, on one
+/// line.
+fn command_line(form: &HeartbeatForm) -> String {
+    let line = form
+        .choice()
+        .map(|choice| choice.line())
+        .unwrap_or_default();
+    let words: Vec<&str> = form.prompt.value().split_whitespace().collect();
+    if words.is_empty() {
+        return line;
+    }
+    let prompt = format!("\"{}\"", words.join(" ").replace('"', "\\\""));
+    commands::with_prompt(&line, &prompt).unwrap_or(line)
+}
+
+/// The suggested arguments, as many as fit `area` around the one picked;
+/// returns their click targets.
+fn draw_suggestions(
+    f: &mut Frame,
+    found: &Suggestions,
+    pick: Option<usize>,
+    area: Rect,
+) -> Vec<(Rect, Hit)> {
+    let p = theme::palette();
+    let height = found.rows.len().min(usize::from(area.height));
+    if height == 0 || area.width < 8 {
+        return Vec::new();
+    }
+    let first = pick.map_or(0, |pick| (pick + 1).saturating_sub(height));
+    let below = found.rows.len() - first - height;
+    let named = |row: &crate::app::argument_suggest::Suggestion| match row.value {
+        Some(value) => format!("{} <{value}>", row.text),
+        None => row.text.to_string(),
+    };
+    let widest = found.rows.iter().map(|row| str_width(&named(row))).max();
+    let about_at = widest.unwrap_or(0) + 3;
+    let cols = usize::from(area.width);
+    let mut hits = Vec::new();
+    for (line, (index, row)) in found
+        .rows
+        .iter()
+        .enumerate()
+        .skip(first)
+        .take(height)
+        .enumerate()
+    {
+        let cell = Rect {
+            y: area.y + line as u16,
+            height: 1,
+            ..area
+        };
+        let picked = pick == Some(index);
+        let background = Style::default().bg(if picked { p.selection } else { p.surface });
+        let name = truncate(&named(row), cols.saturating_sub(2));
+        let mut spans = vec![Span::styled(
+            format!(" {name}"),
+            Style::default()
+                .fg(if row.takes {
+                    p.text_bright
+                } else {
+                    p.text_muted
+                })
+                .add_modifier(if picked {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
+        )];
+        // How many more there are, at the end of the last row.
+        let more = match below > 0 && line + 1 == height {
+            true => format!("{below} more "),
+            false => String::new(),
+        };
+        let used = 1 + str_width(&name);
+        let room = cols.saturating_sub(about_at.max(used + 2) + str_width(&more) + 1);
+        let muted = Style::default().fg(p.text_muted);
+        let mut at = used;
+        if room >= 8 && !row.about.is_empty() {
+            let gap = about_at.max(used + 2) - used;
+            let about = truncate(row.about, room);
+            at += gap + str_width(&about);
+            spans.push(Span::raw(" ".repeat(gap)));
+            spans.push(Span::styled(about, muted));
+        }
+        if !more.is_empty() && at + str_width(&more) < cols {
+            spans.push(Span::raw(" ".repeat(cols - at - str_width(&more))));
+            spans.push(Span::styled(more, muted));
+        }
+        f.render_widget(Clear, cell);
+        f.render_widget(Paragraph::new(Line::from(spans)).style(background), cell);
+        let hit = match row.takes {
+            true => FormHit::Suggestion(index),
+            false => FormHit::Inside,
+        };
+        hits.push((cell, Hit::HeartbeatForm(hit)));
+    }
+    hits
 }

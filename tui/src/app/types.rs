@@ -726,7 +726,7 @@ pub enum AppMode {
     /// The workspaces menu (`w`, `W`).
     Workspaces(super::workspaces::WorkspacePicker),
     Renaming(RenameDialog),
-    /// A new heartbeat (Beats' `n` and `+ New heartbeat`).
+    /// A new heartbeat (Heartbeats' `n` and `+ New heartbeat`).
     NewHeartbeat(super::heartbeat_form::HeartbeatForm),
     /// Writing back to a feed entry.
     FeedReply(FeedReplyDialog),

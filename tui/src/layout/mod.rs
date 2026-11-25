@@ -229,7 +229,7 @@ pub struct LayoutAreas {
     /// screen too short to stack, with the list focused); check
     /// `detail.is_empty()` before drawing or resizing a terminal to it.
     pub detail: Rect,
-    /// The Tabs layout's Inbox or Beats ([`PaneSizes::left_panel`]), in the
+    /// The Tabs layout's Inbox or Heartbeats ([`PaneSizes::left_panel`]), in the
     /// session's place under the bar, in Rakumux mode.
     pub panel: Option<Rect>,
     /// The drawer (rtop): a docked pane on the right, or wherever it takes
@@ -252,7 +252,7 @@ pub struct PaneSizes {
     /// rail [`RAIL_COLS`] wide is left of the detail. A stacked or phone
     /// screen shows the list as usual.
     pub list_hidden: bool,
-    /// The left column shows the Inbox or Beats instead of the sessions: a
+    /// The left column shows the Inbox or Heartbeats instead of the sessions: a
     /// stacked screen gives it everything in Rakumux mode, and the Tabs
     /// layout, which has no column, the session's place.
     pub left_panel: bool,
@@ -511,7 +511,7 @@ fn split_sessions(
     if focus == PaneFocus::Zoomed {
         return only(area);
     }
-    // A tab bar row, then the detail (the Inbox or Beats in its place in
+    // A tab bar row, then the detail (the Inbox or Heartbeats in its place in
     // Rakumux mode).
     let tabs_over = |area: Rect| {
         let bar_height = area.height.min(1);

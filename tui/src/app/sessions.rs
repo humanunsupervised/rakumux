@@ -1283,7 +1283,7 @@ impl App {
             if let Some(index) = layout::tab_at(&self.tab_hits, event.column, event.row) {
                 let id = self.list.tab_order().get(index).map(|s| s.id.clone());
                 if let Some(id) = id {
-                    // The Inbox or Beats in the session's place makes way.
+                    // The Inbox or Heartbeats in the session's place makes way.
                     if screen.panel.is_some() {
                         self.show_sessions_tab();
                     }

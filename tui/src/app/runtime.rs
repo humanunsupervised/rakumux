@@ -217,7 +217,7 @@ pub enum AppEvent {
         generation: u64,
         result: Result<session_core::api::ResourceSample, ApiError>,
     },
-    /// The heartbeats for the Beats tab (`generation`: the showing it was
+    /// The heartbeats for the Heartbeats tab (`generation`: the showing it was
     /// asked for).
     Heartbeats {
         generation: u64,

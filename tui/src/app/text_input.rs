@@ -49,6 +49,17 @@ impl TextInput {
         self.value[..self.cursor].chars().count()
     }
 
+    /// The cursor's place in [`Self::value`].
+    pub fn cursor(&self) -> usize {
+        self.cursor
+    }
+
+    /// Put `text` in place of `range`; the cursor moves after it.
+    pub fn replace(&mut self, range: Range<usize>, text: &str) {
+        self.value.replace_range(range.clone(), text);
+        self.cursor = range.start + text.len();
+    }
+
     /// Replace the content; the cursor moves to the end.
     pub fn set(&mut self, value: impl Into<String>) {
         *self = Self {

@@ -2602,7 +2602,7 @@ mod tests {
         assert_eq!(screen.detail.unwrap().right(), 160);
         // The column's tabs at its bottom, the Inbox's in the accent.
         assert_eq!(
-            pane[45], "   ❯ Workspaces   ≡ Inbox   ♥ Beats           «",
+            pane[45], "   ❯ Workspaces   ≡ Inbox   ♥ Heartbeats      «",
             "{wide}"
         );
         assert_eq!(pane[44], "                  ▔▔▔▔▔▔▔", "{wide}");
@@ -2666,7 +2666,7 @@ mod tests {
         assert!(h.app.screen().divider.is_none());
         assert!(narrow.contains("api  claude · repo"), "{narrow}");
         assert!(
-            narrow.contains("❯ Workspaces   ≡ Inbox   ♥ Beats"),
+            narrow.contains("❯ Workspaces   ≡ Inbox   ♥ Heartbeats"),
             "{narrow}"
         );
         assert!(!narrow.contains("«"), "{narrow}");
@@ -3091,7 +3091,7 @@ mod tests {
         h.app.process_pending();
         let screen = render(&mut h.app, 160, 48);
         assert!(
-            screen.contains("❯ Workspaces   ≡ Inbox ●1   ♥ Beats"),
+            screen.contains("❯ Workspaces   ≡ Inbox ●1   ♥ Heartbeats"),
             "{screen}"
         );
         let phone = render(&mut h.app, 40, 20);
@@ -3117,7 +3117,7 @@ mod tests {
         let phone = render(&mut h.app, 45, 40);
         assert_eq!(
             phone.lines().nth(37).unwrap().trim_end(),
-            "   ❯ Workspaces   ≡ Inbox   ♥ Beats",
+            "   ❯ Workspaces   ≡ Inbox   ♥ Heartbeats",
             "{phone}"
         );
         assert!(phone.contains("nightly-build"), "{phone}");
@@ -3167,7 +3167,10 @@ mod tests {
         // over the left column's tabs.
         let width = usize::from(crate::layout::sidebar_width(160));
         let cards = list_column(&screen, width);
-        assert_eq!(cards[45], "   ❯ Workspaces   ≡ Inbox   ♥ Beats", "{screen}");
+        assert_eq!(
+            cards[45], "   ❯ Workspaces   ≡ Inbox   ♥ Heartbeats",
+            "{screen}"
+        );
         assert!(cards[1].starts_with("   ◷ last hour"), "{screen}");
         assert!(cards[2].contains(" · 2m  api  claude · repo ─"), "{screen}");
         assert!(rows[2].chars().nth(width) == Some('│'), "{screen}");
@@ -3401,7 +3404,7 @@ mod tests {
                 let row = list_column(&screen, pane.width.into())
                     [usize::from(tabs.y + tabs.height / 2)]
                 .clone();
-                for label in ["Workspaces", "Inbox", "Beats"] {
+                for label in ["Workspaces", "Inbox", "Heartbeats"] {
                     assert!(row.contains(label), "{width}x{height}: {row:?}");
                 }
                 // Only the sessions have their own tabs over them.
@@ -3687,11 +3690,11 @@ mod tests {
                 .collect::<Vec<_>>()
         };
 
-        // B: the drawer on Beats, the agent's heartbeat first, waiting.
+        // B: the drawer on Heartbeats, the agent's heartbeat first, waiting.
         h.press(KeyCode::Char('B')).await;
         assert!(h.app.beats_has_keys());
         let screen = render(&mut h.app, 160, 48);
-        assert!(screen.contains("♥ Beats"), "{screen}");
+        assert!(screen.contains("♥ Heartbeats"), "{screen}");
         assert!(screen.contains("? nightly"), "{screen}");
         assert!(screen.contains("approve?"), "{screen}");
         assert!(screen.contains("● deps"), "{screen}");
@@ -3770,7 +3773,10 @@ mod tests {
         assert!(matches!(h.app.mode, AppMode::Normal));
         assert!(enables(&h).contains(&"heartbeat_create Heartbeat".to_string()));
         let setup = h.fake.creates().last().cloned().unwrap();
-        assert_eq!(setup.startup_cmds, ["claude --permission-mode acceptEdits"]);
+        assert_eq!(
+            setup.startup_cmds,
+            ["claude --dangerously-skip-permissions"]
+        );
         let first = setup.first_input.unwrap();
         assert!(!first.submit);
         assert!(
@@ -3819,29 +3825,62 @@ mod tests {
         for text in [
             "New heartbeat",
             "Name",
-            "Task",
             "Every",
             "Daily",
             "‹ claude ›",
+            "Arguments",
+            "--dangerously-skip-permissions",
+            "Prompt",
+            "$ claude --dangerously-skip-permissions",
             "Create",
             "Ask agent",
         ] {
             assert!(screen.contains(text), "{text}: {screen}");
         }
-        // Named, a task of two lines, daily at 18:30, run by codex.
+        // Named, daily at 18:30.
         h.type_text("nightly").await;
         h.press(KeyCode::Enter).await;
-        h.type_text("Run the tests.").await;
-        h.ctrl('j').await;
-        h.type_text("Fix what fails.").await;
-        h.press(KeyCode::Tab).await;
         h.press(KeyCode::Right).await;
         h.press(KeyCode::Tab).await;
         h.ctrl('u').await;
         h.type_text("6pm").await;
         h.press(KeyCode::Tab).await;
+        // Nothing is listed off the agent; on it, what that agent takes, and
+        // what the next one does. Tab goes on to its arguments.
+        assert!(!render(&mut h.app, 160, 48).contains("--permission-mode"));
         h.press(KeyCode::Tab).await;
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("--permission-mode <mode>"), "{screen}");
         h.press(KeyCode::Right).await;
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("--sandbox <mode>"), "{screen}");
+        assert!(!screen.contains("--permission-mode"), "{screen}");
+        assert!(screen.contains("more"), "{screen}");
+        h.press(KeyCode::Tab).await;
+        // Its own, at first; typing finds one, Enter takes it, then its value.
+        h.type_text(" sand").await;
+        let screen = render(&mut h.app, 160, 48);
+        assert!(!screen.contains("--search"), "{screen}");
+        h.press(KeyCode::Enter).await;
+        h.type_text("read").await;
+        h.press(KeyCode::Tab).await;
+        // Esc leaves a suggestion as it is, then Enter goes on.
+        h.type_text("--sear").await;
+        h.press(KeyCode::Esc).await;
+        assert!(matches!(h.app.mode, AppMode::NewHeartbeat(_)));
+        h.press(KeyCode::Backspace).await;
+        // A click takes one too.
+        click_text(&mut h, 160, 48, "Search the web");
+        h.press(KeyCode::Enter).await;
+        h.type_text("Run the tests.").await;
+        h.ctrl('j').await;
+        h.type_text("Fix what fails.").await;
+        let screen = render(&mut h.app, 160, 48);
+        assert!(!screen.contains("Never ask, no sandbox"), "{screen}");
+        assert!(
+            screen.contains("$ codex --dangerously-bypass-approvals-and-sandbox --sandbox"),
+            "{screen}"
+        );
         h.press(KeyCode::Tab).await;
         // A time it can't read: said, and the keys are on it.
         h.press(KeyCode::Enter).await;
@@ -3872,9 +3911,13 @@ mod tests {
         assert_eq!(made.prompt, "Run the tests.\nFix what fails.");
         assert_eq!(made.schedule.as_ref().unwrap().to_string(), "daily 18:30");
         assert_eq!(made.agent.as_deref(), Some("codex"));
+        assert_eq!(
+            made.command,
+            "codex --dangerously-bypass-approvals-and-sandbox --sandbox read-only --search"
+        );
         assert_eq!(made.scope, scope());
         assert!(made.enabled);
-        // Beats shows it whole, with its buttons.
+        // Heartbeats shows it whole, with its buttons.
         let screen = render(&mut h.app, 160, 48);
         assert!(screen.contains("● nightly"), "{screen}");
         assert!(screen.contains("Fix what fails."), "{screen}");
@@ -3946,7 +3989,13 @@ mod tests {
             render(&mut h.app, width, height);
             h.press(KeyCode::Char('B')).await;
             click_text(&mut h, width, height, "+ New heartbeat");
-            click_text(&mut h, width, height, "Task");
+            // The arguments listed leave the labels: a tap takes one, or goes on.
+            click_text(&mut h, width, height, "Arguments");
+            let screen = render(&mut h.app, width, height);
+            assert!(screen.contains("--model <model>"), "{screen}");
+            click_text(&mut h, width, height, "--model <");
+            click_text(&mut h, width, height, "opus");
+            click_text(&mut h, width, height, "Prompt");
             h.app
                 .handle_paste("Update the dependencies, run the tests and fix what fails.\nThen say what changed.");
             click_text(&mut h, width, height, "Days");
@@ -3968,6 +4017,10 @@ mod tests {
             click_text(&mut h, width, height, " Create ");
             let made = h.fake.state.lock().unwrap().heartbeats[0].clone();
             assert!(made.prompt.ends_with("\nThen say what changed."));
+            assert_eq!(
+                made.command,
+                "claude --dangerously-skip-permissions --model opus"
+            );
             assert_eq!(
                 made.schedule.as_ref().unwrap().to_string(),
                 "mon,tue,wed,thu 09:00"

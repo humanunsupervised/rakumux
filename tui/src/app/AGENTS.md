@@ -76,9 +76,10 @@ new-session flow, and code boundaries.
   the workspace shown (`new_session_workspace`). Keys in `handlers/workspaces.rs`, drawing in
   `components/workspaces.rs`. The test fake announces `workspaces` only with
   `FakeState::keeps_workspaces`.
-- `heartbeats.rs`: the left column's Beats tab (`BeatsView`, `BeatAction`: the selected heartbeat's
+- `heartbeats.rs`: the left column's Heartbeats tab (`BeatsView`, `BeatAction`: the selected heartbeat's
   buttons; `+ New heartbeat`, `Hit::BeatNew`); `heartbeat_form.rs`: the New heartbeat form
-  (`AppMode::NewHeartbeat(HeartbeatForm)`, its keys, clicks (`FormHit`) and what it makes).
+  (`AppMode::NewHeartbeat(HeartbeatForm)`, its keys, clicks (`FormHit`) and what it makes);
+  `argument_suggest.rs`: the arguments it suggests, from `session_core::commands`.
   Drawing in `components/heartbeats.rs` and `components/heartbeat_form.rs`.
 - `path_complete.rs`: the folders that complete a typed path (`suggest`: folders and links to
   them, dot-folders only once the name starts with `.`, case-insensitive only when nothing else
@@ -118,9 +119,9 @@ new-session flow, and code boundaries.
   `components::feed::turn_lines` (`›` prompts, quiet reasoning, `●` tool calls with the first
   lines of their output). `components/feed.rs::draw_feed` draws the cards, or
   the reply under a `‹` row.
-- `left.rs`: the left column's tabs (`LeftTab`: Sessions, shown as Workspaces, Inbox, Beats; `App::left_tab`, this
+- `left.rs`: the left column's tabs (`LeftTab`: Sessions, shown as Workspaces, Inbox, Heartbeats; `App::left_tab`, this
   window's, Workspaces at every start) and `keys_panel`, what has Rakumux mode's keys instead of the
-  sessions (`drawer::Panel`: the drawer, else the column's Inbox or Beats on screen). `left_pane` is
+  sessions (`drawer::Panel`: the drawer, else the column's Inbox or Heartbeats on screen). `left_pane` is
   the column (`Screen::list`, or the Tabs layout's `Screen::panel`), `left_body` it without its tabs
   (`layout::left_split`). `show_left_tab` (a click, with the keys; shows a hidden column),
   `toggle_left_tab` (`f`, `B`), `click_left_tab` (`Hit::LeftTab`), `show_sessions_tab` (Esc, a
@@ -274,7 +275,7 @@ new-session flow, and code boundaries.
   session, `Focus::Terminal` = utility shell):
   - Rakumux mode (`handlers/list.rs`): arrows and Vim keys (`j`/`k`, `gg`/`G`, `Ctrl-d`/`u`,
     `{`/`}` groups; ←/→, `h`/`l` on the tabs row switch tabs; `*` the Pinned tab; `f` the left column's Inbox and `B` its
-    Beats, `t` the drawer, rtop; `panel_key` while one has the keys),
+    Heartbeats, `t` the drawer, rtop; `panel_key` while one has the keys),
     `gg` via `App::pending_key`,
     `d`/`dd` opens delete confirmation, `b` hides or shows the list, Enter/`i`
     go in, Esc (cancel first) or the

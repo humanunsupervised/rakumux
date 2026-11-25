@@ -2,7 +2,7 @@
 //! end (the folder filter under All folders), then the tabs drawn by
 //! `layout::render_tabs_from`: the sessions that filter shows, in the
 //! folders' order whatever the active tab (`SessionList::tab_order`),
-//! so tabs keep their places as statuses change. The Inbox or Beats, while
+//! so tabs keep their places as statuses change. The Inbox or Heartbeats, while
 //! the left column's tab, and rtop, while the drawer is shown, come first,
 //! before a line, unnumbered and never moved (`draw_panel_tab`). A phone's
 //! session-mode tab row is the same bar without the filter or
@@ -125,7 +125,7 @@ pub fn draw_session_tabs(
 }
 
 /// `panel`'s tab at the left of `area`: ` ≡ Inbox ●2 ` (the count of new
-/// entries in the unread mark's amber), ` ♥ Beats ` or ` ▥ rtop `,
+/// entries in the unread mark's amber), ` ♥ Heartbeats ` or ` ▥ rtop `,
 /// highlighted as a selected tab while it has the keys; after the `last` one
 /// a line before the sessions' tabs. Records its target; returns the columns
 /// used.

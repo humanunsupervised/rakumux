@@ -1,6 +1,6 @@
 //! The left column (`app/left.rs`): what its tab shows (the sessions, the
-//! Inbox or Beats), and its tabs fixed at the bottom, `▴ Launch   ≡ Inbox
-//! ●2   ♥ Beats`: a band, the active one bold with a line over it, in the
+//! Inbox or Heartbeats), and its tabs fixed at the bottom, `▴ Launch   ≡ Inbox
+//! ●2   ♥ Heartbeats`: a band, the active one bold with a line over it, in the
 //! accent while the column has the keys; beside the session, `«` at its right
 //! hides the column. A rail is what's left of it then.
 
@@ -81,7 +81,7 @@ impl Tab {
 }
 
 /// The tabs, the indent and the gap between them, as wide as fits `room`:
-/// short of it the gaps narrow, then the marks of the Inbox and Beats go,
+/// short of it the gaps narrow, then the marks of the Inbox and Heartbeats go,
 /// then the workspace's name is cut, then the count goes.
 fn fit(app: &App, room: usize) -> (Vec<Tab>, usize, usize) {
     let count = feed_count(app);

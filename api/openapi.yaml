@@ -652,8 +652,9 @@ paths:
       summary: Heartbeats, every folder's or one folder's.
       description: >
         Tasks Rakumux runs on a clock: at each due time the daemon starts a new
-        session (`<name> #<n>`) in the heartbeat's folder, types its command and
-        gives the agent its prompt once the agent waits at its prompt. Needs the
+        session (`<name> #<n>`) in the heartbeat's folder that runs its command with
+        its prompt as an argument (typed once the agent waits at its prompt, for an
+        agent that takes none as it starts). Needs the
         daemon's `heartbeats` capability (501 without it). Session callers see
         every folder's.
       parameters:

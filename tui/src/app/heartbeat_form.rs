@@ -1,44 +1,37 @@
-//! The New heartbeat form (`AppMode::NewHeartbeat`; Beats' `n` and
-//! `+ New heartbeat`): its name, task, schedule, folder and agent. `Create`
-//! makes it, on its schedule, and Beats shows it whole; `Ask agent` makes it
-//! paused and opens a session whose agent is asked to fill it in.
+//! The New heartbeat form (`AppMode::NewHeartbeat`; Heartbeats' `n` and
+//! `+ New heartbeat`): its name, schedule and folder, and the command each
+//! run is: the agent, its arguments and the prompt. `Create` makes it, on its
+//! schedule, and Heartbeats shows it whole; `Ask agent` makes it paused and
+//! opens a session whose agent is asked to fill it in.
 //!
-//! `Tab`, `Enter` and `↑`/`↓` go through the fields (in a task of several
+//! `Tab`, `Enter` and `↑`/`↓` go through the fields (in a prompt of several
 //! rows `↑`/`↓` go through those first; Alt-Enter or Ctrl-J starts a new
 //! line), `←`/`→` choose, Space ticks a day, Esc closes.
+//!
+//! Each agent has arguments of its own, at first those with which it doesn't
+//! stop to ask (`AgentCommand::unattended`). On the agent or its arguments
+//! the form lists what the agent takes (`argument_suggest.rs`); typing
+//! narrows it, `↑`/`↓` pick, Tab or Enter (or a click) takes one, Esc leaves
+//! what's typed as it is.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use session_core::api::{ApiError, CreateSession, ErrorCode, FirstInput};
+use session_core::commands::{self, AgentCommand};
 use session_core::heartbeat::{Heartbeat, HeartbeatFields, HeartbeatSpec, Schedule, Weekday};
 use session_core::model::ScopeRoot;
 
+use super::argument_suggest::{suggest, Suggestions};
 use super::folders::compare_folders;
 use super::heartbeats::setup_prompt;
 use super::runtime::AppEvent;
 use super::types::AppMode;
 use super::{env_snapshot, App, Hit, TextInput};
-use crate::components::heartbeat_form::task_cols;
-
-/// The agents a heartbeat can run, as Rakumux names them.
-const AGENTS: [&str; 11] = [
-    "claude",
-    "codex",
-    "opencode",
-    "copilot",
-    "cursor-agent",
-    "pi",
-    "grok",
-    "kimi",
-    "droid",
-    "amp",
-    "aider",
-];
+use crate::components::heartbeat_form::prompt_cols;
 
 /// What the form's keys are on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormField {
     Name,
-    Task,
     /// How it repeats: every so often, daily, on days.
     Runs,
     /// The interval, or the time of day.
@@ -47,6 +40,8 @@ pub enum FormField {
     Days,
     Folder,
     Agent,
+    Arguments,
+    Prompt,
     Create,
     AskAgent,
 }
@@ -80,16 +75,42 @@ pub enum FormHit {
     Day(usize),
     /// The `‹` or `›` of a field: its choice before or after.
     Step(FormField, isize),
+    /// A row of the suggested arguments.
+    Suggestion(usize),
     Cancel,
     /// Anywhere else on it.
     Inside,
+}
+
+/// An agent and the arguments written for it.
+#[derive(Debug, Clone)]
+pub struct AgentChoice {
+    pub command: &'static AgentCommand,
+    pub arguments: TextInput,
+}
+
+impl AgentChoice {
+    fn new(command: &'static AgentCommand) -> Self {
+        Self {
+            command,
+            arguments: TextInput::new(command.unattended),
+        }
+    }
+
+    /// The agent's command line, its prompt left out.
+    pub fn line(&self) -> String {
+        let program = self.command.program();
+        match self.arguments.value().trim() {
+            "" => program.to_string(),
+            arguments => format!("{program} {arguments}"),
+        }
+    }
 }
 
 /// The form as it's filled in.
 #[derive(Debug, Clone)]
 pub struct HeartbeatForm {
     pub name: TextInput,
-    pub task: TextInput,
     pub repeat: Repeat,
     /// The interval ([`Repeat::Every`]).
     pub every: TextInput,
@@ -101,8 +122,11 @@ pub struct HeartbeatForm {
     pub day: usize,
     pub folders: Vec<ScopeRoot>,
     pub folder: usize,
-    pub agents: Vec<String>,
+    pub agents: Vec<AgentChoice>,
     pub agent: usize,
+    /// The suggested argument Tab and Enter take.
+    pub pick: Option<usize>,
+    pub prompt: TextInput,
     pub field: FormField,
     pub error: Option<String>,
     /// Being made.
@@ -110,10 +134,9 @@ pub struct HeartbeatForm {
 }
 
 impl HeartbeatForm {
-    fn new(folders: Vec<ScopeRoot>, folder: usize, agents: Vec<String>) -> Self {
+    fn new(folders: Vec<ScopeRoot>, folder: usize, agents: Vec<AgentChoice>) -> Self {
         Self {
             name: TextInput::default(),
-            task: TextInput::multiline(),
             repeat: Repeat::Every,
             every: TextInput::new("1h"),
             at: TextInput::new("09:00"),
@@ -123,6 +146,8 @@ impl HeartbeatForm {
             folder,
             agents,
             agent: 0,
+            pick: None,
+            prompt: TextInput::multiline(),
             field: FormField::Name,
             error: None,
             busy: false,
@@ -131,29 +156,116 @@ impl HeartbeatForm {
 
     /// The fields the keys go through, in order.
     fn fields(&self) -> Vec<FormField> {
-        let mut fields = vec![
-            FormField::Name,
-            FormField::Task,
-            FormField::Runs,
-            FormField::When,
-        ];
+        let mut fields = vec![FormField::Name, FormField::Runs, FormField::When];
         if self.repeat == Repeat::Days {
             fields.push(FormField::Days);
         }
         fields.extend([
             FormField::Folder,
             FormField::Agent,
+            FormField::Arguments,
+            FormField::Prompt,
             FormField::Create,
             FormField::AskAgent,
         ]);
         fields
     }
 
+    /// The agent chosen, with its arguments.
+    pub fn choice(&self) -> Option<&AgentChoice> {
+        self.agents.get(self.agent)
+    }
+
+    /// What the agent takes, listed while the keys are on it or on its
+    /// arguments.
+    pub fn suggestions(&self) -> Option<Suggestions> {
+        let choice = self.choice()?;
+        match self.field {
+            FormField::Agent => Some(suggest(choice.command, " ", 1)),
+            FormField::Arguments => Some(suggest(
+                choice.command,
+                choice.arguments.value(),
+                choice.arguments.cursor(),
+            )),
+            _ => None,
+        }
+    }
+
+    /// What's typed changed, or the keys came to it: the suggestion it means
+    /// is the one taken.
+    fn suggest_again(&mut self) {
+        self.pick = match self.field {
+            FormField::Arguments => self.suggestions().and_then(|found| found.best),
+            _ => None,
+        };
+    }
+
+    /// `↑`/`↓` in the suggestions; `false` when there's nothing there to go to.
+    fn step_pick(&mut self, delta: isize) -> bool {
+        let Some(found) = self.suggestions() else {
+            return false;
+        };
+        if self.field != FormField::Arguments || !found.rows.iter().any(|row| row.takes) {
+            return false;
+        }
+        self.pick = match (self.pick, delta) {
+            (None, 1..) => Some(0),
+            (None, _) => return false,
+            (Some(0), ..=-1) => None,
+            (Some(at), delta) => Some(at.saturating_add_signed(delta).min(found.rows.len() - 1)),
+        };
+        true
+    }
+
+    /// Write the suggested argument `index` in place of the word it's for.
+    fn take_suggestion(&mut self, index: usize) {
+        let Some(found) = self.suggestions() else {
+            return;
+        };
+        let Some(row) = found.rows.get(index).filter(|row| row.takes).copied() else {
+            return;
+        };
+        // On the agent, it goes after what its arguments say.
+        let word = match self.field {
+            FormField::Arguments => Some(found.word),
+            _ => None,
+        };
+        self.field = FormField::Arguments;
+        if let Some(choice) = self.agents.get_mut(self.agent) {
+            let input = &mut choice.arguments;
+            match word {
+                Some(word) => {
+                    // One space after it, the one there already if any.
+                    let spaced = input.value()[word.end..].starts_with(' ');
+                    let end = word.end + usize::from(spaced);
+                    let joins = input.value()[..word.start]
+                        .chars()
+                        .next_back()
+                        .is_some_and(|c| !c.is_whitespace());
+                    let text = format!("{}{} ", if joins { " " } else { "" }, row.text);
+                    input.replace(word.start..end, &text);
+                }
+                None => {
+                    let line = format!("{} {} ", input.value().trim_end(), row.text);
+                    input.set(line.trim_start());
+                }
+            }
+        }
+        self.error = None;
+        self.suggest_again();
+    }
+
+    /// Move the keys to `field`.
+    fn focus(&mut self, field: FormField) {
+        self.field = field;
+        self.suggest_again();
+    }
+
     fn step_field(&mut self, delta: isize) {
         let fields = self.fields();
         let at = fields.iter().position(|f| *f == self.field).unwrap_or(0) as isize;
         let at = (at + delta).rem_euclid(fields.len() as isize);
-        self.field = fields[at as usize];
+        self.focus(fields[at as usize]);
     }
 
     /// `←`/`→` on a field with choices.
@@ -198,7 +310,11 @@ impl HeartbeatForm {
     fn text_mut(&mut self) -> Option<&mut TextInput> {
         match self.field {
             FormField::Name => Some(&mut self.name),
-            FormField::Task => Some(&mut self.task),
+            FormField::Arguments => {
+                let choice = self.agents.get_mut(self.agent)?;
+                Some(&mut choice.arguments)
+            }
+            FormField::Prompt => Some(&mut self.prompt),
             FormField::When => Some(match self.repeat {
                 Repeat::Every => &mut self.every,
                 _ => &mut self.at,
@@ -207,18 +323,19 @@ impl HeartbeatForm {
         }
     }
 
-    /// A paste: the task keeps its lines, the others run on as one.
+    /// A paste: the prompt keeps its lines, the others run on as one.
     pub fn paste(&mut self, text: &str) {
         if self.busy {
             return;
         }
-        let one_line = self.field != FormField::Task;
+        let one_line = self.field != FormField::Prompt;
         if let Some(input) = self.text_mut() {
             match one_line {
                 true => input.insert_str(&text.replace(['\r', '\n'], " ")),
                 false => input.insert_str(text),
             }
             self.error = None;
+            self.suggest_again();
         }
     }
 
@@ -253,23 +370,27 @@ impl HeartbeatForm {
     /// What it makes: complete and on (`Create`), or for its agent to fill
     /// in (`setup`); else the field that's wrong and why.
     fn spec(&self, setup: bool) -> Result<HeartbeatSpec, (FormField, String)> {
-        let task = self.task.value().trim();
-        if task.is_empty() && !setup {
-            return Err((FormField::Task, "Write the task".into()));
-        }
-        // With no task, the agent asks for the schedule too.
-        let schedule = match (setup, task.is_empty()) {
+        let prompt = self.prompt.value().trim();
+        // With no prompt, the agent asks for the schedule too.
+        let schedule = match (setup, prompt.is_empty()) {
             (true, true) => None,
             _ => Some(self.schedule().map_err(|error| (FormField::When, error))?),
         };
+        let command = self.choice().map(AgentChoice::line);
+        if let Some(problem) = command.as_deref().and_then(commands::problem) {
+            return Err((FormField::Arguments, format!("Arguments: {problem}")));
+        }
+        if prompt.is_empty() && !setup {
+            return Err((FormField::Prompt, "Write the prompt".into()));
+        }
         let name = self.name.value().trim();
         Ok(HeartbeatSpec {
             scope: self.folders.get(self.folder).cloned(),
             name: (!name.is_empty()).then(|| name.to_string()),
             fields: HeartbeatFields {
-                agent: self.agents.get(self.agent).cloned(),
-                command: None,
-                prompt: (!task.is_empty()).then(|| task.to_string()),
+                agent: self.choice().map(|choice| choice.command.label.to_string()),
+                command,
+                prompt: (!prompt.is_empty()).then(|| prompt.to_string()),
                 schedule,
                 by_agent: false,
             },
@@ -287,7 +408,7 @@ fn capitalized(text: &str) -> String {
 }
 
 impl App {
-    /// `n` on Beats, or its `+ New heartbeat`: the form, in the current
+    /// `n` on Heartbeats, or its `+ New heartbeat`: the form, in the current
     /// folder with the agent last used there.
     pub fn new_heartbeat(&mut self) {
         if self.creating_session {
@@ -317,7 +438,7 @@ impl App {
 
     /// The agents, those used most recently first: in `folder`, then
     /// anywhere.
-    fn heartbeat_agents(&self, folder: &ScopeRoot) -> Vec<String> {
+    fn heartbeat_agents(&self, folder: &ScopeRoot) -> Vec<AgentChoice> {
         let mut sessions: Vec<_> = self
             .list
             .sessions()
@@ -325,14 +446,13 @@ impl App {
             .filter(|s| s.heartbeat.is_none())
             .collect();
         sessions.sort_by_key(|s| (&s.scope != folder, std::cmp::Reverse(s.last_active_at)));
-        let mut agents: Vec<String> = Vec::new();
+        let mut agents: Vec<AgentChoice> = Vec::new();
         let used = sessions
             .into_iter()
-            .filter_map(|s| s.agent.as_ref().map(|agent| agent.kind.as_str()))
-            .filter(|kind| AGENTS.contains(kind));
-        for agent in used.chain(AGENTS) {
-            if !agents.iter().any(|known| known == agent) {
-                agents.push(agent.to_string());
+            .filter_map(|s| commands::agent(&s.agent.as_ref()?.kind));
+        for agent in used.chain(commands::AGENTS) {
+            if !agents.iter().any(|known| known.command == agent) {
+                agents.push(AgentChoice::new(agent));
             }
         }
         agents
@@ -340,7 +460,7 @@ impl App {
 
     /// Keys while the form is open.
     pub(super) fn heartbeat_form_key(&mut self, key: KeyEvent) {
-        let cols = task_cols(self.area.width);
+        let cols = prompt_cols(self.area.width);
         let AppMode::NewHeartbeat(form) = &mut self.mode else {
             return;
         };
@@ -351,13 +471,20 @@ impl App {
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         match (key.code, form.field) {
+            // Off the suggestion, then off the form.
+            (KeyCode::Esc, _) if form.pick.is_some() => form.pick = None,
             (KeyCode::Esc, _) => self.mode = AppMode::Normal,
-            (KeyCode::Enter, FormField::Task) if alt || shift => form.task.newline(),
-            (KeyCode::Char('j'), FormField::Task) if ctrl => form.task.newline(),
+            (KeyCode::Enter, FormField::Prompt) if alt || shift => form.prompt.newline(),
+            (KeyCode::Char('j'), FormField::Prompt) if ctrl => form.prompt.newline(),
             (KeyCode::Enter, FormField::Create) => self.submit_heartbeat(false),
             (KeyCode::Enter, FormField::AskAgent) => self.submit_heartbeat(true),
-            (KeyCode::Up, FormField::Task) if form.task.move_rows(-1, cols) => {}
-            (KeyCode::Down, FormField::Task) if form.task.move_rows(1, cols) => {}
+            (KeyCode::Up, FormField::Prompt) if form.prompt.move_rows(-1, cols) => {}
+            (KeyCode::Down, FormField::Prompt) if form.prompt.move_rows(1, cols) => {}
+            (KeyCode::Up, FormField::Arguments) if form.step_pick(-1) => {}
+            (KeyCode::Down, FormField::Arguments) if form.step_pick(1) => {}
+            (KeyCode::Tab | KeyCode::Enter, FormField::Arguments) if form.pick.is_some() => {
+                form.take_suggestion(form.pick.unwrap_or_default())
+            }
             (KeyCode::Tab | KeyCode::Enter | KeyCode::Down, _) => form.step_field(1),
             (KeyCode::BackTab | KeyCode::Up, _) => form.step_field(-1),
             (KeyCode::Char(' '), FormField::Days) => form.toggle_day(form.day),
@@ -367,6 +494,7 @@ impl App {
                 if let Some(input) = form.text_mut() {
                     if input.handle_key(&key) {
                         form.error = None;
+                        form.suggest_again();
                     }
                 }
             }
@@ -398,25 +526,26 @@ impl App {
         }
         match hit {
             Some(FormHit::Field(FormField::Create)) => {
-                form.field = FormField::Create;
+                form.focus(FormField::Create);
                 self.submit_heartbeat(false);
             }
             Some(FormHit::Field(FormField::AskAgent)) => {
-                form.field = FormField::AskAgent;
+                form.focus(FormField::AskAgent);
                 self.submit_heartbeat(true);
             }
-            Some(FormHit::Field(field)) => form.field = field,
+            Some(FormHit::Field(field)) => form.focus(field),
+            Some(FormHit::Suggestion(index)) => form.take_suggestion(index),
             Some(FormHit::Repeat(repeat)) => {
                 form.repeat = repeat;
-                form.field = FormField::Runs;
+                form.focus(FormField::Runs);
                 form.error = None;
             }
             Some(FormHit::Day(day)) => {
-                form.field = FormField::Days;
+                form.focus(FormField::Days);
                 form.toggle_day(day);
             }
             Some(FormHit::Step(field, delta)) => {
-                form.field = field;
+                form.focus(field);
                 form.step_choice(field, delta);
             }
             Some(FormHit::Cancel) => self.mode = AppMode::Normal,
@@ -433,7 +562,7 @@ impl App {
         let spec = match form.spec(setup) {
             Ok(spec) => spec,
             Err((field, error)) => {
-                form.field = field;
+                form.focus(field);
                 form.error = Some(error);
                 return;
             }
@@ -450,7 +579,7 @@ impl App {
         });
     }
 
-    /// The heartbeat the form asked for: Beats shows it whole, or (`setup`)
+    /// The heartbeat the form asked for: Heartbeats shows it whole, or (`setup`)
     /// its agent's session is started.
     pub(super) fn on_heartbeat_made(&mut self, setup: bool, result: Result<Heartbeat, ApiError>) {
         let heartbeat = match result {
@@ -529,8 +658,19 @@ mod tests {
         HeartbeatForm::new(
             vec![ScopeRoot::from_canonical("/w".into())],
             0,
-            vec!["claude".into()],
+            ["claude", "codex", "pi"]
+                .map(|label| AgentChoice::new(commands::agent(label).unwrap()))
+                .into(),
         )
+    }
+
+    fn arguments(form: &HeartbeatForm) -> &str {
+        form.choice().unwrap().arguments.value()
+    }
+
+    fn write(form: &mut HeartbeatForm, text: &str) {
+        form.text_mut().unwrap().insert_str(text);
+        form.suggest_again();
     }
 
     #[test]
@@ -556,13 +696,13 @@ mod tests {
     }
 
     #[test]
-    fn create_needs_a_task_and_asking_the_agent_does_not() {
+    fn create_needs_a_prompt_and_asking_the_agent_does_not() {
         let mut form = form();
-        assert_eq!(form.spec(false).unwrap_err().0, FormField::Task);
+        assert_eq!(form.spec(false).unwrap_err().0, FormField::Prompt);
         let empty = form.spec(true).unwrap();
         assert!(!empty.enabled && empty.name.is_none());
         assert_eq!((empty.fields.prompt, empty.fields.schedule), (None, None));
-        form.task.insert_str("Run the tests.\nFix them.\n");
+        form.prompt.insert_str("Run the tests.\nFix them.\n");
         form.name.set(" nightly ");
         let spec = form.spec(false).unwrap();
         assert!(spec.enabled && !spec.fields.by_agent);
@@ -576,6 +716,82 @@ mod tests {
         assert!(!asked.enabled && asked.fields.schedule.is_some());
         form.every.set("x");
         assert_eq!(form.spec(false).unwrap_err().0, FormField::When);
+    }
+
+    #[test]
+    fn each_agent_has_its_own_arguments_at_first_those_that_dont_stop_to_ask() {
+        let mut form = form();
+        form.prompt.insert_str("Run the tests.");
+        let command = |form: &HeartbeatForm| form.spec(false).unwrap().fields.command.unwrap();
+        assert_eq!(command(&form), "claude --dangerously-skip-permissions");
+        form.focus(FormField::Arguments);
+        write(&mut form, " --model opus");
+        form.step_choice(FormField::Agent, 1);
+        assert_eq!(
+            command(&form),
+            "codex --dangerously-bypass-approvals-and-sandbox"
+        );
+        form.step_choice(FormField::Agent, 1);
+        assert_eq!(command(&form), "pi");
+        form.step_choice(FormField::Agent, 1);
+        assert_eq!(
+            command(&form),
+            "claude --dangerously-skip-permissions --model opus"
+        );
+        // What a shell would read as more than its arguments.
+        write(&mut form, " 'x");
+        let (field, error) = form.spec(false).unwrap_err();
+        assert_eq!(field, FormField::Arguments);
+        assert_eq!(error, "Arguments: a quote isn't closed");
+    }
+
+    #[test]
+    fn suggestions_are_picked_and_taken() {
+        let mut form = form();
+        assert!(form.suggestions().is_none());
+        // On the agent: what it takes, nothing picked, its keys its own.
+        form.focus(FormField::Agent);
+        assert!(form.suggestions().unwrap().rows.len() > 8);
+        assert!(form.pick.is_none() && !form.step_pick(1));
+        // A click there adds one.
+        let at = |form: &HeartbeatForm, text: &str| {
+            let found = form.suggestions().unwrap();
+            found.rows.iter().position(|row| row.text == text).unwrap()
+        };
+        form.take_suggestion(at(&form, "--effort"));
+        assert_eq!(form.field, FormField::Arguments);
+        assert_eq!(arguments(&form), "--dangerously-skip-permissions --effort ");
+        // Then its values: ↓ picks, ↑ from the first leaves them.
+        assert!(form.pick.is_none());
+        assert!(form.step_pick(1) && form.step_pick(1));
+        assert_eq!(form.pick, Some(1));
+        assert!(form.step_pick(-1) && form.step_pick(-1) && form.pick.is_none());
+        assert!(!form.step_pick(-1));
+        form.take_suggestion(at(&form, "high"));
+        // After a whole word, it goes after it.
+        form.agents[0].arguments.set("--chrome");
+        form.take_suggestion(at(&form, "--verbose"));
+        assert_eq!(arguments(&form), "--chrome --verbose ");
+        form.agents[0]
+            .arguments
+            .set("--dangerously-skip-permissions --effort high ");
+        // Half typed, the best is picked.
+        write(&mut form, "--verb");
+        assert_eq!(form.pick, Some(0));
+        form.take_suggestion(0);
+        assert_eq!(
+            arguments(&form),
+            "--dangerously-skip-permissions --effort high --verbose "
+        );
+        assert!(form.pick.is_none());
+        // ↓ stops at the last.
+        for _ in 0..100 {
+            form.step_pick(1);
+        }
+        assert_eq!(form.pick, Some(form.suggestions().unwrap().rows.len() - 1));
+        // A value of its own isn't one to take.
+        write(&mut form, "--max-budget-usd 5");
+        assert!(form.pick.is_none() && !form.step_pick(1));
     }
 
     #[test]

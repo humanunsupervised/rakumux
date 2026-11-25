@@ -25,6 +25,8 @@ const STRIPPED: &[&str] = &[
     "OMPCODE",
     // Replaced below with this session's values.
     rakumux_env::SOCKET,
+    // A heartbeat run's, never another session's.
+    rakumux_env::PROMPT,
     "TERM",
     "COLORTERM",
 ];
@@ -236,6 +238,17 @@ pub(crate) fn starts_program(startup_cmds: &[String], argv: &[String]) -> bool {
     startup_cmds
         .iter()
         .any(|cmd| cmd.split_whitespace().next().map(program_name) == Some(program))
+}
+
+/// The shell `argv` starts reads `"$NAME"` as POSIX shells do: the variable,
+/// whole, as one word.
+pub(crate) fn expands_variables(argv: &[String]) -> bool {
+    argv.first().is_some_and(|program| {
+        matches!(
+            program_name(program),
+            "sh" | "bash" | "zsh" | "fish" | "dash" | "ash" | "ksh" | "mksh"
+        )
+    })
 }
 
 /// Executable name without its directory: `/usr/bin/claude` → `claude`.

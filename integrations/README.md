@@ -14,13 +14,14 @@ integrations/
   amp/           # Plugin (state, binding, thread copy), detection, recovery, installer, tests
   detection.rs   # Shared process/screen engine and retained older profiles
   recovery.rs    # Shared resume dispatch and safe argument/file helpers
+  commands.rs    # Agents' command lines (each one's command.rs): arguments, unattended ones, prompts
   hooks.rs       # Adapter dispatch and metadata-only normalization
   environment.rs / presentation.rs / mcp.rs  # Shared dispatch to provider metadata
 ```
 
 Agent-specific runtime code, inherited environment markers and colours belong in its agent
 folder. Rust `#[path]` modules mount
-detection/recovery into the daemon, hook adapters into the CLI, and the OpenCode installer
+detection/recovery into the daemon, command lines into `session-core`, hook adapters into the CLI, and the OpenCode installer
 into MCP. Existing public Rust module paths are unchanged; there are no new cross-layer
 dependencies. Policy stays in `tui/crates/ptyd/src/control/`; wire types stay in
 `tui/crates/session-core/src/activity.rs`. Clients never parse provider-specific events.

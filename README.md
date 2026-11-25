@@ -135,14 +135,16 @@ Tabs across the top of the list group your sessions:
 Inside a repository or an app, sessions are listed by status.
 
 The left column has three tabs at its bottom: **Workspaces** (your sessions; a click
-opens the menu of workspaces), **Inbox** and **Beats** (across every workspace).
+opens the menu of workspaces), **Inbox** and **Heartbeats** (across every workspace).
 
 `f` (or a click on its tab) shows the **Inbox**: your agents' replies, newest first (needs an
 account). `Enter` reads a reply, again goes into its session; `Esc` or `f` goes back to the
 sessions. The tab counts the replies that came in since you last looked.
 
-`B` shows **Beats**: your heartbeats, tasks Rakumux runs on a clock. `n` (or `+ New heartbeat`)
-makes one, `c` renames it, `d` twice deletes it.
+`B` shows your **Heartbeats**: commands Rakumux runs on a clock, such as `claude
+--dangerously-skip-permissions "<prompt>"` every morning, each run a new session. `n` (or
+`+ New heartbeat`) makes one: its schedule, agent, arguments (suggested as you type) and prompt.
+`c` renames it, `d` twice deletes it.
 
 `t` shows **rtop** in a drawer on the right: the CPU, memory and network this machine, Rakumux and
 each session's processes use, graphed over the last few minutes as btop does. `s` sorts, `←` `→` fold a session's processes, `Enter` goes

@@ -301,11 +301,11 @@ fn program_args(cmdline: &[String], program: &str) -> Vec<String> {
 
 /// The flags of `switches` (no value), `options` (one value) and `lists`
 /// (every value that follows) in `args`, in order; everything else is
-/// dropped.
+/// dropped, and whatever follows `--` (a prompt).
 fn keep_flags(args: &[String], switches: &[&str], options: &[&str], lists: &[&str]) -> Vec<String> {
     let mut kept = Vec::new();
     let mut words = args.iter().peekable();
-    while let Some(word) = words.next() {
+    while let Some(word) = words.next_if(|word| *word != "--") {
         let (flag, inline) = match word.split_once('=') {
             Some((flag, value)) if flag.starts_with("--") => (flag, Some(value)),
             _ => (word.as_str(), None),
@@ -486,6 +486,11 @@ mod tests {
                 "/b",
                 "--permission-mode=plan",
             ])
+        );
+        // Nor is a prompt after `--`, whatever it says.
+        assert_eq!(
+            claude_flags(&args(&["--verbose", "--", "--model opus", "--ide"])),
+            args(&["--verbose"])
         );
         // A prompt after a one-value option isn't taken along.
         assert_eq!(

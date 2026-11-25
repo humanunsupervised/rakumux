@@ -2,15 +2,16 @@
 //! heartbeat made over its socket, and a run asked for now. The run's login
 //! shell types the heartbeat's command, which starts a stand-in Claude Code
 //! (a script installed as `claude`: a moment starting, then Claude Code's
-//! idle screen, recording every byte typed); the daemon gives it the task
-//! only once that prompt shows, and sends it. A session's own first input
-//! (not sent) goes in the same way, without Enter.
+//! idle screen, recording its arguments and every byte typed) with the
+//! prompt as its last argument, whatever is in it. A command that can't take
+//! it there has it typed, only once that prompt shows, and sent. A session's
+//! own first input (not sent) goes in the same way, without Enter.
 #![cfg(target_os = "linux")]
 
 mod runtime_support;
 
 use runtime_support::{wait_until, TestHome};
-use session_core::api::{CreateSession, FirstInput};
+use session_core::api::{CreateSession, FirstInput, ReviveSession};
 use session_core::client::{AuthMode, Client, ClientConfig, SessionApi};
 use session_core::heartbeat::{HeartbeatFields, HeartbeatSpec, RunOutcome, Schedule};
 use session_core::model::ScopeRoot;
@@ -32,8 +33,9 @@ impl Drop for Daemon {
 }
 
 /// `claude`: two seconds starting (a plain line, then nothing), then Claude
-/// Code's idle screen from a captured fixture; every byte typed afterwards
-/// goes to `$STAND_IN_INPUT`. Only builtins run once it shows its prompt,
+/// Code's idle screen from a captured fixture; its arguments go to
+/// `$STAND_IN_INPUT.args` (each ended by NUL), every byte typed afterwards to
+/// `$STAND_IN_INPUT`. Only builtins run once it shows its prompt,
 /// so it alone is the session's foreground.
 fn install_stand_in(bin: &Path) {
     let fixture =
@@ -45,6 +47,7 @@ fn install_stand_in(bin: &Path) {
     let script = format!(
         r#"#!/bin/bash
 set -u
+printf '%s\0' "$@" > "$STAND_IN_INPUT.args"
 stty raw -echo 2>/dev/null
 printf 'starting Claude Code…\r\n'
 read -r -t 2 -N 100000 _ignored || true
@@ -103,8 +106,119 @@ fn typed(input: &Path) -> String {
     std::fs::read_to_string(input).unwrap_or_default()
 }
 
+/// The arguments the stand-in was last started with.
+fn arguments(input: &Path) -> Vec<String> {
+    let text = std::fs::read_to_string(input.with_extension("args")).unwrap_or_default();
+    let mut words: Vec<String> = text.split('\0').map(String::from).collect();
+    words.pop();
+    words
+}
+
 #[test]
-fn a_run_gives_a_real_agent_its_task_once_its_prompt_shows() {
+fn a_run_is_its_command_with_the_prompt_as_the_last_argument() {
+    let home = TestHome::new();
+    let bin = home.dir.path().join("bin");
+    let input: PathBuf = home.dir.path().join("typed");
+    install_stand_in(&bin);
+    let (_daemon, client) = start(&home, &bin, &input);
+    let scope = ScopeRoot::from_canonical(std::fs::canonicalize(&home.work).unwrap());
+    client.add_project(scope.path()).ok();
+
+    // Nothing in it means anything to the shell, its line editor or Claude.
+    let prompt = format!(
+        "--model x\nDon't expand \"$HOME\", `date`, !! or \\n:\n\tfix it; then 'stop' & é\n{}",
+        "a long task. ".repeat(600)
+    );
+    let heartbeat = client
+        .heartbeat_create(HeartbeatSpec {
+            scope: Some(scope.clone()),
+            name: Some("deps".into()),
+            fields: HeartbeatFields {
+                agent: Some("claude".into()),
+                command: Some(
+                    "claude --dangerously-skip-permissions --allowedTools 'Bash(git *)' Edit"
+                        .into(),
+                ),
+                prompt: Some(prompt.clone()),
+                schedule: Some(Schedule::Daily { at: "09:00".into() }),
+                ..Default::default()
+            },
+            enabled: true,
+        })
+        .unwrap();
+    let run = client.heartbeat_run(&heartbeat.id).unwrap();
+    let expected = [
+        "--dangerously-skip-permissions",
+        "--allowedTools",
+        "Bash(git *)",
+        "Edit",
+        "--",
+        &prompt,
+    ];
+    assert!(
+        wait_until(SLOW, || arguments(&input).len() == expected.len()),
+        "never started: {:?}",
+        arguments(&input)
+    );
+    assert_eq!(arguments(&input), expected);
+    assert!(wait_until(SLOW, || client
+        .heartbeat(&heartbeat.id)
+        .is_ok_and(|h| h
+            .last_run
+            .is_some_and(|r| r.outcome == RunOutcome::TaskGiven))));
+    // Nothing is typed into the agent, its prompt showing.
+    std::thread::sleep(Duration::from_secs(5));
+    assert_eq!(typed(&input), "");
+
+    // Brought back before its conversation is known, it's the same command.
+    client.kill(&run.id, false).unwrap();
+    std::fs::remove_file(input.with_extension("args")).unwrap();
+    assert!(wait_until(SLOW, || client.get(&run.id).is_ok_and(|s| {
+        s.status == session_core::model::SessionStatus::Exited
+    })));
+    client
+        .revive(ReviveSession {
+            id: run.id.clone(),
+            env: Vec::new(),
+            cols: 100,
+            rows: 30,
+            resume: true,
+        })
+        .unwrap();
+    assert!(wait_until(SLOW, || arguments(&input).len() == expected.len()));
+    assert_eq!(arguments(&input), expected);
+
+    // The prompt is that run's alone.
+    let other = client
+        .create(CreateSession {
+            scope: Some(scope),
+            name: Some("other".into()),
+            cwd: None,
+            argv: None,
+            startup_cmds: vec!["claude \"[${RAKUMUX_PROMPT-none}]\"".into()],
+            env: vec![
+                ("PATH".into(), format!("{}:/usr/bin:/bin", bin.display())),
+                ("STAND_IN_INPUT".into(), input.display().to_string()),
+                ("RAKUMUX_PROMPT".into(), prompt),
+            ],
+            cols: 100,
+            rows: 30,
+            machine: None,
+            prefill: None,
+            first_input: None,
+            workspace: None,
+        })
+        .unwrap();
+    assert!(
+        wait_until(SLOW, || arguments(&input) == ["[none]"]),
+        "{}: {:?}",
+        other.id,
+        arguments(&input)
+    );
+}
+
+#[test]
+fn a_run_whose_command_takes_no_prompt_has_it_typed_once_its_agents_prompt_shows() {
     let home = TestHome::new();
     let bin = home.dir.path().join("bin");
     let input: PathBuf = home.dir.path().join("typed");
@@ -119,7 +233,7 @@ fn a_run_gives_a_real_agent_its_task_once_its_prompt_shows() {
             scope: Some(scope.clone()),
             name: Some("deps".into()),
             fields: HeartbeatFields {
-                command: Some("claude --permission-mode acceptEdits".into()),
+                command: Some("cd . && claude --permission-mode acceptEdits".into()),
                 prompt: Some("update the dependencies".into()),
                 schedule: Some(Schedule::Daily { at: "09:00".into() }),
                 ..Default::default()
@@ -128,7 +242,6 @@ fn a_run_gives_a_real_agent_its_task_once_its_prompt_shows() {
         })
         .unwrap();
     assert!(heartbeat.enabled);
-    assert_eq!(heartbeat.agent.as_deref(), Some("claude"));
     assert!(heartbeat.next_run_at.is_some());
 
     let run = client.heartbeat_run(&heartbeat.id).unwrap();

@@ -554,7 +554,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    (`heartbeat_action`, below; else a signature refusal), as the user (`not_listed`,
    `incomplete` or `refused` when the daemon won't); `enable` and `run` fail `refused`, the daemon
    never asked, since whoever can write to rakumux.com could otherwise have a command run here:
-   heartbeats are approved, turned on and run only on this machine (the Beats tab, `rakumux
+   heartbeats are approved, turned on and run only on this machine (the Heartbeats tab, `rakumux
    heartbeat`) (`POST /api/v1/feed/heartbeat-actions/status`). Each id is
    marked handled before the daemon is asked and kept with the reports not yet taken in
    `sensagent/status/heartbeat-actions.json` (0600, two hours), so an action is carried out at most
@@ -714,7 +714,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
 
 Agent-specific hooks, detection profiles, resume code, question dialogs' drivers and prompt
 readers (`choices.rs`)
-(`questions.rs`), the OpenCode, Kimi Code and Amp plugins and the Pi extension (each with its
+(`questions.rs`), command lines (`command.rs`), the OpenCode, Kimi Code and Amp plugins and the Pi extension (each with its
 installer) live under
 `integrations/{open-code,claude-code,codex,pi,copilot,cursor-agent,grok,kimi,droid,amp}/`. Shared engines live in `integrations/`.
 See [integration boundaries and protocol](integrations/README.md). New integrations go there,
@@ -760,6 +760,7 @@ tui/
       api.rs                 # Hello/Auth, Request, Response, errors, stream commands/events, events
       frame.rs               # [u32 len][u8 kind][payload] codec
       paths.rs               # Layout (~/.rakumux, run dir, socket), Registration, find_ptyd_binary
+      commands.rs            # agents' command lines for heartbeats (mounted from integrations/)
       remote.rs              # RemoteConfig (remote.json), pairing token, is_tailscale (the ranges)
       sprite.rs              # the Fly Sprite this runs on: tasks that hold it running
       tailscale.rs           # this machine's Tailscale addresses (ranges + Tailscale's interface, or
@@ -818,7 +819,7 @@ tui/
                              # terminal shows it: control characters as `?`; every TUI frame
                              # (`ui::draw`) and each value the CLI prints as text (not `--json`)
     updater.rs, version.rs, theme.rs, icons.rs (plain / emoji / Nerd Font marks)
-  tests/heartbeat_tui.rs     # the left column, Beats and Help's search in the real TUI, in a
+  tests/heartbeat_tui.rs     # the left column, Heartbeats and Help's search in the real TUI, in a
                              # session of another daemon
   tests/mid_turn_replies.rs  # replies typed into Claude Code at work, end to end: real daemon and
                              # account service, a local rakumux.com (mid_turn/fake_cloud.rs, HTTPS
@@ -1220,7 +1221,13 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   without one). **Runs**: on the control tick, an enabled heartbeat whose `next_run_at` came
   starts `<name> #<n>` in its folder as the daemon for the user (`created_by: user`, depth 0, the
   daemon's environment, a login shell with the command as its startup command and the prompt as
-  its sent first input). Its earlier runs whose agent waits (lifecycle idle, done or none) are
+  its last argument, `claude --x -- "$RAKUMUX_PROMPT"`, or its option's value: the shell's
+  environment has the prompt, so its length, newlines and quotes never meet the line editor
+  (`session_core::commands::with_prompt`, `integrations/commands.rs` and each agent's
+  `command.rs`). OpenCode, Kimi Code, Amp and Aider take none as they start (but for `opencode
+  run`, `kimi -p`, `amp -x`, `aider -m`), nor does a program Rakumux doesn't know, a command of
+  several (`cd web && claude`) or a login shell other than sh, bash, zsh, dash, ksh or fish:
+  the prompt is then the run's sent first input). Its earlier runs whose agent waits (lifecycle idle, done or none) are
   ended first (their final screens kept, Enter resumes them); while one is working, blocked or
   unknown (still starting) the due time is skipped (`last_run.outcome: skipped`), but a run asked
   for starts beside it. The newest 10 runs stay; older ended ones go to the session history.
@@ -1407,7 +1414,8 @@ accidents; they don't stop a hostile process running as the same user.
   `selected_projects` of 0.6 previews, and the `remote_replies` and `remote_sessions` switches of
   0.1.32 and earlier, are ignored and dropped on the next save.
 - **Environment** injected into every session: `RAKUMUX_SESSION_ID`, `RAKUMUX_SESSION_TOKEN`,
-  `RAKUMUX_SOCKET`, `RAKUMUX_BIN`, `TERM=xterm-256color`, `COLORTERM=truecolor`. Other variables:
+  `RAKUMUX_SOCKET`, `RAKUMUX_BIN`, `TERM=xterm-256color`, `COLORTERM=truecolor`, and into a
+  heartbeat's run `RAKUMUX_PROMPT` (never another session's). Other variables:
   `RAKUMUX_HOME` (isolated data dir; tests), `RAKUMUX_PTYD_BIN` (daemon binary),
   `RAKUMUX_PTYD_LOG` (log level), `RAKUMUX_API_BIN` (the `rakumux-api` binary
   `rakumux-mcp`, `rakumux remote` and the TUI start), `RAKUMUX_API_LOG`, `GW_TUI_BIN` / `GW_PTYD_BIN` (launcher overrides),
@@ -1639,14 +1647,14 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
   under it and opens them again.
 - **Left column** (`app/left.rs`, `LeftTab`): Master detail's column, with three tabs fixed at its
   bottom, a level above the list tabs: **Workspaces** (`LeftTab::Sessions`: the list with its own
-  tabs; it names the workspace shown and opens the menu of them), **Inbox** and **Beats**, which go across workspaces. What its
+  tabs; it names the workspace shown and opens the menu of them), **Inbox** and **Heartbeats**, which go across workspaces. What its
   tab shows has Rakumux mode's keys. Every start shows Workspaces.
 - **Drawer** (`app/drawer.rs`): rtop, beside the sessions: a pane on the right in Master detail, a
   tab in Tabs, the screen on a phone. It takes Rakumux mode's keys from the left column while
   focused. Hidden at every start; never opens by itself.
 - **Inbox** (`app/feed`, `f`; the feed in code, contracts and on the wire): what agents said,
   across sessions and machines: the left column's Inbox tab.
-- **Beats** (`app/heartbeats.rs`, `B`): the heartbeats: the left column's Beats tab.
+- **Heartbeats** (`app/heartbeats.rs`, `B`; Beats in code): the left column's Heartbeats tab.
 - **Pin**: a user mark that lists a session in the list's Pinned tab (and shows `★` before its
   name in the list).
 - **Workspace**: a named group of this machine's sessions (`workspace_*`); the list shows every
@@ -1754,7 +1762,7 @@ on). Rakumux mode (also where the TUI starts): `↑/↓`, `j/k`, `Option`/`Alt`+
 session preview fades by 30% in Rakumux mode and 45% under a dialog or for saved output,
 while the list never fades; the tabs, a header and + New session keep the last session in view,
 one the filters show), `←`/`→` switch between the tabs, Pinned, Status, Repos and Agent,
-wherever the selection is (`h`/`l` on the tabs row), `*` the Pinned tab, `f` the Inbox and `B` Beats, the left column's tabs (again: back to the sessions), and `t` rtop, the
+wherever the selection is (`h`/`l` on the tabs row), `*` the Pinned tab, `f` the Inbox and `B` Heartbeats, the left column's tabs (again: back to the sessions), and `t` rtop, the
 drawer (shows it with the keys, gives it the keys, hides it; below),
 `gg`/`G`, `Ctrl-d`/`Ctrl-u`, `{`/`}` (previous/next folder, app or status) (a Ctrl or Alt
 that no shortcut uses is ignored, so Ctrl-↑ from a phone's key bar moves and Alt-q quits), `Enter`/`i`/`l` go in (revive/restart; on a
@@ -1793,12 +1801,12 @@ those shown (`layout::render_tabs_from`, `App::tab_first`), and the ends say how
 (`‹3`, `5›`; a click goes to the nearest one).
 **The left column** (`app/left.rs`, `components/left.rs`) has three tabs fixed at its bottom, a level
 above the list tabs (`layout::left_split`: a band of `left_tabs_rows`, 3 rows or 1 on short
-columns): `▴ Launch   ≡ Inbox ●N   ♥ Beats` (the first is the workspace shown; the active one bold with a line over it, in the accent
+columns): `▴ Launch   ≡ Inbox ●N   ♥ Heartbeats` (the first is the workspace shown; the active one bold with a line over it, in the accent
 while the column has the keys; short rows narrow the gaps, then drop the marks, then the count),
 each a click target (`Hit::LeftTab`; on the active one, what's read whole goes back to its list)
 and, beside the session, `«` at their right, which hides the column. Workspaces is the
 sessions of the workspace shown, the list with its own tabs over it, and its tab names that
-workspace and opens the menu of them (below); the Inbox (`f`, or Settings; `app/feed/pane.rs`) and Beats (`B`, or Settings;
+workspace and opens the menu of them (below); the Inbox (`f`, or Settings; `app/feed/pane.rs`) and Heartbeats (`B`, or Settings;
 below) show in its place, with nothing over them but a `‹` row while one thing is read whole
 (`Hit::FeedBack`, `Hit::BeatBack`). What the tab shows has Rakumux mode's keys
 (`App::keys_panel`, `drawer::Panel`; `App::panel_key`) unless the drawer has them; `f` (`B`) again,
@@ -1808,8 +1816,8 @@ the tab as it is: going into a session from the Inbox, the Inbox is there when R
 back. With the column hidden `f` and `B` show it, and the keys move the sessions otherwise. The tab
 is this window's, never saved: every start shows Workspaces. Only what's on screen works: the feed
 and the heartbeats are read every 2 s while theirs shows. On a phone each fills the screen over the
-tabs, and on a stacked window the Inbox and Beats do (`PaneSizes::left_panel`). Tabs has no column:
-the Inbox or Beats takes the session's place under the tab bar in Rakumux mode (`Screen::panel`),
+tabs, and on a stacked window the Inbox and Heartbeats do (`PaneSizes::left_panel`). Tabs has no column:
+the Inbox or Heartbeats takes the session's place under the tab bar in Rakumux mode (`Screen::panel`),
 over the same three tabs, with a tab of its own in the bar (` ≡ Inbox ●N `, `Hit::PanelTab`); the
 Inbox has the selected reply beside its cards there from 100 columns (`layout::feed_tab_columns`).
 **The drawer** (`app/drawer.rs`, `components/drawer.rs`) is rtop (`t`, or Settings; below), under a
@@ -1825,7 +1833,7 @@ keeps `FEED_SESSION_MIN_COLS` (60) beside it (and Master detail its list or rail
 makes room). Narrower windows from 80 columns show the drawer in the session's place in Rakumux
 mode only (beside or under the list) and session
 mode keeps the session's full width. Tabs gives it a tab of its own in the tab bar (` ▥ rtop `,
-after the Inbox's or Beats', before a `│`, unnumbered, never moved); selected, it fills the body
+after the Inbox's or Heartbeats', before a `│`, unnumbered, never moved); selected, it fills the body
 under the bar. On a phone it fills the
 screen while it has the keys (`App::rtop_has_keys`): `t` shows it with them, gives them to it while
 the left column has them, and hides it while it has them; a click gives them to the side it lands
@@ -2081,10 +2089,10 @@ Tabs.
 
 **Workspaces.** With a daemon that has `workspaces`, the left column's Workspaces tab names the one
 shown after a chevron, and nothing else (`▴ Launch`, `▾` while its menu is open; cut short of room): All (every session), a workspace, or No workspace (the sessions in
-none). A click on it (`App::click_left_tab`; from the Inbox, Beats or a session it shows the sessions
+none). A click on it (`App::click_left_tab`; from the Inbox, Heartbeats or a session it shows the sessions
 too) opens the workspaces menu as a popover just over it (`components/workspaces.rs`, `popover`): a
 row each with its sessions' count, the one shown ticked; Enter or a click switches the sessions
-listed, a click off it or Esc closes it. The Inbox and Beats go across workspaces. The Tabs layout
+listed, a click off it or Esc closes it. The Inbox and Heartbeats go across workspaces. The Tabs layout
 has no column: there `⊞` (the menu, as a modal) and a button per view (`Hit::WorkspaceTab`) are in
 the footer's left, in the session's place
 (`components/footer.rs::fit_tabs`, `tab_styles`, after a light `workspaces` label while everything
@@ -2136,8 +2144,8 @@ highlighted, and a click selects one: again, or a tap on a phone, goes in; the w
 (the default), CPU, network or name; Enter goes into the selected row's session; Esc gives the
 list the keys; `t` hides the drawer. A daemon without `resources` gets "restart it (S)".
 
-**Beats** (heartbeats). `B` in Rakumux mode or Settings → Heartbeats (`app/heartbeats.rs`,
-`components/heartbeats.rs`) shows the left column's Beats tab: the heartbeats of every folder, read
+**Heartbeats** (Beats in code). `B` in Rakumux mode or Settings → Heartbeats (`app/heartbeats.rs`,
+`components/heartbeats.rs`) shows the left column's Heartbeats tab: the heartbeats of every folder, read
 with `SessionApi::heartbeats` off the UI thread every 2 s while the tab is on screen (the daemon
 sends no heartbeat events), two lines each: a mark (`?` waiting for approval, orange; `●` on;
 `○` paused or empty), the name and when it runs next (`in 25m`, `approve?`, `paused`, `empty`),
@@ -2153,16 +2161,20 @@ pauses; `r` runs it now; `c` renames it (the rename dialog, `RenameTarget::Heart
 doesn't pause it); `d` twice (or two clicks) deletes it (its runs stay). `n`, `Enter` on
 `+ New heartbeat` or one click on it opens the **New heartbeat form** (`AppMode::NewHeartbeat`,
 `app/heartbeat_form.rs`, `components/heartbeat_form.rs`): Name (the generated one when empty),
-Task (several lines: `Alt-Enter` or `Ctrl-J` starts one, a paste keeps its own), Runs (`Every` an
-interval, 1h; `Daily` at a time; `Days`, Monday to Friday until ticked otherwise, at a time),
-Folder (the current one; any the daemon knows) and Agent (those used most recently first, in the
-folder, then anywhere; the daemon picks its command, with the flags it was last started with
-there). `Tab`, `Enter` and `↑`/`↓` go through them, `←`/`→` choose, `Space` ticks a day, `Esc`
-closes (a click off it doesn't, so nothing written is lost). `Create` needs the task and a
-schedule, makes it enabled (the user wrote it) and shows it whole; what's wrong, the daemon's
-refusal too, is said in the form. `Ask agent` makes it paused, with the task and schedule when
-a task was written, and a session in its folder running its command (the agent's, its flags
-kept) whose first input, typed once the agent's prompt shows and not
+Runs (`Every` an interval, 1h; `Daily` at a time; `Days`, Monday to Friday until ticked
+otherwise, at a time), Folder (the current one; any the daemon knows), then the command each run
+is: Agent (those used most recently first, in the folder, then anywhere), Arguments (each agent's
+own, kept while another is chosen; at first those with which it doesn't stop to ask,
+`AgentCommand::unattended`: `claude --dangerously-skip-permissions`) and Prompt (several lines:
+`Alt-Enter` or `Ctrl-J` starts one, a paste keeps its own); under them the command as it will run,
+while there's room. On the agent or its arguments a list over the rows under them says what that
+agent takes (`app/argument_suggest.rs`): typing narrows it, or lists the values of the argument
+before the cursor; a half-typed word's best is picked, `↑`/`↓` pick another, `Tab`, `Enter` or a
+click takes it, `Esc` leaves what's typed. `Tab`, `Enter` and `↑`/`↓` go through them, `←`/`→` choose, `Space` ticks a day, `Esc`
+closes (a click off it doesn't, so nothing written is lost). `Create` needs the prompt and a
+schedule, and arguments a shell reads as one command's (`commands::problem`), makes it enabled (the user wrote it) and shows it whole; what's wrong, the daemon's
+refusal too, is said in the form. `Ask agent` makes it paused, with the prompt and schedule when
+a prompt was written, and a session in its folder running its command whose first input, typed once the agent's prompt shows and not
 sent, asks the agent to ask the user what to run and how often and save both with
 `"$RAKUMUX_BIN" heartbeat update hb_… --prompt … --every …` (or `update_heartbeat`), then goes
 into it (`heartbeats::setup_prompt`); `Esc` goes back, then shows the sessions. A click

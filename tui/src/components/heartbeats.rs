@@ -1,4 +1,4 @@
-//! The left column's Beats tab (`app/heartbeats.rs`): the heartbeats, two lines
+//! The left column's Heartbeats tab (`app/heartbeats.rs`): the heartbeats, two lines
 //! each (a mark, the name and when it runs next; its schedule, folder and
 //! last run), those waiting for approval first, the selected one's buttons
 //! under it, then `+ New heartbeat`; or one heartbeat whole: its buttons, how
@@ -29,7 +29,7 @@ pub fn draw_beats(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hi
     let p = theme::palette();
     let view = &app.beats;
     let area = match view.read() {
-        Some(_) => draw_back(f, "Beats", area, Hit::BeatBack, hits),
+        Some(_) => draw_back(f, "Heartbeats", area, Hit::BeatBack, hits),
         None => area,
     };
     // A row down, a column each side, as rtop.

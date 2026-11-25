@@ -26,6 +26,7 @@ use crate::layout::SessionLayout;
 use crate::remote_access::PhoneAccess;
 
 mod account;
+pub mod argument_suggest;
 mod auto_name;
 mod auto_update;
 pub mod config;
@@ -214,18 +215,18 @@ pub enum Hit {
     PanelTab(drawer::Panel),
     /// A tab at the bottom of the left column: shows it, with the keys.
     LeftTab(left::LeftTab),
-    /// Anywhere else on the left column while it shows the Inbox or Beats:
+    /// Anywhere else on the left column while it shows the Inbox or Heartbeats:
     /// gives it the keys.
     LeftPane,
     /// A row of rtop (its index): selects it, or goes into its session as
     /// Enter does when it's selected already (at once on a phone).
     RtopRow(usize),
-    /// A row of the Beats tab (a heartbeat, or reading one, a run): selects
+    /// A row of the Heartbeats tab (a heartbeat, or reading one, a run): selects
     /// it, or does what Enter does when it's selected already.
     BeatRow(usize),
     /// The `‹` over a heartbeat read whole: back to the list.
     BeatBack,
-    /// Beats' `+ New heartbeat`: opens the form.
+    /// Heartbeats' `+ New heartbeat`: opens the form.
     BeatNew,
     /// A button of the selected (or read) heartbeat.
     BeatAction(heartbeats::BeatAction),
@@ -379,7 +380,7 @@ pub struct App {
     /// The agent feed (`app/feed`).
     pub feed: feed::FeedStore,
     /// The left column's tab (`app/left.rs`): the sessions, the Inbox or
-    /// Beats. This window only: every start shows the sessions.
+    /// Heartbeats. This window only: every start shows the sessions.
     left_tab: left::LeftTab,
     /// The drawer (`app/drawer.rs`), rtop, is shown (`t`): a pane on the
     /// right, a tab, or the screen on a phone. This window only, never
@@ -388,9 +389,9 @@ pub struct App {
     /// The drawer has Rakumux mode's keys (its pane focused, its tab
     /// selected) rather than the left column. Session mode clears it.
     drawer_focused: bool,
-    /// The Beats tab (`app/heartbeats.rs`): the heartbeats as last read.
+    /// The Heartbeats tab (`app/heartbeats.rs`): the heartbeats as last read.
     pub beats: heartbeats::BeatsView,
-    /// Beats was on screen when last checked.
+    /// Heartbeats was on screen when last checked.
     beats_on_screen: bool,
     /// rtop (`app/rtop.rs`): its samples while it's on screen, its sort,
     /// folds and selection for as long as the window runs.
