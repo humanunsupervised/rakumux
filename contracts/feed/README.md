@@ -226,7 +226,8 @@ conformance tests, not an HTTP server, database or local runtime.
   (below); `workspaces`, it lists its workspaces and moves sessions between them (below);
   `new_sessions`, it takes new sessions asked of it on
   rakumux.com (below); `new_session_agents`, it starts every agent in them, not only Claude
-  Code, Codex and OpenCode (below); `question_answers`, it gives answers written on rakumux.com to
+  Code, Codex and OpenCode (below); `new_session_args`, it starts the agent with the request's
+  arguments (below); `question_answers`, it gives answers written on rakumux.com to
   the questions Claude Code asks in its own dialog (above); `question_answers.copilot`,
   `question_answers.droid`, `question_answers.opencode`, `question_answers.grok` and
   `question_answers.kimi`, beside it, to those GitHub Copilot, Droid, OpenCode, Grok Build and Kimi
@@ -253,14 +254,19 @@ conformance tests, not an HTTP server, database or local runtime.
   in common, under an id it makes, so a request sent again is stored once) `pending` for that
   machine, and gives it only to a machine whose latest session list advertises `new_sessions`
   (and, for an agent other than `claude-code`, `codex` and `opencode`, `new_session_agents`
-  too, so an older Rakumux is never asked for one it would leave pending):
+  too, so an older Rakumux is never asked for one it would leave pending, and, for a request with
+  `args`, `new_session_args`, so none starts the agent without them):
   its replies read (naming itself with `machine`) carries `new_sessions`, the requests still
   pending for it, oldest first, at most 20, with every read until reported or expired, whatever
   `after` says; they take no seq, so a machine takes each by its `id`, at most once. A request
-  carries no path and no command: the machine finds the folder among the folders of the sessions
+  carries no path and no program: the machine finds the folder among the folders of the sessions
   it lists, by name (`folder_session`, a session the website listed in that folder, picks one of
-  two folders with one name), never a private session's, and starts the agent as its own user
-  would. It reports `new-session-status` (only the request's own machine, only a pending
+  two folders with one name), never a private session's, and starts the agent's own program as
+  its own user would. A request with an agent may carry its arguments (`args`: 1 to 32, each one
+  visible line of at most 1024 characters and bytes, signed with the rest): the machine passes
+  each to the agent as one argument, quoted so its shell expands nothing in it but a leading `~`
+  (`~/notes` is the home folder's). What each agent takes is in `agent-commands.json` (below),
+  for pages to suggest; a machine passes any argument on, known or not. It reports `new-session-status` (only the request's own machine, only a pending
   request, or one that expired while the machine was starting it, whose first prompt went
   when it expired): `created` with the session it started (`{id, name}`), which its next session list
   shows, or `failed` with why: `folder_unknown` (no listed folder of that name now, or several
@@ -344,7 +350,8 @@ conformance tests, not an HTTP server, database or local runtime.
   `session`, `entry`, `text`, `answer`, `choice` as the reply has them, and `attachments` as
   `[{name, sha256}]` (the file's SHA-256 in lower-case hex, in the reply's order), which the
   machine checks against each file it downloads before typing anything; `new_session`:
-  `folder`, `folder_session`, `agent` and `prompt`, the first prompt asked for with it (the
+  `folder`, `folder_session`, `agent`, `args` (the request's arguments, absent without them) and
+  `prompt`, the first prompt asked for with it (the
   session message rakumux.com writes with that prompt once the session is `created` carries the
   same `signed`, and the machine takes it only into the session it started for that request);
   `delete_session`: `session`; `rename_session`: `session`, `name`; `move_session`: `session`, `workspace` (null for none); `workspace_change`: `workspace`, `action`, `name` (null for a delete); `heartbeat_action`:
@@ -503,11 +510,24 @@ token's subject, never a body field.
    `maxLength` counts code points, not bytes.
 3. Apply the schemas without coercion, defaults or removing extra fields.
 
+## Agents' arguments
+
+[`agent-commands.json`](agent-commands.json) lists, for each agent a new session can start, the
+program the machine runs for it and the arguments worth suggesting as the user writes them
+(`{version: 1, agents: [{agent, program, arguments: [{flag, value?, values?, about, repeats?}]}]}`:
+`value` names what an option takes, absent for a switch; `values`, the values it's known to take;
+`repeats`, it may be given more than once). It is generated from Rakumux's own table
+(`integrations/commands.rs`, the one the TUI's New heartbeat form suggests from), and a Rakumux
+test fails when they differ (`RAKUMUX_UPDATE_CONTRACTS=1` rewrites it). It is not part of the
+wire: pages show agents by their program's name and suggest from it, and a machine passes any
+argument on.
+
 ## What is not in it
 
 No terminal output, full paths (beyond what the chat's own text holds), account ids or
 credentials, and no commands for a machine to run: a new session names a folder by its name and
-an agent from a fixed list. Files attached to replies travel only through the attachment download, never in a
+an agent from a fixed list, whose own program the machine starts, with the arguments a paired
+device signed when there are any. Files attached to replies travel only through the attachment download, never in a
 JSON body, and only from rakumux.com to the reply's machine. Schemas reject such fields, not
 secrets inside the text: the status service sends replies and chats only while signed in, never
 a private session's, and masks keys, credential assignments, URLs' passwords and tokens in every text first

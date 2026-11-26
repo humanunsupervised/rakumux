@@ -356,6 +356,108 @@ fn a_session_asked_on_rakumux_com_to_be_renamed_takes_the_name_once() {
     daemon.stop();
 }
 
+/// A new session asked for on rakumux.com with arguments starts its agent
+/// with each one as it was signed, the shell expanding nothing in it but a
+/// leading `~`.
+#[test]
+fn a_new_session_asked_on_rakumux_com_starts_its_agent_with_the_arguments() {
+    let world = World::new();
+    // A stand-in `codex` the login shell finds, which writes each argument
+    // it gets on a line of its own.
+    let argv = world.root.join("codex-argv");
+    let codex = world.root.join("bin").join("codex");
+    std::fs::write(
+        &codex,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}.new'\nmv '{0}.new' '{0}'\nexec sleep 600\n",
+            argv.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(
+        world.home.join(".bash_profile"),
+        format!(
+            "export PATH='{}':\"$PATH\"\n",
+            world.root.join("bin").display()
+        ),
+    )
+    .unwrap();
+    let mut daemon = world.start_daemon();
+    let client = world.client();
+    let listed = client
+        .create(CreateSession {
+            scope: Some(ScopeRoot::resolve(&world.work).unwrap()),
+            name: Some("listed".into()),
+            cwd: None,
+            argv: Some(vec!["/bin/sleep".into(), "600".into()]),
+            startup_cmds: Vec::new(),
+            env: Vec::new(),
+            cols: 80,
+            rows: 24,
+            machine: None,
+            prefill: None,
+            first_input: None,
+            workspace: None,
+        })
+        .unwrap();
+    let mut service = world.start_service(1);
+    world.wait("the session list to say it takes arguments", || {
+        let state = world.cloud.state();
+        state.says("new_session_args")
+            && state.sessions.as_ref().is_some_and(|list| {
+                list["sessions"]
+                    .as_array()
+                    .is_some_and(|all| all.iter().any(|s| s["id"] == listed.id.as_str()))
+            })
+    });
+
+    let args = [
+        "--model",
+        "o3",
+        "two words",
+        "it's $HOME; echo `id`",
+        "~/notes",
+    ];
+    let asked = world.cloud.ask_new_session(MACHINE, "work", "codex", &args);
+    world.wait("the new session reported", || {
+        !world.cloud.state().new_session_reports.is_empty()
+    });
+    let report = world.cloud.state().new_session_reports[0].clone();
+    assert_eq!(report["id"], asked.as_str(), "{}", world.diagnostics());
+    assert_eq!(
+        report["status"],
+        "created",
+        "{report}\n{}",
+        world.diagnostics()
+    );
+    world.wait("the agent to start with its arguments", || argv.exists());
+    let got: Vec<String> = std::fs::read_to_string(&argv)
+        .unwrap()
+        .lines()
+        .map(String::from)
+        .collect();
+    let notes = world.home.join("notes").display().to_string();
+    assert_eq!(
+        got,
+        [
+            "--model",
+            "o3",
+            "two words",
+            "it's $HOME; echo `id`",
+            notes.as_str()
+        ],
+        "{}",
+        world.diagnostics()
+    );
+    let started = SessionId::from_string(report["session"]["id"].as_str().unwrap().to_owned());
+    let view = client.get(&started).unwrap();
+    assert_eq!(view.scope, listed.scope);
+    service.stop();
+    let _ = client.shutdown();
+    daemon.stop();
+}
+
 /// A slow rakumux.com keeps both shared workers busy (AI titles and chat
 /// uploads answered only after 12 s): what the replies read brings is still
 /// carried out within seconds, as the read has a worker of its own.

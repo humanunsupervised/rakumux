@@ -6,14 +6,17 @@
 //! `created` with the session it started, or `failed` with why.
 //!
 //! A request names a folder by its name and, optionally, an agent from a
-//! fixed list; never a path or a command. The folder is one of those of the
+//! fixed list with its arguments (`args`, signed with the rest); never a path
+//! or a program. The folder is one of those of the
 //! sessions this machine lists to rakumux.com (live or exited, never private
 //! or another machine's), found by name, and `folder_session` (a session
 //! rakumux.com listed there) picks one of two folders with the same name;
 //! none, or several without that, fails `folder_unknown`. The session is a
 //! login shell in the folder, with the agent's own command typed in as a
 //! startup command (`claude`, `codex`, `opencode`, `cursor-agent`, …: what
-//! `rakumux new --cmd` would run), and the daemon's environment. (`not_accepted`, which older
+//! `rakumux new --cmd` would run), each of the request's arguments after it
+//! quoted so the shell expands nothing in it but a leading `~`
+//! ([`shell_word`]), and the daemon's environment. (`not_accepted`, which older
 //! releases report while a setting of theirs is off, is never sent.)
 //!
 //! Each request is started at most once: its id is kept as handled before
@@ -44,6 +47,15 @@ pub(crate) const NEW_SESSIONS: &str = "new_sessions";
 /// ([`Agent`]), not only Claude Code, Codex and OpenCode: rakumux.com asks a
 /// machine without it for none of the others, which it would leave pending.
 pub(crate) const NEW_SESSION_AGENTS: &str = "new_session_agents";
+/// What it says too when it starts the agent with a request's `args`:
+/// rakumux.com sends arguments to no machine without it, which would start
+/// the agent without them.
+pub(crate) const NEW_SESSION_ARGS: &str = "new_session_args";
+/// The most arguments a request carries, and each one's most characters and
+/// UTF-8 bytes (contract `agentArgument`).
+const MAX_ARGS: usize = 32;
+const ARG_CHARACTERS: usize = 1024;
+const ARG_BYTES: usize = 1024;
 /// The most requests one read carries (contract).
 const MAX_ASKED: usize = 20;
 /// The first and longest waits after a failed report.
@@ -131,6 +143,8 @@ pub(crate) struct NewSessionAsk {
     pub folder_session: Option<SessionId>,
     /// The agent to start in its shell; none: the shell alone.
     pub agent: Option<Agent>,
+    /// The arguments to start the agent with (none without an agent).
+    pub args: Vec<String>,
     /// What a paired device signed for it.
     pub signed: Signature,
 }
@@ -144,6 +158,8 @@ struct WireAsk {
     folder_session: Option<String>,
     #[serde(default)]
     agent: Option<String>,
+    #[serde(default)]
+    args: Option<Vec<String>>,
     status: String,
     #[serde(default)]
     signed: Option<serde_json::Value>,
@@ -166,6 +182,16 @@ impl WireAsk {
             Some(name) => Some(Agent::of(&name)?),
             None => None,
         };
+        // Never empty when sent, only with an agent, each one visible line.
+        let args = match self.args {
+            Some(args) => {
+                let fits = agent.is_some()
+                    && (1..=MAX_ARGS).contains(&args.len())
+                    && args.iter().all(|arg| argument_fits(arg));
+                fits.then_some(args)?
+            }
+            None => Vec::new(),
+        };
         let folder_session = match self.folder_session {
             Some(id) if crate::feed::is_entry_id(&id) => Some(SessionId::from_string(id)),
             Some(_) => return None,
@@ -177,6 +203,7 @@ impl WireAsk {
             folder,
             folder_session,
             agent,
+            args,
             signed: Signed::of(self.signed),
         })
     }
@@ -188,6 +215,14 @@ fn one_line(text: &str, characters: usize, bytes: usize) -> bool {
     text.len() <= bytes
         && text.chars().count() <= characters
         && wire::label(text, characters).is_some_and(|clean| clean == text.trim())
+}
+
+/// `arg` is one argument within the contract (`agentArgument`): at most
+/// [`ARG_CHARACTERS`] characters and [`ARG_BYTES`] bytes, no control or
+/// format characters, something visible (spaces, quotes and the rest kept as
+/// sent).
+fn argument_fits(arg: &str) -> bool {
+    arg.len() <= ARG_BYTES && arg.chars().count() <= ARG_CHARACTERS && wire::is_label(arg)
 }
 
 /// The replies read's `new_sessions`: those within the contract, at most
@@ -452,6 +487,13 @@ impl NewSessionSync {
                             ask.folder_session.as_ref().map(SessionId::as_str).into(),
                         ),
                         ("agent", ask.agent.map(Agent::name).into()),
+                        (
+                            "args",
+                            match ask.args.is_empty() {
+                                true => serde_json::Value::Null,
+                                false => ask.args.clone().into(),
+                            },
+                        ),
                     ],
                 };
                 let allowed = self.guard.borrow_mut().allows(
@@ -474,7 +516,7 @@ impl NewSessionSync {
                 self.creating = Some(ask.id.clone());
                 return Some(NewSessionWork::Create {
                     id: ask.id,
-                    request: create(scope, ask.agent),
+                    request: create(scope, ask.agent, &ask.args),
                 });
             }
         }
@@ -571,15 +613,20 @@ fn failed(failure: NewSessionFailure) -> Outcome {
 
 /// The daemon request for a new session in `scope`: a login shell in the
 /// folder with a generated name, `agent`'s command typed in as a startup
-/// command, the daemon's environment and size (no terminal asks for one).
-fn create(scope: ScopeRoot, agent: Option<Agent>) -> CreateSession {
+/// command with `args` after it, each one word ([`shell_word`]), the daemon's
+/// environment and size (no terminal asks for one).
+fn create(scope: ScopeRoot, agent: Option<Agent>, args: &[String]) -> CreateSession {
     CreateSession {
         cwd: Some(scope.path().to_path_buf()),
         scope: Some(scope),
         name: None,
         argv: None,
         startup_cmds: agent
-            .map(|agent| vec![agent.command().to_owned()])
+            .map(|agent| {
+                let words = std::iter::once(agent.command().to_owned())
+                    .chain(args.iter().map(|arg| shell_word(arg)));
+                vec![words.collect::<Vec<_>>().join(" ")]
+            })
             .unwrap_or_default(),
         env: Vec::new(),
         cols: 0,
@@ -588,6 +635,27 @@ fn create(scope: ScopeRoot, agent: Option<Agent>) -> CreateSession {
         prefill: None,
         first_input: None,
         workspace: None,
+    }
+}
+
+/// `arg` as one word a shell (sh, bash, zsh, fish) reads back as it is:
+/// bare when it's only characters no shell treats specially, else in single
+/// quotes (a `'` in it as `'\''`). A leading `~/` (or a lone `~`) stays
+/// outside the quotes, so it still names the home folder.
+fn shell_word(arg: &str) -> String {
+    if arg == "~" {
+        return arg.to_owned();
+    }
+    if let Some(rest) = arg.strip_prefix("~/") {
+        return match rest.is_empty() {
+            true => "~/".to_owned(),
+            false => format!("~/{}", shell_word(rest)),
+        };
+    }
+    let plain = |c: char| c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c);
+    match !arg.is_empty() && arg.chars().all(plain) {
+        true => arg.to_owned(),
+        false => format!("'{}'", arg.replace('\'', "'\\''")),
     }
 }
 

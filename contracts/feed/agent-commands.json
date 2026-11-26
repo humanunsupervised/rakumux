@@ -1,0 +1,745 @@
+{
+  "version": 1,
+  "agents": [
+    {
+      "agent": "claude-code",
+      "program": "claude",
+      "arguments": [
+        {
+          "flag": "--dangerously-skip-permissions",
+          "about": "Skip every permission prompt"
+        },
+        {
+          "flag": "--permission-mode",
+          "value": "mode",
+          "values": [
+            "acceptEdits",
+            "auto",
+            "bypassPermissions",
+            "dontAsk",
+            "manual",
+            "plan"
+          ],
+          "about": "How permissions are asked for"
+        },
+        {
+          "flag": "--model",
+          "value": "model",
+          "values": [
+            "fable",
+            "opus",
+            "sonnet",
+            "haiku"
+          ],
+          "about": "The model"
+        },
+        {
+          "flag": "--effort",
+          "value": "level",
+          "values": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "about": "How hard it thinks"
+        },
+        {
+          "flag": "--allowedTools",
+          "value": "tools",
+          "about": "Tools it may use without asking"
+        },
+        {
+          "flag": "--disallowedTools",
+          "value": "tools",
+          "about": "Tools it may not use"
+        },
+        {
+          "flag": "--add-dir",
+          "value": "folder",
+          "about": "Another folder it may work in",
+          "repeats": true
+        },
+        {
+          "flag": "--append-system-prompt",
+          "value": "text",
+          "about": "Add to the system prompt"
+        },
+        {
+          "flag": "--agent",
+          "value": "name",
+          "about": "Run as this agent"
+        },
+        {
+          "flag": "--mcp-config",
+          "value": "file",
+          "about": "Load MCP servers"
+        },
+        {
+          "flag": "--strict-mcp-config",
+          "about": "Only --mcp-config's MCP servers"
+        },
+        {
+          "flag": "--settings",
+          "value": "file",
+          "about": "Load more settings"
+        },
+        {
+          "flag": "--fallback-model",
+          "value": "model",
+          "about": "The model when the first is busy"
+        },
+        {
+          "flag": "--worktree",
+          "value": "name",
+          "about": "Work in a new git worktree"
+        },
+        {
+          "flag": "--chrome",
+          "about": "Use Claude in Chrome"
+        },
+        {
+          "flag": "--print",
+          "about": "Print the answer and exit"
+        },
+        {
+          "flag": "--max-budget-usd",
+          "value": "amount",
+          "about": "Spend at most this (with --print)"
+        },
+        {
+          "flag": "--verbose",
+          "about": "Show every turn in full"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "program": "codex",
+      "arguments": [
+        {
+          "flag": "--dangerously-bypass-approvals-and-sandbox",
+          "about": "Never ask, no sandbox"
+        },
+        {
+          "flag": "--ask-for-approval",
+          "value": "policy",
+          "values": [
+            "never",
+            "on-request"
+          ],
+          "about": "When it asks before a command"
+        },
+        {
+          "flag": "--sandbox",
+          "value": "mode",
+          "values": [
+            "read-only",
+            "workspace-write",
+            "danger-full-access"
+          ],
+          "about": "What its commands may touch"
+        },
+        {
+          "flag": "--approve-for-me",
+          "about": "Review approvals automatically"
+        },
+        {
+          "flag": "--model",
+          "value": "model",
+          "about": "The model"
+        },
+        {
+          "flag": "--config",
+          "value": "key=value",
+          "about": "Set a configuration value",
+          "repeats": true
+        },
+        {
+          "flag": "--profile",
+          "value": "name",
+          "about": "Use a configuration profile"
+        },
+        {
+          "flag": "--search",
+          "about": "Search the web"
+        },
+        {
+          "flag": "--add-dir",
+          "value": "folder",
+          "about": "Another folder it may write to",
+          "repeats": true
+        },
+        {
+          "flag": "--image",
+          "value": "file",
+          "about": "Attach an image",
+          "repeats": true
+        },
+        {
+          "flag": "--worktree",
+          "about": "Work in a new git worktree"
+        },
+        {
+          "flag": "--oss",
+          "about": "Use an open-source provider"
+        },
+        {
+          "flag": "--local-provider",
+          "value": "name",
+          "values": [
+            "lmstudio",
+            "ollama"
+          ],
+          "about": "The local provider"
+        },
+        {
+          "flag": "--enable",
+          "value": "feature",
+          "about": "Turn a feature on",
+          "repeats": true
+        },
+        {
+          "flag": "--disable",
+          "value": "feature",
+          "about": "Turn a feature off",
+          "repeats": true
+        },
+        {
+          "flag": "--no-alt-screen",
+          "about": "Keep the terminal's scrollback"
+        }
+      ]
+    },
+    {
+      "agent": "opencode",
+      "program": "opencode",
+      "arguments": [
+        {
+          "flag": "--auto",
+          "about": "Allow whatever isn't denied"
+        },
+        {
+          "flag": "--standalone",
+          "about": "Run a server of its own"
+        },
+        {
+          "flag": "--server",
+          "value": "url",
+          "about": "Use the server at this address"
+        },
+        {
+          "flag": "--print-logs",
+          "about": "Print logs"
+        },
+        {
+          "flag": "--log-level",
+          "value": "level",
+          "values": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
+          "about": "Which logs"
+        }
+      ]
+    },
+    {
+      "agent": "copilot",
+      "program": "copilot",
+      "arguments": [
+        {
+          "flag": "--allow-all",
+          "about": "Allow every tool, path and URL"
+        },
+        {
+          "flag": "--no-ask-user",
+          "about": "Never ask you questions"
+        },
+        {
+          "flag": "--autopilot",
+          "about": "Keep going on its own"
+        },
+        {
+          "flag": "--max-autopilot-continues",
+          "value": "count",
+          "about": "How often autopilot continues"
+        },
+        {
+          "flag": "--mode",
+          "value": "mode",
+          "values": [
+            "interactive",
+            "plan",
+            "autopilot"
+          ],
+          "about": "The mode it starts in"
+        },
+        {
+          "flag": "--model",
+          "value": "model",
+          "values": [
+            "auto"
+          ],
+          "about": "The model"
+        },
+        {
+          "flag": "--reasoning-effort",
+          "value": "level",
+          "values": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "about": "How hard it thinks"
+        },
+        {
+          "flag": "--allow-all-tools",
+          "about": "Allow every tool"
+        },
+        {
+          "flag": "--allow-all-paths",
+          "about": "Allow every path"
+        },
+        {
+          "flag": "--allow-all-urls",
+          "about": "Allow every URL"
+        },
+        {
+          "flag": "--allow-tool",
+          "value": "tools",
+          "about": "Allow these tools",
+          "repeats": true
+        },
+        {
+          "flag": "--deny-tool",
+          "value": "tools",
+          "about": "Deny these tools",
+          "repeats": true
+        },
+        {
+          "flag": "--add-dir",
+          "value": "folder",
+          "about": "Another folder it may work in",
+          "repeats": true
+        },
+        {
+          "flag": "--agent",
+          "value": "name",
+          "about": "Run as this agent"
+        },
+        {
+          "flag": "--max-ai-credits",
+          "value": "credits",
+          "about": "Spend at most this"
+        },
+        {
+          "flag": "--additional-mcp-config",
+          "value": "json",
+          "about": "Load MCP servers",
+          "repeats": true
+        },
+        {
+          "flag": "--no-custom-instructions",
+          "about": "Ignore instruction files"
+        }
+      ]
+    },
+    {
+      "agent": "cursor-agent",
+      "program": "cursor-agent",
+      "arguments": [
+        {
+          "flag": "--force",
+          "about": "Run commands unless denied"
+        },
+        {
+          "flag": "--auto-review",
+          "about": "Run safe calls, ask about the rest"
+        },
+        {
+          "flag": "--approve-mcps",
+          "about": "Approve every MCP server"
+        },
+        {
+          "flag": "--trust",
+          "about": "Trust the folder"
+        },
+        {
+          "flag": "--sandbox",
+          "value": "mode",
+          "values": [
+            "enabled",
+            "disabled"
+          ],
+          "about": "Run commands in a sandbox"
+        },
+        {
+          "flag": "--mode",
+          "value": "mode",
+          "values": [
+            "plan",
+            "ask"
+          ],
+          "about": "Only plan, or only answer"
+        },
+        {
+          "flag": "--model",
+          "value": "model",
+          "about": "The model"
+        },
+        {
+          "flag": "--add-dir",
+          "value": "folder",
+          "about": "Another folder it may work in",
+          "repeats": true
+        },
+        {
+          "flag": "--worktree",
+          "value": "name",
+          "about": "Work in a new git worktree"
+        },
+        {
+          "flag": "--worktree-base",
+          "value": "branch",
+          "about": "What the worktree starts from"
+        },
+        {
+          "flag": "--plugin-dir",
+          "value": "folder",
+          "about": "Load a plugin",
+          "repeats": true
+        },
+        {
+          "flag": "--print",
+          "about": "Print the answer and exit"
+        }
+      ]
+    },
+    {
+      "agent": "pi",
+      "program": "pi",
+      "arguments": [
+        {
+          "flag": "--model",
+          "value": "model",
+          "about": "The model"
+        },
+        {
+          "flag": "--provider",
+          "value": "name",
+          "about": "The model's provider"
+        },
+        {
+          "flag": "--thinking",
+          "value": "level",
+          "values": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "about": "How hard it thinks"
+        },
+        {
+          "flag": "--approve",
+          "about": "Trust the folder's own files"
+        },
+        {
+          "flag": "--tools",
+          "value": "tools",
+          "about": "Only these tools"
+        },
+        {
+          "flag": "--exclude-tools",
+          "value": "tools",
+          "about": "Not these tools"
+        },
+        {
+          "flag": "--append-system-prompt",
+          "value": "text",
+          "about": "Add to the system prompt"
+        },
+        {
+          "flag": "--extension",
+          "value": "path",
+          "about": "Load an extension",
+          "repeats": true
+        },
+        {
+          "flag": "--skill",
+          "value": "path",
+          "about": "Load a skill",
+          "repeats": true
+        },
+        {
+          "flag": "--no-mcp",
+          "about": "No MCP servers"
+        },
+        {
+          "flag": "--no-context-files",
+          "about": "Ignore AGENTS.md and CLAUDE.md"
+        },
+        {
+          "flag": "--offline",
+          "about": "No network as it starts"
+        },
+        {
+          "flag": "--print",
+          "about": "Print the answer and exit"
+        }
+      ]
+    },
+    {
+      "agent": "grok",
+      "program": "grok",
+      "arguments": [
+        {
+          "flag": "--always-approve",
+          "about": "Approve every tool"
+        },
+        {
+          "flag": "--permission-mode",
+          "value": "mode",
+          "values": [
+            "default",
+            "acceptEdits",
+            "auto",
+            "dontAsk",
+            "bypassPermissions",
+            "plan"
+          ],
+          "about": "How permissions are asked for"
+        },
+        {
+          "flag": "--model",
+          "value": "model",
+          "about": "The model"
+        },
+        {
+          "flag": "--reasoning-effort",
+          "value": "level",
+          "values": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "about": "How hard it thinks"
+        },
+        {
+          "flag": "--max-turns",
+          "value": "count",
+          "about": "At most this many turns"
+        },
+        {
+          "flag": "--allow",
+          "value": "rule",
+          "about": "Allow what matches",
+          "repeats": true
+        },
+        {
+          "flag": "--deny",
+          "value": "rule",
+          "about": "Deny what matches",
+          "repeats": true
+        },
+        {
+          "flag": "--sandbox",
+          "value": "profile",
+          "about": "What its commands may touch"
+        },
+        {
+          "flag": "--rules",
+          "value": "text",
+          "about": "Add to the system prompt"
+        },
+        {
+          "flag": "--add-dir",
+          "value": "folder",
+          "about": "Another folder it may work in",
+          "repeats": true
+        },
+        {
+          "flag": "--agent",
+          "value": "name",
+          "about": "Run as this agent"
+        },
+        {
+          "flag": "--no-subagents",
+          "about": "No subagents"
+        },
+        {
+          "flag": "--no-plan",
+          "about": "No plan mode"
+        },
+        {
+          "flag": "--disable-web-search",
+          "about": "No web"
+        },
+        {
+          "flag": "--worktree",
+          "value": "name",
+          "about": "Work in a new git worktree"
+        }
+      ]
+    },
+    {
+      "agent": "kimi",
+      "program": "kimi",
+      "arguments": [
+        {
+          "flag": "--auto",
+          "about": "Never ask"
+        },
+        {
+          "flag": "--yolo",
+          "about": "Ask only about risky actions"
+        },
+        {
+          "flag": "--plan",
+          "about": "Start in plan mode"
+        },
+        {
+          "flag": "--model",
+          "value": "model",
+          "about": "The model"
+        },
+        {
+          "flag": "--agent",
+          "value": "name",
+          "about": "Run as this agent"
+        },
+        {
+          "flag": "--agent-file",
+          "value": "path",
+          "about": "Run as the agent in this file"
+        },
+        {
+          "flag": "--add-dir",
+          "value": "folder",
+          "about": "Another folder it may work in",
+          "repeats": true
+        },
+        {
+          "flag": "--skills-dir",
+          "value": "folder",
+          "about": "Load skills from here",
+          "repeats": true
+        }
+      ]
+    },
+    {
+      "agent": "droid",
+      "program": "droid",
+      "arguments": [
+        {
+          "flag": "--auto",
+          "value": "level",
+          "values": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "about": "How much it does without asking"
+        },
+        {
+          "flag": "--use-spec",
+          "about": "Start in spec mode"
+        },
+        {
+          "flag": "--settings",
+          "value": "path",
+          "about": "Load more settings"
+        },
+        {
+          "flag": "--append-system-prompt",
+          "value": "text",
+          "about": "Add to the system prompt"
+        },
+        {
+          "flag": "--append-system-prompt-file",
+          "value": "path",
+          "about": "Add a file to the system prompt"
+        },
+        {
+          "flag": "--worktree",
+          "value": "name",
+          "about": "Work in a git worktree"
+        },
+        {
+          "flag": "--disable-builtin-skills",
+          "about": "No built-in skills"
+        }
+      ]
+    },
+    {
+      "agent": "amp",
+      "program": "amp",
+      "arguments": [
+        {
+          "flag": "--mode",
+          "value": "mode",
+          "values": [
+            "low",
+            "medium",
+            "high",
+            "ultra"
+          ],
+          "about": "The model and tools it uses"
+        },
+        {
+          "flag": "--fast",
+          "about": "Faster models, at a premium"
+        },
+        {
+          "flag": "--features",
+          "value": "names",
+          "values": [
+            "fast",
+            "plaid",
+            "pro"
+          ],
+          "about": "Turn features on"
+        },
+        {
+          "flag": "--mcp-config",
+          "value": "file",
+          "about": "Load MCP servers"
+        },
+        {
+          "flag": "--settings-file",
+          "value": "path",
+          "about": "Load these settings"
+        },
+        {
+          "flag": "--visibility",
+          "value": "who",
+          "values": [
+            "private",
+            "unlisted",
+            "workspace",
+            "group"
+          ],
+          "about": "Who sees the thread"
+        },
+        {
+          "flag": "--no-ide",
+          "about": "No IDE connection"
+        },
+        {
+          "flag": "--no-notifications",
+          "about": "No notifications"
+        }
+      ]
+    }
+  ]
+}

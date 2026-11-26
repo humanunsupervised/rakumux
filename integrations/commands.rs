@@ -286,6 +286,90 @@ mod tests {
         assert!(problem("claude # --x").is_some());
     }
 
+    /// The agents a new session asked for on rakumux.com starts, by the feed
+    /// contract's name for each and Rakumux's, in the contract's order.
+    const CONTRACT_AGENTS: [(&str, &str); 10] = [
+        ("claude-code", "claude"),
+        ("codex", "codex"),
+        ("opencode", "opencode"),
+        ("copilot", "copilot"),
+        ("cursor-agent", "cursor-agent"),
+        ("pi", "pi"),
+        ("grok", "grok"),
+        ("kimi", "kimi"),
+        ("droid", "droid"),
+        ("amp", "amp"),
+    ];
+
+    /// `contracts/feed/agent-commands.json` as these tables make it.
+    fn contract_commands() -> String {
+        #[derive(serde::Serialize)]
+        struct Commands {
+            version: u8,
+            agents: Vec<Agent>,
+        }
+        #[derive(serde::Serialize)]
+        struct Agent {
+            agent: &'static str,
+            program: &'static str,
+            arguments: Vec<Listed>,
+        }
+        #[derive(serde::Serialize)]
+        struct Listed {
+            flag: &'static str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            value: Option<&'static str>,
+            #[serde(skip_serializing_if = "<[_]>::is_empty")]
+            values: &'static [&'static str],
+            about: &'static str,
+            #[serde(skip_serializing_if = "std::ops::Not::not")]
+            repeats: bool,
+        }
+        let agents = CONTRACT_AGENTS
+            .iter()
+            .map(|(name, label)| {
+                let known = agent(label).unwrap_or_else(|| panic!("{label}"));
+                Agent {
+                    agent: name,
+                    program: known.program(),
+                    arguments: known
+                        .arguments
+                        .iter()
+                        .map(|argument| Listed {
+                            flag: argument.flag,
+                            value: argument.value,
+                            values: argument.values,
+                            about: argument.about,
+                            repeats: argument.repeats,
+                        })
+                        .collect(),
+                }
+            })
+            .collect();
+        let json = serde_json::to_string_pretty(&Commands { version: 1, agents }).unwrap();
+        format!("{json}\n")
+    }
+
+    /// The feed contract's list of agents' arguments, which rakumux.com
+    /// suggests from, is these tables'.
+    #[test]
+    fn the_feed_contract_lists_these_arguments() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../contracts/feed/agent-commands.json");
+        let made = contract_commands();
+        if std::env::var_os("RAKUMUX_UPDATE_CONTRACTS").is_some() {
+            std::fs::write(&path, &made).unwrap();
+        }
+        let kept = std::fs::read_to_string(&path).unwrap_or_default();
+        assert!(
+            kept == made,
+            "{} differs from integrations/commands.rs: run \
+             RAKUMUX_UPDATE_CONTRACTS=1 cargo test -p rakumux-session-core \
+             the_feed_contract_lists_these_arguments",
+            path.display()
+        );
+    }
+
     #[test]
     fn every_agent_is_found_by_its_label_and_programs_and_its_defaults_are_its_arguments() {
         for known in AGENTS {

@@ -54,7 +54,9 @@ pub(crate) use job::FeedResult;
 pub use job::{FeedCompletion, FeedJob};
 pub(crate) use logs::LogSync;
 pub(crate) use machine::MachineIdentity;
-pub(crate) use new_sessions::{NewSessionSync, NewSessionWork, NEW_SESSIONS, NEW_SESSION_AGENTS};
+pub(crate) use new_sessions::{
+    NewSessionSync, NewSessionWork, NEW_SESSIONS, NEW_SESSION_AGENTS, NEW_SESSION_ARGS,
+};
 pub use pairings::{failure_text as pairing_failure_text, DeviceView, PairingAction, PairingView};
 pub(crate) use pairings::{PairingSync, READ_EVERY as PAIRING_READ_EVERY};
 pub(crate) use poke::{listen, PokeEvent, PokeSync};

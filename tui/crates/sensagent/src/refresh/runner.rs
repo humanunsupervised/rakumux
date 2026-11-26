@@ -847,6 +847,7 @@ fn own<S, A, C>(
     let mut sessions = SessionSync::new(machine.clone(), uploads.is_some())
         .handling(crate::feed::NEW_SESSIONS)
         .handling(crate::feed::NEW_SESSION_AGENTS)
+        .handling(crate::feed::NEW_SESSION_ARGS)
         .handling(crate::feed::DELETE_SESSIONS)
         .handling(crate::feed::RENAME_SESSIONS)
         .handling(crate::signing::SIGNED_COMMANDS)

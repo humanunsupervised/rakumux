@@ -189,6 +189,11 @@ fn sign_read(phone: &Phone, machine: &str, files: &HashMap<String, Vec<u8>>, rea
         }
     };
     sign("replies", "reply", &["entry", "text", "answer", "choice"]);
+    sign(
+        "new_sessions",
+        "new_session",
+        &["folder", "folder_session", "agent", "args"],
+    );
     sign("session_deletions", "delete_session", &["session"]);
     sign("session_renames", "rename_session", &["session", "name"]);
     sign("session_moves", "move_session", &["session", "workspace"]);
@@ -251,6 +256,10 @@ pub struct State {
     pub titles: Vec<(u64, Value)>,
     /// How many of the next status reports meet a security checkpoint.
     pub checkpoints: usize,
+    /// New sessions asked for (`newSession`), as stored.
+    pub new_sessions: Vec<Value>,
+    /// New session status reports, as sent.
+    pub new_session_reports: Vec<Value>,
     /// Sessions asked to be deleted (`sessionDeletion`), as stored.
     pub deletions: Vec<Value>,
     /// Deletion status reports, as sent.
@@ -438,6 +447,28 @@ impl FakeCloud {
 }
 
 impl FakeCloud {
+    /// Ask this machine for a new session in the folder named `folder`,
+    /// starting `agent` with `args` (none: left out), as the website does;
+    /// the request's id.
+    #[allow(dead_code)]
+    pub fn ask_new_session(
+        &self,
+        machine: &str,
+        folder: &str,
+        agent: &str,
+        args: &[&str],
+    ) -> String {
+        let id = ulid();
+        let at = now_ms();
+        let mut asked = json!({"id": id, "machine": machine, "folder": folder, "agent": agent,
+            "status": "pending", "created_at": at, "status_at": at});
+        if !args.is_empty() {
+            asked["args"] = json!(args);
+        }
+        self.state().new_sessions.push(asked);
+        id
+    }
+
     /// Ask this machine to delete `session`, as the website does; the request's id.
     #[allow(dead_code)]
     pub fn ask_deletion(&self, machine: &str, session: &str) -> String {
@@ -800,6 +831,18 @@ impl Served {
                     .collect();
                 let mut read = json!({"version": 1, "replies": replies, "latest_seq": state.seq,
                     "more": false, "poll_ms": 1000});
+                if state.says("new_sessions") {
+                    let pending: Vec<&Value> = state
+                        .new_sessions
+                        .iter()
+                        .filter(|asked| asked["status"] == "pending")
+                        // Arguments only to a machine that says it takes them.
+                        .filter(|asked| {
+                            asked.get("args").is_none() || state.says("new_session_args")
+                        })
+                        .collect();
+                    read["new_sessions"] = json!(pending);
+                }
                 if state.says("delete_sessions") {
                     let pending: Vec<&Value> = state
                         .deletions
@@ -928,6 +971,24 @@ impl Served {
                 let stored = stored.clone();
                 state.workspace_change_reports.push(body);
                 answer(200, json!({"version": 1, "workspace_change": stored}))
+            }
+            ("POST", "/api/v1/feed/new-sessions/status") => {
+                let Some(stored) = state
+                    .new_sessions
+                    .iter_mut()
+                    .find(|asked| asked["id"] == body["id"])
+                else {
+                    return error(404, "invalid_request");
+                };
+                stored["status"] = body["status"].clone();
+                for key in ["failure", "session"] {
+                    if !body[key].is_null() {
+                        stored[key] = body[key].clone();
+                    }
+                }
+                let stored = stored.clone();
+                state.new_session_reports.push(body);
+                answer(200, json!({"version": 1, "new_session": stored}))
             }
             ("POST", "/api/v1/feed/session-renames/status") => {
                 let Some(stored) = state

@@ -623,11 +623,19 @@
         "name": { "type": "string", "$ref": "#/$defs/label", "maxLength": 64, "maxUtf8Bytes": 256 }
       }
     },
+    "agentArgument": {
+      "description": "One argument of an agent's command line, as written on rakumux.com (`newSession` `args`): one visible line, spaces and quotes kept as written; the machine passes it to the agent as it is.",
+      "type": "string",
+      "$ref": "#/$defs/label",
+      "maxLength": 1024,
+      "maxUtf8Bytes": 1024
+    },
     "newSession": {
-      "description": "A new session asked for on rakumux.com, for one of the account's machines to start in one of the folders its session list names: a login shell in the folder, with `agent` started in it when one is named. It never carries a path or a command: the machine finds the folder among its own by name (`folder_session`, a session rakumux.com listed in that folder, tells two folders of one name apart) and starts the agent as it would itself. `session` is the session it started, once `created`.",
+      "description": "A new session asked for on rakumux.com, for one of the account's machines to start in one of the folders its session list names: a login shell in the folder, with `agent` started in it when one is named. It never carries a path or a program: the machine finds the folder among its own by name (`folder_session`, a session rakumux.com listed in that folder, tells two folders of one name apart), and the agent is one of a fixed list, whose own program the machine starts, with `args` as its arguments when given. `session` is the session it started, once `created`.",
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "machine", "folder", "status", "created_at", "status_at"],
+      "dependentRequired": { "args": ["agent"] },
       "properties": {
         "id": {
           "description": "The ULID rakumux.com gave the request: a machine starts at most one session for an id.",
@@ -652,6 +660,13 @@
         "agent": {
           "description": "The agent to start in the new session's shell; absent: the shell alone. Other than `claude-code`, `codex` and `opencode`, only for a machine whose latest session list advertises `new_session_agents`.",
           "$ref": "#/$defs/agent"
+        },
+        "args": {
+          "description": "The arguments to start `agent` with, in order, each passed to it as one argument: the machine quotes each, so its shell expands nothing in it but a leading `~`. Only with `agent`, and only for a machine whose latest session list advertises `new_session_args`; never empty (absent when none). Signed with the rest (`new_session` command `args`).",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": { "$ref": "#/$defs/agentArgument" }
         },
         "signed": {
           "description": "The command a device paired with the machine signed for it (`signedCommand`): a machine with paired devices carries it out only with one; absent when written without one.",

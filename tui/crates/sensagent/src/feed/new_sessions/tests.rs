@@ -17,6 +17,7 @@ fn ask(id: &str, folder: &str, agent: Option<Agent>) -> NewSessionAsk {
         folder: folder.into(),
         folder_session: None,
         agent,
+        args: Vec::new(),
         signed: crate::signing::testing::signed(
             "new_session",
             id,
@@ -358,6 +359,7 @@ fn the_replies_read_brings_requests_within_the_contract_row_by_row() {
                 folder: "rakumux".into(),
                 folder_session: Some(SessionId::from_string("01K89ZQ4D2F6H8J0K2M4N6P8R0")),
                 agent: Some(Agent::ClaudeCode),
+                args: Vec::new(),
                 signed: Ok(None),
             },
             NewSessionAsk {
@@ -419,10 +421,16 @@ fn the_session_list_says_this_machine_takes_new_sessions() {
     // As the service sends it: every agent too, in rakumux.com's spelling.
     let every = SessionSync::new("studio".into(), true)
         .handling(NEW_SESSIONS)
-        .handling(NEW_SESSION_AGENTS);
+        .handling(NEW_SESSION_AGENTS)
+        .handling(NEW_SESSION_ARGS);
     assert_eq!(
         capabilities(every),
-        serde_json::json!(["reply_attachments", "new_sessions", "new_session_agents"])
+        serde_json::json!([
+            "reply_attachments",
+            "new_sessions",
+            "new_session_agents",
+            "new_session_args"
+        ])
     );
 }
 
@@ -488,4 +496,150 @@ fn once_a_device_is_paired_only_signed_sessions_start_and_take_their_prompt() {
         Err(Refusal::BadSignature),
         "once"
     );
+}
+
+/// A request read with `args` (JSON), as the replies read brings it.
+fn read_args(args: serde_json::Value, agent: Option<&str>) -> Vec<NewSessionAsk> {
+    let mut row = serde_json::json!({
+        "id": ASK, "machine": "studio", "folder": "web", "status": "pending",
+        "created_at": 1, "status_at": 1, "args": args,
+    });
+    if let Some(agent) = agent {
+        row["agent"] = agent.into();
+    }
+    asks(Some(serde_json::json!([row])))
+}
+
+#[test]
+fn arguments_are_read_within_the_contract() {
+    let read = read_args(
+        serde_json::json!(["--model", "opus", " a b ", "it's $HOME"]),
+        Some("claude-code"),
+    );
+    assert_eq!(read.len(), 1);
+    assert_eq!(read[0].args, ["--model", "opus", " a b ", "it's $HOME"]);
+    let long = "x".repeat(ARG_CHARACTERS);
+    assert_eq!(
+        read_args(serde_json::json!([long]), Some("codex"))[0].args,
+        [long]
+    );
+    // Off the contract: none, too many, empty, blank, a control or a newline,
+    // too long, not a string, or without an agent.
+    let many: Vec<String> = (0..=MAX_ARGS).map(|n| format!("--x{n}")).collect();
+    for (args, agent) in [
+        (serde_json::json!([]), Some("claude-code")),
+        (serde_json::json!(many), Some("claude-code")),
+        (serde_json::json!([""]), Some("claude-code")),
+        (serde_json::json!(["   "]), Some("claude-code")),
+        (serde_json::json!(["a\nb"]), Some("claude-code")),
+        (serde_json::json!(["\u{1b}[2J"]), Some("claude-code")),
+        (serde_json::json!(["a\u{200b}"]), Some("claude-code")),
+        (
+            serde_json::json!(["x".repeat(ARG_CHARACTERS + 1)]),
+            Some("claude-code"),
+        ),
+        (
+            serde_json::json!(["é".repeat(ARG_BYTES / 2 + 1)]),
+            Some("claude-code"),
+        ),
+        (serde_json::json!([1]), Some("claude-code")),
+        (serde_json::json!("--model opus"), Some("claude-code")),
+        (serde_json::json!(["--model"]), None),
+    ] {
+        assert!(read_args(args.clone(), agent).is_empty(), "{args}");
+    }
+}
+
+#[test]
+fn each_argument_is_one_word_the_shell_expands_nothing_in_but_a_leading_tilde() {
+    for (arg, word) in [
+        ("--model", "--model"),
+        ("opus", "opus"),
+        (
+            "--add-dir=/srv/a_b@c%d+e,f:g.h",
+            "--add-dir=/srv/a_b@c%d+e,f:g.h",
+        ),
+        ("two words", "'two words'"),
+        ("it's", "'it'\\''s'"),
+        ("$HOME", "'$HOME'"),
+        ("a; rm -rf ~", "'a; rm -rf ~'"),
+        ("Bash(git *)", "'Bash(git *)'"),
+        ("`id`", "'`id`'"),
+        ("~", "~"),
+        ("~/", "~/"),
+        ("~/src", "~/src"),
+        ("~/my src", "~/'my src'"),
+        ("~root", "'~root'"),
+        ("a~/b", "'a~/b'"),
+    ] {
+        assert_eq!(shell_word(arg), word, "{arg}");
+    }
+    let mut sync = on(&[view("01K89ZQ4D2F6H8J0K2M4N6P8R0", "/home/me/web")]);
+    sync.read(
+        true,
+        vec![NewSessionAsk {
+            args: vec!["--model".into(), "opus".into(), "be brief; ok".into()],
+            signed: crate::signing::testing::signed(
+                "new_session",
+                ASK,
+                serde_json::json!({
+                    "folder": "web", "agent": "claude-code",
+                    "args": ["--model", "opus", "be brief; ok"],
+                }),
+            ),
+            ..ask(ASK, "web", Some(Agent::ClaudeCode))
+        }],
+    );
+    let Some(NewSessionWork::Create { request, .. }) = sync.next_work(NOW) else {
+        panic!("expected a create");
+    };
+    assert_eq!(
+        request.startup_cmds,
+        vec!["claude --model opus 'be brief; ok'".to_string()]
+    );
+}
+
+/// The arguments are signed with the rest: others than those signed, or
+/// some where none were, start nothing.
+#[test]
+fn the_signature_covers_the_arguments() {
+    use crate::signing::testing::{guard, Device};
+    use crate::signing::KeyFormat;
+    const MACHINE_ID: &str = "01K8C2B3C4D5E6F7G8H9J0K1M2";
+    let phone = Device::new(KeyFormat::P256);
+    let shared = guard(MACHINE_ID, &[&phone]);
+    let run = |signed_args: Option<serde_json::Value>, sent: Option<serde_json::Value>| {
+        let mut fields = serde_json::json!({ "folder": "web", "agent": "codex" });
+        if let Some(args) = signed_args {
+            fields["args"] = args;
+        }
+        let signed = phone.signed_now("new_session", MACHINE_ID, ASK, fields);
+        let mut row = serde_json::json!({
+            "id": ASK, "machine": "studio", "folder": "web", "agent": "codex",
+            "status": "pending", "created_at": 1, "status_at": 1, "signed": signed,
+        });
+        if let Some(args) = sent {
+            row["args"] = args;
+        }
+        let mut sync = on(&[view(OTHER, "/repos/web")]).signing(shared.clone());
+        sync.read(true, asks(Some(serde_json::json!([row]))));
+        sync.next_work(NOW)
+    };
+    let search = serde_json::json!(["--search"]);
+    let yolo = serde_json::json!(["--dangerously-bypass-approvals-and-sandbox"]);
+    match run(Some(search.clone()), Some(search.clone())) {
+        Some(NewSessionWork::Create { request, .. }) => {
+            assert_eq!(request.startup_cmds, ["codex --search"]);
+        }
+        other => panic!("expected a create, got {other:?}"),
+    }
+    assert_eq!(
+        body(run(Some(search.clone()), Some(yolo)))["failure"],
+        "bad_signature"
+    );
+    assert_eq!(
+        body(run(None, Some(search.clone())))["failure"],
+        "bad_signature"
+    );
+    assert_eq!(body(run(Some(search), None))["failure"], "bad_signature");
 }

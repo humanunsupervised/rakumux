@@ -722,6 +722,15 @@ static LABEL_HIDDEN: LazyLock<Option<Regex>> = LazyLock::new(|| {
 static LABEL_VISIBLE: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r"[\p{L}\p{N}\p{P}\p{S}]").ok());
 
+/// `text` is the contract's `label` as it is: something visible, and nothing
+/// a terminal would act on (spaces, leading or trailing, kept).
+pub(crate) fn is_label(text: &str) -> bool {
+    let (Some(hidden), Some(visible)) = (LABEL_HIDDEN.as_ref(), LABEL_VISIBLE.as_ref()) else {
+        return false;
+    };
+    !hidden.is_match(text) && visible.is_match(text)
+}
+
 /// `text` as the contract's one visible line of at most `characters`: what a
 /// terminal would act on removed; `None` when nothing visible is left.
 pub(crate) fn label(text: &str, characters: usize) -> Option<String> {

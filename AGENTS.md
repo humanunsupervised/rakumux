@@ -503,11 +503,18 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    in the folder of the sessions it lists (live or exited, never a private one or another
    machine's) whose name (`folder_of`, the last path component) is the request's, the one of
    `folder_session` (a session rakumux.com listed there) when two folders share the name;
-   never a path or a command from the cloud. The session is a login shell in that folder with
+   never a path or a program from the cloud. The session is a login shell in that folder with
    a generated name, the daemon's environment and default size, and for an agent its own
    command (`claude`, `codex`, `opencode`, `copilot`, `cursor-agent` (never `agent`, which Grok
    installs too), `pi`, `grok`, `kimi`, `droid`, `amp`) typed in as a startup command, as
-   `rakumux new --cmd` would. It reports `created` with the session's id and name
+   `rakumux new --cmd` would, with the request's `args` after it when it has them (its list
+   says `new_session_args`, so rakumux.com sends arguments to no machine that would drop them;
+   1 to 32, each one visible line of at most 1024 characters and bytes, signed with the rest):
+   each one word, bare when it's only `[A-Za-z0-9_@%+=:,./-]`, else in single quotes, a leading
+   `~/` left outside them (`shell_word`), so the shell expands nothing else in it. The
+   arguments rakumux.com suggests are the contract's `agent-commands.json`, generated from
+   `integrations/commands.rs` (a session-core test fails when they differ;
+   `RAKUMUX_UPDATE_CONTRACTS=1` rewrites it). It reports `created` with the session's id and name
    (`POST /api/v1/feed/new-sessions/status`), or `failed`: `folder_unknown` (no listed folder
    of that name, or several without `folder_session` saying which), `refused` (the daemon's
    error); `not_accepted` stays in the contract for older releases, which send it while their
@@ -1693,8 +1700,8 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
   what's typed during a turn (mid-turn); with the entries that answer them
   they make a **thread**.
 - **New session from rakumux.com** (`NewSessionAsk`): a session the user asked a machine for
-  on rakumux.com, in a folder it lists there (by name), a shell or one named agent; started by
-  that machine's account service, signed in.
+  on rakumux.com, in a folder it lists there (by name), a shell or one named agent with the
+  arguments the user wrote; started by that machine's account service, signed in.
 - **Daemon** (`rakumux-ptyd`): the single per-user server owning every session.
 - **Client**: anything connected to the daemon (TUI, CLI call, agent, `rakumux-api`).
 - **External API**: `rakumux-api`, HTTP on 127.0.0.1 over the daemon; found through `api.json`.
