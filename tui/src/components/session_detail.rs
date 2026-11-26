@@ -268,6 +268,10 @@ fn draw_terminal(f: &mut Frame, app: &App, area: Rect, focused: bool) -> Option<
             );
             None
         }
+        DetailView::Note(note) => {
+            centered_text(f, area, vec![Line::from(Span::styled(note.clone(), muted))]);
+            None
+        }
         DetailView::SelfSession(_) => {
             centered_text(
                 f,

@@ -29,6 +29,9 @@ pub enum DetailView {
     },
     /// The session this TUI runs inside (nesting guard).
     SelfSession(SessionId),
+    /// No session to show, and why: a heartbeat's run that started none,
+    /// or whose output is gone.
+    Note(String),
     Error {
         id: SessionId,
         message: String,
@@ -38,7 +41,7 @@ pub enum DetailView {
 impl DetailView {
     pub fn session_id(&self) -> Option<&SessionId> {
         match self {
-            DetailView::Empty => None,
+            DetailView::Empty | DetailView::Note(_) => None,
             DetailView::Loading(id) | DetailView::Live(id) | DetailView::SelfSession(id) => {
                 Some(id)
             }

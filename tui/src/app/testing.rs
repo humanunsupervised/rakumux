@@ -170,6 +170,11 @@ pub struct FakeState {
     pub resources: Vec<session_core::api::ResourceSample>,
     /// The heartbeats, as a daemon keeps them.
     pub heartbeats: Vec<session_core::heartbeat::Heartbeat>,
+    /// Their run records, oldest first.
+    pub run_records: Vec<(
+        session_core::ids::HeartbeatId,
+        session_core::heartbeat::HeartbeatRunRecord,
+    )>,
     /// The workspaces, oldest first.
     pub workspaces: Vec<session_core::workspace::Workspace>,
     /// It keeps workspaces (`workspaces`): off by default, so the footer
@@ -532,7 +537,72 @@ impl SessionApi for FakeApi {
             run,
         });
         state.sessions.push(session.clone());
+        let seq = state.run_records.len() as u64 + 1;
+        let at = state.now;
+        state.run_records.push((
+            id.clone(),
+            session_core::heartbeat::HeartbeatRunRecord {
+                seq,
+                run: session_core::heartbeat::HeartbeatRun {
+                    run,
+                    at,
+                    session_id: Some(session.id.clone()),
+                    outcome: session_core::heartbeat::RunOutcome::TaskGiven,
+                    detail: None,
+                },
+                place: Some(session_core::heartbeat::RunPlace::Listed),
+                status: Some(session.status),
+                lifecycle: Some(session.lifecycle),
+            },
+        ));
         Ok(session)
+    }
+
+    fn heartbeat_runs(
+        &self,
+        id: &session_core::ids::HeartbeatId,
+        limit: Option<u32>,
+        before: Option<u64>,
+    ) -> Result<session_core::heartbeat::HeartbeatRunPage> {
+        self.take_failure("heartbeat_runs")?;
+        let state = self.state.lock().unwrap();
+        let mut runs: Vec<_> = state
+            .run_records
+            .iter()
+            .rev()
+            .filter(|(heartbeat, run)| heartbeat == id && before.is_none_or(|b| run.seq < b))
+            .map(|(_, run)| run.clone())
+            .collect();
+        let limit = limit.unwrap_or(100) as usize;
+        let more = runs.len() > limit;
+        runs.truncate(limit);
+        Ok(session_core::heartbeat::HeartbeatRunPage { runs, more })
+    }
+
+    fn history_read(
+        &self,
+        id: &SessionId,
+        lines: Option<u32>,
+        _format: session_core::api::TextFormat,
+    ) -> Result<ReadResult> {
+        self.record(format!("history_read {id} lines={lines:?}"));
+        self.take_failure("history_read")?;
+        let text = self
+            .state
+            .lock()
+            .unwrap()
+            .reads
+            .get(id)
+            .cloned()
+            .unwrap_or_default();
+        Ok(ReadResult {
+            text,
+            rows: 24,
+            cols: 80,
+            cursor: (0, 0),
+            truncated: false,
+            untrusted: true,
+        })
     }
 
     fn open_terminal(

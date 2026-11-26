@@ -1,5 +1,5 @@
 //! `rakumux heartbeat`: tasks the daemon runs on a clock (`ls`, `show`,
-//! `add`, `update`, `enable`, `pause`, `run`, `rm`). From inside a session
+//! `runs`, `add`, `update`, `enable`, `pause`, `run`, `rm`). From inside a session
 //! (an agent) `add` and `update` work too, and what they make or change waits
 //! for the user's approval; `enable`, `run` and `rm` are the user's.
 
@@ -11,10 +11,12 @@ use serde_json::json;
 use session_core::api::{ApiError, ErrorCode};
 use session_core::client::SessionApi;
 use session_core::heartbeat::{
-    Heartbeat, HeartbeatEdit, HeartbeatFields, HeartbeatSpec, Schedule, Weekday,
+    Heartbeat, HeartbeatEdit, HeartbeatFields, HeartbeatRunRecord, HeartbeatSpec, RunOutcome,
+    RunPlace, Schedule, Weekday, MAX_RUN_RECORD_LIMIT,
 };
 use session_core::ids::HeartbeatId;
 use session_core::model::ScopeRoot;
+use session_core::model::SessionStatus;
 use std::io::{Read, Write};
 
 pub(crate) fn run(
@@ -54,6 +56,14 @@ pub(crate) fn run(
             writeln!(out, "Started {} ({})", printable(&session.name), session.id)
                 .map_err(output_error)?;
             Ok(0)
+        }
+        HeartbeatCommand::Runs {
+            target,
+            limit,
+            json,
+        } => {
+            let heartbeat = find(api, invocation, &target)?;
+            runs(api, &heartbeat, limit, json, out)
         }
         HeartbeatCommand::Rm { target } => {
             let heartbeat = find(api, invocation, &target)?;
@@ -147,6 +157,95 @@ fn show(heartbeat: &Heartbeat, json: bool, out: &mut dyn Write) -> Result<i32, C
     out.write_all(printable_lines(&text).as_bytes())
         .map_err(output_error)?;
     Ok(0)
+}
+
+/// `runs`: the heartbeat's run record, newest first, `limit` of it.
+fn runs(
+    api: &dyn SessionApi,
+    heartbeat: &Heartbeat,
+    limit: u32,
+    json: bool,
+    out: &mut dyn Write,
+) -> Result<i32, CliError> {
+    let mut runs: Vec<HeartbeatRunRecord> = Vec::new();
+    let mut more = true;
+    while more && runs.len() < limit as usize {
+        let page = api.heartbeat_runs(
+            &heartbeat.id,
+            Some((limit - runs.len() as u32).min(MAX_RUN_RECORD_LIMIT)),
+            runs.last().map(|run| run.seq),
+        )?;
+        more = page.more && !page.runs.is_empty();
+        runs.extend(page.runs);
+    }
+    if json {
+        writeln!(out, "{}", json!({ "runs": runs, "more": more })).map_err(output_error)?;
+        return Ok(0);
+    }
+    if runs.is_empty() {
+        writeln!(out, "No runs yet").map_err(output_error)?;
+        return Ok(0);
+    }
+    let now = table::now();
+    let cells = |cell: &dyn Fn(&HeartbeatRunRecord) -> String| runs.iter().map(cell).collect();
+    let columns = vec![
+        Column::new(
+            "RUN",
+            cells(&|r| match r.run.run {
+                0 => "-".into(),
+                n => format!("#{n}"),
+            }),
+        ),
+        Column::new("STARTED", cells(&|r| ago(now, r.run.at))),
+        Column::new("OUTCOME", cells(&run_outcome)),
+        Column::new("SESSION", cells(&run_session)),
+        Column::new(
+            "ID",
+            cells(&|r| {
+                r.run
+                    .session_id
+                    .as_ref()
+                    .map_or("-".into(), ToString::to_string)
+            }),
+        ),
+    ];
+    out.write_all(table::render(columns).as_bytes())
+        .map_err(output_error)?;
+    if more {
+        writeln!(out, "(older runs: --limit {})", limit.saturating_mul(2)).map_err(output_error)?;
+    }
+    Ok(0)
+}
+
+/// What became of a run's task, and why when it didn't start.
+fn run_outcome(run: &HeartbeatRunRecord) -> String {
+    let label = match run.run.outcome {
+        RunOutcome::Unknown => "-",
+        outcome => outcome.label(),
+    };
+    match (&run.run.detail, run.run.outcome) {
+        (Some(detail), RunOutcome::Skipped | RunOutcome::Failed | RunOutcome::NoAgent) => {
+            format!("{label}: {detail}")
+        }
+        _ => label.into(),
+    }
+}
+
+/// Where a run's session is: its status, in the session history, or gone.
+fn run_session(run: &HeartbeatRunRecord) -> String {
+    match (run.place, run.status) {
+        (Some(RunPlace::Listed), Some(SessionStatus::Live)) => {
+            run.lifecycle.map_or("live".into(), |lifecycle| {
+                format!("live, {lifecycle:?}").to_lowercase()
+            })
+        }
+        (Some(RunPlace::Listed), Some(SessionStatus::Exited)) => "exited".into(),
+        (Some(RunPlace::Listed), _) => "dead".into(),
+        (Some(RunPlace::History), _) => "deleted (rakumux restore)".into(),
+        (Some(RunPlace::Gone), _) => "gone".into(),
+        (Some(RunPlace::Unknown), _) => "-".into(),
+        (None, _) => "none".into(),
+    }
 }
 
 fn add(

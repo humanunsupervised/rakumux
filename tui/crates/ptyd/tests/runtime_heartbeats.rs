@@ -302,3 +302,127 @@ fn a_run_whose_command_takes_no_prompt_has_it_typed_once_its_agents_prompt_shows
     std::thread::sleep(Duration::from_millis(1500));
     assert_eq!(typed(&input), "Heartbeat hb_X is empty");
 }
+
+/// Every run is in its heartbeat's record, newest first, with where its
+/// session is now: a run that couldn't start too, a deleted run's saved
+/// output still readable, and all of it there after the daemon restarts.
+#[test]
+fn every_run_is_recorded_and_a_deleted_runs_output_stays_readable() {
+    use session_core::api::TextFormat;
+    use session_core::heartbeat::RunPlace;
+    use session_core::model::SessionStatus;
+    let home = TestHome::new();
+    let bin = home.dir.path().join("bin");
+    let input: PathBuf = home.dir.path().join("typed");
+    install_stand_in(&bin);
+    let (daemon, client) = start(&home, &bin, &input);
+    let scope = ScopeRoot::from_canonical(std::fs::canonicalize(&home.work).unwrap());
+    client.add_project(scope.path()).ok();
+    let spec = |scope: &ScopeRoot, name: &str| HeartbeatSpec {
+        scope: Some(scope.clone()),
+        name: Some(name.into()),
+        fields: HeartbeatFields {
+            command: Some("claude".into()),
+            prompt: Some("check the build".into()),
+            schedule: Some(Schedule::Every { minutes: 60 }),
+            ..Default::default()
+        },
+        enabled: true,
+    };
+    let heartbeat = client.heartbeat_create(spec(&scope, "build")).unwrap();
+    let given = |run: &session_core::model::SessionView| {
+        client
+            .heartbeat_runs(&heartbeat.id, None, None)
+            .is_ok_and(|page| {
+                page.runs.iter().any(|r| {
+                    r.run.session_id.as_ref() == Some(&run.id)
+                        && r.run.outcome == RunOutcome::TaskGiven
+                })
+            })
+    };
+    let first = client.heartbeat_run(&heartbeat.id).unwrap();
+    assert!(
+        wait_until(SLOW, || given(&first)),
+        "run #1 never had its task"
+    );
+    let second = client.heartbeat_run(&heartbeat.id).unwrap();
+    assert!(
+        wait_until(SLOW, || given(&second)),
+        "run #2 never had its task"
+    );
+    client.kill(&first.id, false).unwrap();
+    assert!(wait_until(SLOW, || client
+        .get(&first.id)
+        .is_ok_and(|s| s.status == SessionStatus::Exited)));
+
+    let page = client.heartbeat_runs(&heartbeat.id, None, None).unwrap();
+    let runs: Vec<(u32, Option<RunPlace>, Option<SessionStatus>)> = page
+        .runs
+        .iter()
+        .map(|r| (r.run.run, r.place, r.status))
+        .collect();
+    assert_eq!(
+        runs,
+        [
+            (2, Some(RunPlace::Listed), Some(SessionStatus::Live)),
+            (1, Some(RunPlace::Listed), Some(SessionStatus::Exited)),
+        ]
+    );
+    assert!(!page.more);
+    // In pages.
+    let newest = client.heartbeat_runs(&heartbeat.id, Some(1), None).unwrap();
+    assert!(newest.more);
+    let older = client
+        .heartbeat_runs(&heartbeat.id, Some(1), Some(newest.runs[0].seq))
+        .unwrap();
+    assert_eq!(older.runs[0].run.session_id.as_ref(), Some(&first.id));
+
+    // Deleted, run #1 is in the session history, its output readable.
+    client.delete(&first.id).unwrap();
+    let page = client.heartbeat_runs(&heartbeat.id, None, None).unwrap();
+    assert_eq!(page.runs[1].place, Some(RunPlace::History));
+    let saved = client
+        .history_read(&first.id, Some(200), TextFormat::Text)
+        .unwrap();
+    assert!(
+        saved.text.contains("starting Claude Code"),
+        "saved output: {:?}",
+        saved.text
+    );
+    // A listed session isn't read so.
+    assert!(client
+        .history_read(&second.id, None, TextFormat::Text)
+        .is_err());
+
+    // A run that couldn't start is recorded too.
+    let gone = home.dir.path().join("gone");
+    std::fs::create_dir_all(&gone).unwrap();
+    let gone = ScopeRoot::from_canonical(std::fs::canonicalize(&gone).unwrap());
+    client.add_project(gone.path()).ok();
+    let orphan = client.heartbeat_create(spec(&gone, "orphan")).unwrap();
+    std::fs::remove_dir(gone.path()).unwrap();
+    assert!(client.heartbeat_run(&orphan.id).is_err());
+    let failed = client.heartbeat_runs(&orphan.id, None, None).unwrap();
+    assert_eq!(failed.runs.len(), 1);
+    assert_eq!(failed.runs[0].run.outcome, RunOutcome::Failed);
+    assert_eq!(failed.runs[0].run.session_id, None);
+    assert!(failed.runs[0].run.detail.is_some());
+
+    // The record outlives the daemon.
+    drop(client);
+    drop(daemon);
+    let (_daemon, client) = start(&home, &bin, &input);
+    let page = client.heartbeat_runs(&heartbeat.id, None, None).unwrap();
+    let runs: Vec<(u32, RunOutcome, Option<RunPlace>)> = page
+        .runs
+        .iter()
+        .map(|r| (r.run.run, r.run.outcome, r.place))
+        .collect();
+    assert_eq!(
+        runs,
+        [
+            (2, RunOutcome::TaskGiven, Some(RunPlace::Listed)),
+            (1, RunOutcome::TaskGiven, Some(RunPlace::History)),
+        ]
+    );
+}

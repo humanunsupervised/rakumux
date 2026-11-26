@@ -4,8 +4,10 @@
 //! screen; the daemon sends no heartbeat events.
 //!
 //! With Rakumux mode's keys: `↑`/`↓` (`j`/`k`) select, `Enter` reads the
-//! selected heartbeat whole (its prompt, command and runs; there `↑`/`↓` pick
-//! a run and `Enter` goes into it), `e` approves or enables (from the list it
+//! selected heartbeat whole (its prompt, command and every run, from the
+//! daemon's record of them, `heartbeat_runs`; there `↑`/`↓` pick a run, the
+//! session pane shows it, live while it runs, and `Enter` goes into it), `e`
+//! approves or enables (from the list it
 //! first shows the heartbeat whole, so its prompt and command are read before
 //! they run), `p` pauses, `r` runs it now, `c` edits it, `d` twice deletes it, `n` (or Enter or a click on `+ New heartbeat`, the list's last
 //! row) opens the New heartbeat form (`heartbeat_form.rs`), `Esc` goes back.
@@ -16,17 +18,24 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use session_core::api::{ApiError, ErrorCode};
-use session_core::heartbeat::Heartbeat;
+use session_core::client::SessionApi;
+use session_core::heartbeat::{
+    Heartbeat, HeartbeatRunPage, HeartbeatRunRecord, RunOutcome, RunPlace, MAX_RUN_RECORD_LIMIT,
+};
 use session_core::ids::{HeartbeatId, SessionId};
-use session_core::model::SessionView;
+use session_core::model::{Lifecycle, SessionStatus, SessionView};
 
 use super::drawer::Panel;
 use super::left::LeftTab;
 use super::runtime::AppEvent;
+use super::types::Focus;
 use super::App;
 
 /// How often the tab reads the heartbeats while it's on screen.
 const EVERY: Duration = Duration::from_secs(2);
+/// Runs of the heartbeat read whole read at first, and more each time the
+/// selection nears the last of them.
+const RUN_PAGE: usize = 100;
 
 /// A button of the selected (or read) heartbeat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,9 +86,14 @@ pub struct BeatsView {
     pub selected: Option<HeartbeatId>,
     /// `+ New heartbeat` is selected, under them.
     pub on_new: bool,
-    /// The heartbeat read whole, with the run selected there.
+    /// The heartbeat read whole.
     pub reading: Option<HeartbeatId>,
-    pub run: usize,
+    /// The run selected there, by its `seq`; None: the newest.
+    pub run: Option<u64>,
+    /// The run record of the heartbeat read whole, as last read.
+    pub record: Option<RunRecord>,
+    /// How many of its runs to read.
+    want: usize,
     /// `d` was pressed once on this heartbeat: a second deletes it.
     pub deleting: Option<HeartbeatId>,
     /// Why the heartbeats can't be read.
@@ -118,12 +132,49 @@ impl BeatsView {
         }
     }
 
-    /// Show `id` whole, selected.
+    /// Show `id` whole, selected, its newest run selected.
     pub(super) fn show(&mut self, id: &HeartbeatId) {
         self.selected = Some(id.clone());
         self.on_new = false;
+        self.read_whole(id);
+    }
+
+    fn read_whole(&mut self, id: &HeartbeatId) {
+        if self.reading.as_ref() != Some(id) {
+            self.run = None;
+            self.want = RUN_PAGE;
+        }
         self.reading = Some(id.clone());
-        self.run = 0;
+    }
+
+    /// The runs of the heartbeat read whole, newest first, once read.
+    pub fn runs(&self) -> Option<&[HeartbeatRunRecord]> {
+        let record = self.record.as_ref()?;
+        (self.reading.as_ref() == Some(&record.heartbeat)).then_some(record.runs.as_slice())
+    }
+
+    /// The selected run's index among [`BeatsView::runs`].
+    pub fn run_index(&self) -> usize {
+        let (Some(runs), Some(seq)) = (self.runs(), self.run) else {
+            return 0;
+        };
+        runs.iter().position(|run| run.seq == seq).unwrap_or(0)
+    }
+
+    /// The selected run.
+    pub fn selected_run(&self) -> Option<&HeartbeatRunRecord> {
+        self.runs()?.get(self.run_index())
+    }
+
+    /// Select run `index`: the first follows the newest.
+    fn select_run(&mut self, index: usize) {
+        self.run = match index {
+            0 => None,
+            _ => self
+                .runs()
+                .and_then(|runs| runs.get(index))
+                .map(|run| run.seq),
+        };
     }
 
     /// `+ New heartbeat` is selected (there's nothing else without any).
@@ -157,6 +208,84 @@ impl BeatsView {
     pub fn waiting(&self) -> bool {
         self.busy && !self.loaded
     }
+}
+
+/// A heartbeat's runs as the daemon recorded them (`heartbeat_runs`).
+#[derive(Debug)]
+pub struct RunRecord {
+    pub heartbeat: HeartbeatId,
+    /// Newest first.
+    pub runs: Vec<HeartbeatRunRecord>,
+    /// Older runs than those read.
+    pub more: bool,
+    /// Why they can't be read.
+    pub error: Option<String>,
+}
+
+/// What the session pane shows for the run selected in a heartbeat read
+/// whole.
+#[derive(Debug, Clone)]
+pub(super) enum RunPeek {
+    /// Its session, live or ended.
+    Listed(SessionView),
+    /// Its session in the session history: its saved output.
+    Deleted(SessionId),
+    /// No session to show: why.
+    Note(String),
+}
+
+/// A few words on what became of `run`, its session's `view` when listed
+/// here.
+pub fn run_state(run: &HeartbeatRunRecord, view: Option<&SessionView>) -> String {
+    let detail = |what: &str| match &run.run.detail {
+        Some(detail) => format!("{what}: {detail}"),
+        None => what.to_string(),
+    };
+    match run.run.outcome {
+        RunOutcome::Skipped => return detail("skipped"),
+        RunOutcome::Failed => return detail("failed"),
+        RunOutcome::NoAgent => return "agent didn't start".into(),
+        _ => {}
+    }
+    let (status, lifecycle) = match view {
+        Some(view) => (Some(view.status), Some(view.lifecycle)),
+        None => (run.status, run.lifecycle),
+    };
+    match (run.place, status, lifecycle) {
+        (Some(RunPlace::History), ..) => "deleted".into(),
+        (Some(RunPlace::Gone), ..) => "output gone".into(),
+        (_, Some(SessionStatus::Live), Some(Lifecycle::Working)) => "working".into(),
+        (_, Some(SessionStatus::Live), Some(Lifecycle::Blocked)) => "waiting for you".into(),
+        (_, Some(SessionStatus::Live), Some(Lifecycle::Done)) => "done".into(),
+        (_, Some(SessionStatus::Live), Some(Lifecycle::Idle)) => "idle".into(),
+        (_, Some(SessionStatus::Live), Some(Lifecycle::Unknown))
+            if run.run.outcome == RunOutcome::Started =>
+        {
+            "starting".into()
+        }
+        (_, Some(SessionStatus::Live), _) => "running".into(),
+        (_, Some(SessionStatus::Exited | SessionStatus::Dead), _) => "ended".into(),
+        _ => run.run.outcome.label().into(),
+    }
+}
+
+/// Up to `want` of heartbeat `id`'s runs, newest first, page after page.
+fn read_runs(api: &dyn SessionApi, id: &HeartbeatId, want: usize) -> Result<RunRecord, ApiError> {
+    let mut runs: Vec<HeartbeatRunRecord> = Vec::new();
+    let mut more = true;
+    while more && runs.len() < want {
+        let limit = (want - runs.len()).min(MAX_RUN_RECORD_LIMIT as usize) as u32;
+        let before = runs.last().map(|run| run.seq);
+        let page: HeartbeatRunPage = api.heartbeat_runs(id, Some(limit), before)?;
+        more = page.more && !page.runs.is_empty();
+        runs.extend(page.runs);
+    }
+    Ok(RunRecord {
+        heartbeat: id.clone(),
+        runs,
+        more,
+        error: None,
+    })
 }
 
 /// What a heartbeat's setup session types for its agent (not sent: the user
@@ -222,14 +351,20 @@ impl App {
         };
         view.busy = true;
         let generation = view.generation;
+        let reading = view.reading.clone();
+        let want = view.want.max(RUN_PAGE);
         self.exec.job(move || AppEvent::Heartbeats {
             generation,
             result: api.heartbeats(None),
+            runs: reading.map(|id| {
+                let read = read_runs(&*api, &id, want);
+                (id, read)
+            }),
         });
     }
 
     /// Read again at once (after a change this window made).
-    pub(super) fn reread_heartbeats(&mut self) {
+    pub(crate) fn reread_heartbeats(&mut self) {
         self.beats.due = None;
         if !self.beats.busy && self.beats_shown() {
             self.read_heartbeats(Instant::now());
@@ -240,12 +375,32 @@ impl App {
         &mut self,
         generation: u64,
         result: Result<Vec<Heartbeat>, ApiError>,
+        runs: Option<(HeartbeatId, Result<RunRecord, ApiError>)>,
     ) {
         let view = &mut self.beats;
         if view.generation != generation {
             return;
         }
         view.busy = false;
+        if let Some((id, read)) = runs {
+            view.record = Some(match read {
+                Ok(record) => record,
+                Err(error) => RunRecord {
+                    heartbeat: id,
+                    runs: Vec::new(),
+                    more: false,
+                    error: Some(match error.code {
+                        ErrorCode::Unsupported => {
+                            "The running Rakumux server keeps no record of runs: restart it (S)."
+                                .into()
+                        }
+                        _ => error.message,
+                    }),
+                },
+            });
+        }
+        self.reconcile_detail();
+        let view = &mut self.beats;
         match result {
             Ok(heartbeats) => view.take(heartbeats),
             Err(error) if error.code == ErrorCode::Unsupported => {
@@ -281,16 +436,42 @@ impl App {
         self.reread_heartbeats();
     }
 
-    /// The runs of `id` this window lists, newest first.
-    pub fn heartbeat_runs(&self, id: &HeartbeatId) -> Vec<&SessionView> {
-        let mut runs: Vec<&SessionView> = self
-            .list
-            .sessions()
-            .iter()
-            .filter(|s| s.heartbeat.as_ref().is_some_and(|r| &r.heartbeat == id))
-            .collect();
-        runs.sort_by_key(|s| std::cmp::Reverse(s.heartbeat.as_ref().map_or(0, |r| r.run)));
-        runs
+    /// What the session pane shows while a heartbeat is read whole in
+    /// Rakumux mode: its selected run. None otherwise, or before its runs
+    /// are read.
+    pub(super) fn run_peek(&self) -> Option<RunPeek> {
+        if self.focus != Focus::List || !self.beats_shown() {
+            return None;
+        }
+        self.beats.reading.as_ref()?;
+        let runs = self.beats.runs()?;
+        let Some(run) = self.beats.selected_run() else {
+            return Some(RunPeek::Note(match runs.is_empty() {
+                true => "No runs yet".into(),
+                false => String::new(),
+            }));
+        };
+        let Some(id) = run.run.session_id.clone() else {
+            return Some(RunPeek::Note(capitalized(&run_state(run, None))));
+        };
+        if let Some(view) = self.list.get_anywhere(&id) {
+            return Some(RunPeek::Listed(view.clone()));
+        }
+        match run.place {
+            Some(RunPlace::History) => Some(RunPeek::Deleted(id)),
+            Some(RunPlace::Gone) => Some(RunPeek::Note(
+                "Its output is gone: the session history keeps it 90 days".into(),
+            )),
+            // Just started, not in this window's list yet.
+            _ => None,
+        }
+    }
+
+    /// The listed session of the run selected in a heartbeat read whole.
+    fn selected_run_session(&self) -> Option<&SessionView> {
+        self.beats.reading.as_ref()?;
+        let id = self.beats.selected_run()?.run.session_id.as_ref()?;
+        self.list.get_anywhere(id)
     }
 
     /// Rakumux mode keys while Heartbeats has them; `false` leaves the key to the
@@ -323,10 +504,23 @@ impl App {
 
     /// Move the selection (or, reading one, the selected run) `delta`.
     pub fn beats_move(&mut self, delta: isize) {
-        if let Some(id) = self.beats.reading.clone() {
-            let runs = self.heartbeat_runs(&id).len();
-            let run = self.beats.run.saturating_add_signed(delta);
-            self.beats.run = run.min(runs.saturating_sub(1));
+        if self.beats.reading.is_some() {
+            let (count, more) = self
+                .beats
+                .record
+                .as_ref()
+                .map_or((0, false), |record| (record.runs.len(), record.more));
+            let index = self
+                .beats
+                .run_index()
+                .saturating_add_signed(delta)
+                .min(count.saturating_sub(1));
+            self.beats.select_run(index);
+            if more && index + 10 >= count {
+                self.beats.want = count + RUN_PAGE;
+                self.reread_heartbeats();
+            }
+            self.reconcile_detail();
             return;
         }
         let count = self.beats.heartbeats.len();
@@ -342,26 +536,47 @@ impl App {
     }
 
     /// Enter: read the selected heartbeat whole (or make a new one); reading
-    /// one, go into its selected run.
+    /// one, go into its selected run (one in the session history is
+    /// restored first).
     pub fn beats_enter(&mut self) {
-        let Some(id) = self.beats.reading.clone() else {
+        if self.beats.reading.is_none() {
             if self.beats.new_selected() {
                 self.new_heartbeat();
-            } else if let Some(heartbeat) = self.beats.selected() {
-                self.beats.reading = Some(heartbeat.id.clone());
-                self.beats.run = 0;
+            } else if let Some(id) = self.beats.selected().map(|h| h.id.clone()) {
+                self.beats_read_whole(&id);
             }
             return;
-        };
-        let Some(run) = self
-            .heartbeat_runs(&id)
-            .get(self.beats.run)
-            .map(|s| s.id.clone())
-        else {
+        }
+        let Some(run) = self.beats.selected_run().cloned() else {
             self.set_status("No runs yet: r runs it now.");
             return;
         };
-        self.go_into(run);
+        let Some(id) = run.run.session_id.clone() else {
+            self.set_status(capitalized(&run_state(&run, None)));
+            return;
+        };
+        if self.list.get_anywhere(&id).is_some() {
+            return self.go_into(id);
+        }
+        if run.place != Some(RunPlace::History) {
+            self.set_status(capitalized(&run_state(&run, None)));
+            return;
+        }
+        let Some(api) = self.api() else {
+            self.set_status("Not connected to the daemon.");
+            return;
+        };
+        self.set_status(format!("Restoring run #{}…", run.run.run));
+        self.exec.job(move || AppEvent::Restored {
+            result: api.restore(&id),
+        });
+    }
+
+    /// Read heartbeat `id` whole: its runs are read at once.
+    fn beats_read_whole(&mut self, id: &HeartbeatId) {
+        self.beats.read_whole(id);
+        self.reread_heartbeats();
+        self.reconcile_detail();
     }
 
     /// Esc: from a heartbeat read whole back to the list; from the list, the
@@ -369,6 +584,8 @@ impl App {
     pub fn beats_back(&mut self) {
         if self.beats.reading.take().is_none() {
             self.show_sessions_tab();
+        } else {
+            self.reconcile_detail();
         }
     }
 
@@ -382,9 +599,8 @@ impl App {
     /// first (its prompt and command), so nothing runs unread.
     pub fn beats_enable(&mut self) {
         if self.beats.reading.is_none() {
-            if let Some(heartbeat) = self.beats.selected() {
-                self.beats.reading = Some(heartbeat.id.clone());
-                self.beats.run = 0;
+            if let Some(id) = self.beats.selected().map(|h| h.id.clone()) {
+                self.beats_read_whole(&id);
             }
             return;
         }
@@ -466,6 +682,7 @@ impl App {
             return;
         };
         self.beats.reading = None;
+        self.reconcile_detail();
         let name = heartbeat.name.clone();
         self.exec.job(move || AppEvent::HeartbeatDone {
             result: api
@@ -477,12 +694,7 @@ impl App {
     /// The session the footer names while Heartbeats has the keys: the selected
     /// run's, reading a heartbeat whole.
     pub fn beats_session(&self) -> Option<&SessionView> {
-        let id = self.beats.reading.as_ref()?;
-        let run: Option<SessionId> = self
-            .heartbeat_runs(id)
-            .get(self.beats.run)
-            .map(|s| s.id.clone());
-        self.list.get(&run?)
+        self.selected_run_session()
     }
 
     /// A click on row `index` (a heartbeat, or reading one, a run): Heartbeats
@@ -490,13 +702,16 @@ impl App {
     pub fn click_beat_row(&mut self, index: usize) {
         let again = self.beats_has_keys()
             && match &self.beats.reading {
-                Some(_) => self.beats.run == index,
+                Some(_) => self.beats.run_index() == index,
                 None => self.beats.selected_index() == index,
             };
         self.show_left_tab(LeftTab::Beats);
         self.beats.deleting = None;
         match self.beats.reading.clone() {
-            Some(_) => self.beats.run = index,
+            Some(_) => {
+                self.beats.select_run(index);
+                self.reconcile_detail();
+            }
             None => {
                 self.beats.on_new = false;
                 if let Some(heartbeat) = self.beats.heartbeats.get(index) {
@@ -507,6 +722,15 @@ impl App {
         if again || self.phone() {
             self.beats_enter();
         }
+    }
+}
+
+/// `text` with its first letter upper case.
+fn capitalized(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
     }
 }
 

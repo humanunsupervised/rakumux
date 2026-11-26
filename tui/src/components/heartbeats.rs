@@ -3,7 +3,7 @@
 //! last run), those waiting for approval first, the selected one's buttons
 //! under it, then `+ New heartbeat`; or one heartbeat whole: its buttons, how
 //! it runs, its command and prompt in full (read before `e` approves it),
-//! and its runs, newest first, to go into.
+//! and every run, newest first (the session pane shows the selected one).
 
 use ratatui::{
     layout::Rect,
@@ -15,9 +15,10 @@ use ratatui::{
 use session_core::heartbeat::{Heartbeat, RunOutcome};
 
 use super::drawer::draw_back;
-use crate::app::heartbeats::BeatAction;
+use crate::app::heartbeats::{run_state, BeatAction};
 use crate::app::{App, Hit};
 use crate::components::dialogs::{error_line, text_rows};
+use crate::components::feed::card_stamp;
 use crate::components::format::{now_secs, relative_time, status_glyph, truncate};
 use crate::components::utils::get_spinner_char;
 use crate::layout::str_width;
@@ -371,48 +372,98 @@ fn draw_whole(
                 .map(|line| Line::from(Span::styled(printable(line).into_owned(), plain))),
         ),
     }
-    lines.push(Line::default());
-    let runs = app.heartbeat_runs(&heartbeat.id);
-    lines.push(Line::from(Span::styled(
-        match runs.is_empty() {
-            true => "no runs".to_string(),
-            false => "runs".to_string(),
-        },
-        quiet,
-    )));
-    // The text above the runs wraps: measure it as drawn.
-    let head_rows = text_rows(&lines, area.width).min(area.height);
-    let head = Paragraph::new(lines).wrap(Wrap { trim: false });
+    // The text above the runs wraps: measure it as drawn. It leaves the
+    // runs room for a few, unless an agent's change waits to be read
+    // whole.
+    let runs = app.beats.runs();
+    let record_error = app.beats.record.as_ref().and_then(|r| r.error.clone());
+    let wanted = match runs {
+        Some(runs) if !heartbeat.awaiting_approval => (runs.len().max(1) + 2).min(8) as u16,
+        _ => 2,
+    };
+    let head_rows = text_rows(&lines, area.width).min(area.height.saturating_sub(wanted));
     f.render_widget(
-        head,
+        Paragraph::new(lines).wrap(Wrap { trim: false }),
         Rect {
             height: head_rows,
             ..area
         },
     );
-    let mut y = area.y + head_rows;
-    for (index, run) in runs.iter().enumerate() {
-        if y >= area.bottom() {
-            break;
-        }
-        let (glyph, style) = status_glyph(run);
-        let chosen = index == app.beats.run;
-        let age = relative_time(now, run.last_active_at);
-        let name = truncate(
-            &printable(&run.name),
-            width.saturating_sub(str_width(&age) + 4),
-        );
-        let gap = width.saturating_sub(2 + str_width(&name) + str_width(&age));
-        let line = Line::from(vec![
-            Span::styled(format!("{glyph} "), style),
-            Span::styled(name, if chosen { bold } else { plain }),
-            Span::raw(" ".repeat(gap)),
-            Span::styled(age, quiet),
-        ]);
-        let cell = Rect {
-            y,
+    let area = Rect {
+        y: area.y + head_rows,
+        height: area.height - head_rows,
+        ..area
+    };
+    if area.height < 2 {
+        return;
+    }
+    let label = match (runs, &record_error) {
+        (_, Some(error)) => error.clone(),
+        (None, None) => format!("{} runs", get_spinner_char()),
+        (Some([]), None) => "no runs".into(),
+        (Some(_), None) => "runs".into(),
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            truncate(&label, width),
+            match record_error {
+                Some(_) => Style::default().fg(p.accent_pink),
+                None => quiet,
+            },
+        ))),
+        Rect {
+            y: area.y + 1,
             height: 1,
             ..area
+        },
+    );
+    let Some(runs) = runs else {
+        return;
+    };
+    let list = Rect {
+        y: area.y + 2,
+        height: area.height - 2,
+        ..area
+    };
+    let selected = app.beats.run_index();
+    let fit = usize::from(list.height).max(1);
+    let first = selected.saturating_sub(fit - 1);
+    for (offset, (index, run)) in runs.iter().enumerate().skip(first).take(fit).enumerate() {
+        let view = run
+            .run
+            .session_id
+            .as_ref()
+            .and_then(|id| app.list.get_anywhere(id));
+        let (glyph, style) = match (view, run.run.outcome) {
+            (Some(view), _) => status_glyph(view),
+            (None, RunOutcome::Skipped) => ("–", quiet),
+            (None, RunOutcome::Failed | RunOutcome::NoAgent) => {
+                ("✕", Style::default().fg(p.accent_pink))
+            }
+            (None, _) => ("○", quiet),
+        };
+        let chosen = index == selected;
+        let number = match run.run.run {
+            0 => String::new(),
+            n => format!("#{n} "),
+        };
+        let when = card_stamp(run.run.at, now, width < 36);
+        let state = run_state(run, view);
+        let left = truncate(
+            &printable(&format!("{number}{state}")),
+            width.saturating_sub(str_width(&when) + 4),
+        );
+        let gap = width.saturating_sub(2 + str_width(&left) + str_width(&when));
+        let line = Line::from(vec![
+            Span::styled(format!("{glyph} "), style),
+            Span::styled(left, if chosen { bold } else { plain }),
+            Span::raw(" ".repeat(gap)),
+            Span::styled(when, quiet),
+        ]);
+        let cell = Rect {
+            y: list.y + offset as u16,
+            height: 1,
+            ..list
         };
         let mut paragraph = Paragraph::new(line);
         if chosen {
@@ -420,6 +471,5 @@ fn draw_whole(
         }
         f.render_widget(paragraph, cell);
         hits.push((cell, Hit::BeatRow(index)));
-        y += 1;
     }
 }

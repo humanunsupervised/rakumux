@@ -11,7 +11,7 @@
 //! Compatibility: new fields are optional; enums have an `Unknown` fallback;
 //! an op never changes meaning (add a new op instead).
 
-use crate::heartbeat::{Heartbeat, HeartbeatEdit, HeartbeatSpec};
+use crate::heartbeat::{Heartbeat, HeartbeatEdit, HeartbeatRunPage, HeartbeatSpec};
 use crate::ids::{HeartbeatId, MachineId, PaneId, ReplyId, SessionId, WorkspaceId};
 use crate::model::{
     AgentInfo, DeletedSession, Lifecycle, MachineView, ProjectView, ReportResult, Reported,
@@ -154,6 +154,16 @@ pub enum Request {
     /// now. Answered with `Session`.
     SessionRestore {
         id: SessionId,
+    },
+    /// User only (capability `session.history.read`): a deleted session's
+    /// saved output, as `session_read` gives an ended one's (`source`
+    /// `recent`). Answered with `Read`.
+    SessionHistoryRead {
+        id: SessionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lines: Option<u32>,
+        #[serde(default)]
+        format: TextFormat,
     },
     /// Start a new terminal for a Dead or Exited session (same id, cwd,
     /// launch spec, resume command).
@@ -376,6 +386,18 @@ pub enum Request {
     /// run's `Session`.
     HeartbeatRun {
         id: HeartbeatId,
+    },
+    /// A heartbeat's run record (capability `heartbeats.runs`): every run,
+    /// newest first, with where each run's session is now. `limit`
+    /// (default `RUN_RECORD_LIMIT`, at most `MAX_RUN_RECORD_LIMIT`) caps the
+    /// page and `before` continues after that `seq` of an earlier page.
+    /// Answered with `HeartbeatRuns`.
+    HeartbeatRuns {
+        id: HeartbeatId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        before: Option<u64>,
     },
     /// Every workspace, oldest first (capability `workspaces`). Answered with
     /// `Workspaces`.
@@ -706,6 +728,12 @@ pub const CAPABILITY_SESSIONS_ALL: &str = "sessions.all";
 /// `heartbeat_*` requests and `SessionView::heartbeat`: tasks the daemon
 /// runs on a clock.
 pub const CAPABILITY_HEARTBEATS: &str = "heartbeats";
+
+/// `heartbeat_runs`: every run of a heartbeat, kept as long as it is.
+pub const CAPABILITY_HEARTBEAT_RUNS: &str = "heartbeats.runs";
+
+/// `session_history_read`: a deleted session's saved output.
+pub const CAPABILITY_HISTORY_READ: &str = "session.history.read";
 
 /// `workspace_*` requests, `session_workspace`, `SessionView::workspace` and
 /// `CreateSession::workspace`: named groups of sessions.
@@ -1101,6 +1129,8 @@ pub enum Response {
     Heartbeat {
         heartbeat: Heartbeat,
     },
+    /// The answer to `heartbeat_runs`.
+    HeartbeatRuns(HeartbeatRunPage),
     /// The answer to `workspace_list`.
     Workspaces {
         workspaces: Vec<crate::workspace::Workspace>,

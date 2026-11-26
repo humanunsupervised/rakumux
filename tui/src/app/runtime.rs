@@ -222,6 +222,11 @@ pub enum AppEvent {
     Heartbeats {
         generation: u64,
         result: Result<Vec<session_core::heartbeat::Heartbeat>, ApiError>,
+        /// The run record of the heartbeat read whole.
+        runs: Option<(
+            session_core::ids::HeartbeatId,
+            Result<super::heartbeats::RunRecord, ApiError>,
+        )>,
     },
     /// A heartbeat change this window asked for: what to say.
     HeartbeatDone {

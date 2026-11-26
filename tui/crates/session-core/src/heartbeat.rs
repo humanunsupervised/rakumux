@@ -9,7 +9,7 @@
 //! the user enables it.
 
 use crate::ids::{HeartbeatId, SessionId};
-use crate::model::{Creator, ScopeRoot};
+use crate::model::{Creator, Lifecycle, ScopeRoot, SessionStatus};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -24,8 +24,13 @@ pub const MAX_PROMPT_BYTES: usize = 16 * 1024;
 /// The longest command, in UTF-8 bytes.
 pub const MAX_COMMAND_BYTES: usize = 1024;
 /// Runs of a heartbeat kept in the session list; older ended ones go to the
-/// session history.
+/// session history (their output kept there, the run in its heartbeat's
+/// record).
 pub const RUNS_KEPT: u32 = 10;
+/// `heartbeat_runs`' page when no `limit` is given.
+pub const RUN_RECORD_LIMIT: u32 = 100;
+/// The largest page `heartbeat_runs` gives.
+pub const MAX_RUN_RECORD_LIMIT: u32 = 500;
 
 /// A heartbeat, as every client sees it. Times are Unix seconds.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -134,6 +139,52 @@ impl RunOutcome {
             RunOutcome::Unknown => "unknown",
         }
     }
+}
+
+/// A heartbeat's run in its record (`heartbeat_runs`): every due time and
+/// every run asked for, those that started no session (skipped, failed)
+/// too, kept as long as the heartbeat.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeartbeatRunRecord {
+    /// Its place in the record: higher is newer (`before` pages on it).
+    pub seq: u64,
+    #[serde(flatten)]
+    pub run: HeartbeatRun,
+    /// Where the run's session is now; absent when it started none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub place: Option<RunPlace>,
+    /// The session's status and lifecycle while it's [`RunPlace::Listed`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<SessionStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifecycle: Option<Lifecycle>,
+}
+
+/// Where a run's session is now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunPlace {
+    /// In the session list: live, or ended with its final screen.
+    Listed,
+    /// In the session history: deleted, its saved output kept
+    /// (`session_history_read`) until it's purged.
+    History,
+    /// Purged from the session history, its output with it.
+    Gone,
+    #[serde(other)]
+    Unknown,
+}
+
+/// A page of a heartbeat's run record (`heartbeat_runs`).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct HeartbeatRunPage {
+    /// Newest first.
+    #[serde(default)]
+    pub runs: Vec<HeartbeatRunRecord>,
+    /// Older runs than the page holds: ask again with `before` set to the
+    /// last one's `seq`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub more: bool,
 }
 
 /// Which heartbeat a session is a run of (`SessionView::heartbeat`).

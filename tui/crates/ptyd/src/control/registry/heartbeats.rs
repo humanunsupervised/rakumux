@@ -1,12 +1,14 @@
-//! Heartbeats in the registry: `heartbeats` (one row each) and
-//! `heartbeat_runs` (which sessions are a heartbeat's runs). Both are
-//! created when missing, so the schema version stays and an older daemon
+//! Heartbeats in the registry: `heartbeats` (one row each),
+//! `heartbeat_runs` (which listed sessions are a heartbeat's runs) and
+//! `heartbeat_run_log` (every run of each heartbeat, kept as long as it is,
+//! its session's id there whatever became of it). All are created when
+//! missing, so the schema version stays and an older daemon
 //! still opens the file. Times are stored in Unix milliseconds, as the
 //! sessions' are; [`Heartbeat`] carries seconds.
 
 use super::{path_text, to_json, Registry, RegistryError, Result};
 use rusqlite::{params, Row};
-use session_core::heartbeat::{Heartbeat, HeartbeatRun, Schedule};
+use session_core::heartbeat::{Heartbeat, HeartbeatRun, RunOutcome, Schedule};
 use session_core::ids::{HeartbeatId, SessionId};
 use session_core::model::{Creator, ScopeRoot};
 use std::path::PathBuf;
@@ -37,6 +39,22 @@ CREATE TABLE IF NOT EXISTS heartbeat_runs (
   started_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS heartbeat_runs_heartbeat ON heartbeat_runs(heartbeat_id, run);
+CREATE TABLE IF NOT EXISTS heartbeat_run_log (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  heartbeat_id TEXT NOT NULL,
+  run INTEGER NOT NULL,
+  at INTEGER NOT NULL,
+  session_id TEXT,
+  outcome TEXT NOT NULL,
+  detail TEXT
+);
+CREATE INDEX IF NOT EXISTS heartbeat_run_log_heartbeat ON heartbeat_run_log(heartbeat_id, seq);
+CREATE INDEX IF NOT EXISTS heartbeat_run_log_session ON heartbeat_run_log(session_id);
+-- Runs listed before the record was kept (0.1.82 and earlier) start it.
+INSERT INTO heartbeat_run_log (heartbeat_id, run, at, session_id, outcome)
+  SELECT r.heartbeat_id, r.run, r.started_at, r.session_id, 'unknown' FROM heartbeat_runs r
+  WHERE NOT EXISTS (SELECT 1 FROM heartbeat_run_log l WHERE l.session_id = r.session_id)
+  ORDER BY r.started_at, r.run;
 ";
 
 const COLUMNS: &str = "id, scope_root, name, agent, command, prompt, schedule_json, enabled, \
@@ -104,12 +122,17 @@ impl Registry {
         Ok(())
     }
 
-    /// Forget a heartbeat; its runs stay as plain sessions.
+    /// Forget a heartbeat and its run record; its runs stay as plain
+    /// sessions.
     pub fn delete_heartbeat(&self, id: &HeartbeatId) -> Result<()> {
         let tx = self.conn.unchecked_transaction()?;
         tx.execute("DELETE FROM heartbeats WHERE id = ?1", params![id.as_str()])?;
         tx.execute(
             "DELETE FROM heartbeat_runs WHERE heartbeat_id = ?1",
+            params![id.as_str()],
+        )?;
+        tx.execute(
+            "DELETE FROM heartbeat_run_log WHERE heartbeat_id = ?1",
             params![id.as_str()],
         )?;
         tx.commit()?;
@@ -156,6 +179,72 @@ impl Registry {
         Ok(())
     }
 
+    /// Add `run` to heartbeat `id`'s run record: its `seq`.
+    pub fn log_heartbeat_run(&self, id: &HeartbeatId, run: &HeartbeatRun) -> Result<u64> {
+        self.conn.execute(
+            "INSERT INTO heartbeat_run_log (heartbeat_id, run, at, session_id, outcome, detail) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                id.as_str(),
+                run.run,
+                run.at.saturating_mul(1000),
+                run.session_id.as_ref().map(SessionId::as_str),
+                outcome_text(run.outcome),
+                run.detail,
+            ],
+        )?;
+        Ok(u64::try_from(self.conn.last_insert_rowid()).unwrap_or(0))
+    }
+
+    /// What became of the run whose session is `session`, in its record.
+    pub fn set_run_outcome(
+        &self,
+        session: &SessionId,
+        outcome: RunOutcome,
+        detail: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE heartbeat_run_log SET outcome = ?2, detail = ?3 WHERE session_id = ?1",
+            params![session.as_str(), outcome_text(outcome), detail],
+        )?;
+        Ok(())
+    }
+
+    /// Heartbeat `id`'s runs, newest first: at most `limit`, those before
+    /// `seq` `before`, and whether older ones are left.
+    pub fn heartbeat_run_log(
+        &self,
+        id: &HeartbeatId,
+        before: Option<u64>,
+        limit: u32,
+    ) -> Result<(Vec<(u64, HeartbeatRun)>, bool)> {
+        let before = before.map_or(i64::MAX, |seq| i64::try_from(seq).unwrap_or(i64::MAX));
+        let mut statement = self.conn.prepare(
+            "SELECT seq, run, at, session_id, outcome, detail FROM heartbeat_run_log \
+             WHERE heartbeat_id = ?1 AND seq < ?2 ORDER BY seq DESC LIMIT ?3",
+        )?;
+        let rows =
+            statement.query_map(params![id.as_str(), before, i64::from(limit) + 1], |row| {
+                let seq: i64 = row.get(0)?;
+                let outcome: String = row.get(4)?;
+                Ok((
+                    u64::try_from(seq).unwrap_or(0),
+                    HeartbeatRun {
+                        run: row.get(1)?,
+                        at: row.get::<_, i64>(2)?.div_euclid(1000),
+                        session_id: row.get::<_, Option<String>>(3)?.map(SessionId::from_string),
+                        outcome: serde_json::from_value(serde_json::Value::String(outcome))
+                            .unwrap_or(RunOutcome::Unknown),
+                        detail: row.get(5)?,
+                    },
+                ))
+            })?;
+        let mut runs = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        let more = runs.len() > limit as usize;
+        runs.truncate(limit as usize);
+        Ok((runs, more))
+    }
+
     /// Heartbeats in folder `from` move to `to` (`project_relocate`).
     pub(super) fn relocate_heartbeats(
         conn: &rusqlite::Connection,
@@ -167,6 +256,14 @@ impl Registry {
             params![path_text(from.path())?, path_text(to.path())?],
         )?;
         Ok(())
+    }
+}
+
+/// A run's outcome as the record keeps it: its wire name.
+fn outcome_text(outcome: RunOutcome) -> String {
+    match serde_json::to_value(outcome) {
+        Ok(serde_json::Value::String(text)) => text,
+        _ => "unknown".into(),
     }
 }
 
@@ -274,5 +371,73 @@ mod tests {
         registry.delete_heartbeat(&deps.id).unwrap();
         assert!(registry.heartbeats().unwrap().0.is_empty());
         assert!(registry.heartbeat_runs().unwrap().is_empty());
+    }
+
+    #[test]
+    fn every_run_is_recorded_newest_first_in_pages() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("r.sqlite3");
+        let registry = Registry::open(&path, 0).unwrap();
+        let deps = heartbeat("deps");
+        registry.save_heartbeat(&deps).unwrap();
+        // A run listed before the record was kept starts it.
+        registry
+            .add_heartbeat_run(&RunRow {
+                session_id: SessionId::from_string("S1"),
+                heartbeat: deps.id.clone(),
+                run: 1,
+                started_ms: 1_000,
+            })
+            .unwrap();
+        drop(registry);
+        let registry = Registry::open(&path, 0).unwrap();
+        let started = |run: u32, session: &str| HeartbeatRun {
+            run,
+            at: 2,
+            session_id: Some(SessionId::from_string(session)),
+            outcome: RunOutcome::Started,
+            detail: None,
+        };
+        registry
+            .log_heartbeat_run(&deps.id, &started(2, "S2"))
+            .unwrap();
+        let skipped = HeartbeatRun {
+            run: 0,
+            at: 3,
+            session_id: None,
+            outcome: RunOutcome::Skipped,
+            detail: Some("run #2 is still at work".into()),
+        };
+        registry.log_heartbeat_run(&deps.id, &skipped).unwrap();
+        registry
+            .log_heartbeat_run(&deps.id, &started(3, "S3"))
+            .unwrap();
+        registry
+            .set_run_outcome(&SessionId::from_string("S2"), RunOutcome::TaskGiven, None)
+            .unwrap();
+        // Opening it again adds nothing twice.
+        drop(registry);
+        let registry = Registry::open(&path, 0).unwrap();
+        let (page, more) = registry.heartbeat_run_log(&deps.id, None, 2).unwrap();
+        assert!(more);
+        let runs: Vec<(u32, RunOutcome)> = page.iter().map(|(_, r)| (r.run, r.outcome)).collect();
+        assert_eq!(runs, [(3, RunOutcome::Started), (0, RunOutcome::Skipped)]);
+        assert_eq!(page[1].1.detail.as_deref(), Some("run #2 is still at work"));
+        let (rest, more) = registry
+            .heartbeat_run_log(&deps.id, Some(page[1].0), 10)
+            .unwrap();
+        assert!(!more);
+        let runs: Vec<(u32, RunOutcome, i64)> =
+            rest.iter().map(|(_, r)| (r.run, r.outcome, r.at)).collect();
+        assert_eq!(
+            runs,
+            [(2, RunOutcome::TaskGiven, 2), (1, RunOutcome::Unknown, 1)]
+        );
+        registry.delete_heartbeat(&deps.id).unwrap();
+        assert!(registry
+            .heartbeat_run_log(&deps.id, None, 10)
+            .unwrap()
+            .0
+            .is_empty());
     }
 }

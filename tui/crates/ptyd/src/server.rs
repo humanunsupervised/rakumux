@@ -82,6 +82,8 @@ pub const CAPABILITIES: &[&str] = &[
     session_core::api::CAPABILITY_MACHINES,
     session_core::api::CAPABILITY_HISTORY,
     session_core::api::CAPABILITY_HEARTBEATS,
+    session_core::api::CAPABILITY_HEARTBEAT_RUNS,
+    session_core::api::CAPABILITY_HISTORY_READ,
     session_core::api::CAPABILITY_FIRST_INPUT,
     session_core::api::CAPABILITY_WORKSPACES,
     session_core::api::CAPABILITY_WORKSPACES_RENAME,
@@ -162,6 +164,8 @@ const KNOWN_OPS: &[&str] = &[
     "heartbeat_enable",
     "heartbeat_delete",
     "heartbeat_run",
+    "heartbeat_runs",
+    "session_history_read",
     "workspace_list",
     "workspace_create",
     "workspace_delete",
@@ -2006,6 +2010,11 @@ mod tests {
                 before: None,
             },
             Request::SessionRestore { id: id.clone() },
+            Request::SessionHistoryRead {
+                id: id.clone(),
+                lines: None,
+                format: Default::default(),
+            },
             Request::SessionRevive(ReviveSession {
                 id: id.clone(),
                 env: vec![],
@@ -2115,6 +2124,11 @@ mod tests {
             },
             Request::HeartbeatList { scope: None },
             Request::HeartbeatGet { id: hb.clone() },
+            Request::HeartbeatRuns {
+                id: hb.clone(),
+                limit: None,
+                before: None,
+            },
             Request::HeartbeatCreate(Default::default()),
             Request::HeartbeatUpdate(session_core::heartbeat::HeartbeatEdit {
                 id: hb.clone(),
@@ -2158,6 +2172,7 @@ mod tests {
                 | Request::SessionDelete { .. }
                 | Request::SessionHistory { .. }
                 | Request::SessionRestore { .. }
+                | Request::SessionHistoryRead { .. }
                 | Request::SessionRevive(_)
                 | Request::SessionReport(_)
                 | Request::SessionRead(_)
@@ -2186,6 +2201,7 @@ mod tests {
                 | Request::HeartbeatEnable { .. }
                 | Request::HeartbeatDelete { .. }
                 | Request::HeartbeatRun { .. }
+                | Request::HeartbeatRuns { .. }
                 | Request::WorkspaceList
                 | Request::WorkspaceCreate { .. }
                 | Request::WorkspaceDelete { .. }

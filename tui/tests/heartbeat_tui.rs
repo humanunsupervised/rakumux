@@ -471,3 +471,49 @@ fn a_heartbeat_is_made_edited_and_deleted_in_the_real_tui() {
     assert!(world.heartbeats().is_empty());
     screen.shows("+ New heartbeat");
 }
+
+/// A heartbeat's runs in the real TUI: read whole, it lists every run the
+/// daemon recorded, and the session pane shows the selected one's output as
+/// it runs; deleted, the run stays listed with its saved output.
+#[test]
+fn a_heartbeats_runs_are_listed_and_watched_in_the_real_tui() {
+    let world = World::new();
+    let screen = start_tui(&world);
+    screen.shows("+ New session");
+    world.ok(
+        "inner",
+        &[
+            "heartbeat",
+            "add",
+            "ticker",
+            "--every",
+            "1h",
+            "--command",
+            "printf 'tick %s\\n' one; sleep 2; printf 'tick %s\\n' two; sleep 600",
+            "--prompt",
+            "Go.",
+        ],
+    );
+    world.ok("inner", &["heartbeat", "run", "ticker"]);
+    screen.send("B", &[]);
+    screen.shows("● ticker");
+    screen.keys(&["enter"]);
+    // Its run, and the run's output beside it as it comes.
+    let shown = screen.shows("#1 running");
+    assert!(shown.contains("runs"), "{shown}");
+    screen.shows("tick one");
+    screen.shows("tick two");
+    let runs: Value =
+        serde_json::from_str(&world.ok("inner", &["heartbeat", "runs", "ticker", "--json"]))
+            .unwrap();
+    assert_eq!(runs["runs"].as_array().unwrap().len(), 1);
+    assert_eq!(runs["runs"][0]["run"], 1);
+    assert_eq!(runs["runs"][0]["place"], "listed");
+
+    // Deleted, it stays listed, its saved output shown.
+    world.ok("inner", &["rm", "ticker #1"]);
+    let deleted = screen.shows("#1 deleted");
+    assert!(deleted.contains("tick two"), "{deleted}");
+    let table = world.ok("inner", &["heartbeat", "runs", "ticker"]);
+    assert!(table.contains("deleted (rakumux restore)"), "{table}");
+}

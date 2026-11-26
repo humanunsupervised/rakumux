@@ -21,6 +21,7 @@ use super::detail::{classify_output, Attachment, DetailView, OutputAction};
 use super::drawer::Panel;
 use super::folders::{self, SyncResult};
 use super::grouping::{Grouping, Section, StatusGroup};
+use super::heartbeats::RunPeek;
 use super::left::LeftTab;
 use super::runtime::{cancel_flag, AppEvent};
 use super::screen::Screen;
@@ -159,6 +160,22 @@ impl App {
     /// a removed session, a new selection, or a saved session that came
     /// back to life (revived by another client).
     pub(super) fn reconcile_detail(&mut self) {
+        // A heartbeat's run that isn't a listed session (`shown_session`).
+        match self.run_peek() {
+            Some(RunPeek::Deleted(id)) => {
+                if self.detail.session_id() != Some(&id) {
+                    self.show_selected();
+                }
+                return;
+            }
+            Some(RunPeek::Note(note)) => {
+                if !matches!(&self.detail.view, DetailView::Note(shown) if *shown == note) {
+                    self.show_selected();
+                }
+                return;
+            }
+            Some(RunPeek::Listed(_)) | None => {}
+        }
         let selected = self.list.selected_session().cloned();
         let shown = self.shown_session();
         // Session mode needs its session selected; without it, back to
@@ -182,12 +199,16 @@ impl App {
 
     // ------------------------------------------------------------ detail
 
-    /// The session the detail pane shows: the selected one. While the
-    /// folder filter, a folder header or + New session is selected, the
-    /// pane keeps a session in view: the one it shows already, else the one
-    /// Rakumux mode came from, else the first shown. Only sessions the
-    /// filters show count, so `None` when none is shown.
+    /// The session the detail pane shows: the selected one, or in Rakumux
+    /// mode the run selected in a heartbeat read whole. While the folder
+    /// filter, a folder header or + New session is selected, the pane keeps
+    /// a session in view: the one it shows already, else the one Rakumux
+    /// mode came from, else the first shown. Only sessions the filters show
+    /// count, so `None` when none is shown.
     pub(super) fn shown_session(&self) -> Option<SessionView> {
+        if let Some(RunPeek::Listed(run)) = self.run_peek() {
+            return Some(run);
+        }
         if let Some(session) = self.list.selected_session() {
             return Some(session.clone());
         }
@@ -205,6 +226,14 @@ impl App {
     /// saved screen otherwise.
     pub(super) fn show_selected(&mut self) {
         self.follow_panel_owner();
+        match self.run_peek() {
+            Some(RunPeek::Deleted(id)) => return self.load_deleted(&id),
+            Some(RunPeek::Note(note)) => {
+                self.detail.retarget(DetailView::Note(note));
+                return;
+            }
+            Some(RunPeek::Listed(_)) | None => {}
+        }
         match self.shown_session() {
             None => {
                 self.detail.retarget(DetailView::Empty);
@@ -478,6 +507,24 @@ impl App {
         });
     }
 
+    /// A deleted session's saved output (a heartbeat's run in the session
+    /// history), as an ended session's is shown.
+    fn load_deleted(&mut self, id: &SessionId) {
+        let Some(api) = self.api() else {
+            self.detail.retarget(DetailView::Error {
+                id: id.clone(),
+                message: "Not connected to the daemon.".into(),
+            });
+            return;
+        };
+        let generation = self.detail.retarget(DetailView::Loading(id.clone()));
+        let id = id.clone();
+        self.exec.job(move || AppEvent::SavedScreen {
+            generation,
+            result: api.history_read(&id, Some(DEFAULT_SCROLLBACK_ROWS as u32), TextFormat::Ansi),
+        });
+    }
+
     pub(super) fn on_saved_screen(
         &mut self,
         generation: u64,
@@ -628,6 +675,10 @@ impl App {
         let from = self.detail.session_id().cloned();
         self.leave_session_focus(true);
         self.came_from = from;
+        // Back on a heartbeat read whole: its selected run in view.
+        if self.run_peek().is_some() {
+            self.reconcile_detail();
+        }
     }
 
     /// Esc (with nothing to cancel) or the Rakumux key in Rakumux mode:

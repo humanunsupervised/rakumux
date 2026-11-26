@@ -180,6 +180,8 @@ impl App {
     /// divider gives it), and what came on screen starts (the feed is asked
     /// for changes, rtop for a sample) while what left stops.
     pub(in crate::app) fn drawer_moved(&mut self) {
+        // Heartbeats coming or going: its selected run in view, or the list's.
+        self.reconcile_detail();
         self.sync_terminal_size();
         let now = Instant::now();
         self.feed_timers(now);

@@ -615,6 +615,9 @@ impl Inner {
                 before,
             } => self.history(caller, query.as_deref(), limit, before.as_ref()),
             Request::SessionRestore { id } => self.restore(caller, &id),
+            Request::SessionHistoryRead { id, lines, format } => {
+                self.history_read(caller, &id, lines, format)
+            }
             Request::SessionRevive(request) => self.revive(caller, request),
             Request::SessionReport(report) => self.report(caller, report),
             Request::SessionRead(request) => self.read(caller, request),
@@ -686,6 +689,9 @@ impl Inner {
             Request::HeartbeatEnable { id, enabled } => self.heartbeat_enable(caller, &id, enabled),
             Request::HeartbeatDelete { id } => self.heartbeat_delete(caller, &id),
             Request::HeartbeatRun { id } => self.heartbeat_run(caller, &id),
+            Request::HeartbeatRuns { id, limit, before } => {
+                self.heartbeat_runs(caller, &id, limit, before)
+            }
             Request::WorkspaceList => self.workspace_list(caller),
             Request::WorkspaceCreate { name } => self.workspace_create(caller, &name),
             Request::WorkspaceDelete { id } => self.workspace_delete(caller, &id),
@@ -1411,6 +1417,35 @@ impl Inner {
         });
         self.audit_outcome(&state, caller, Op::History, None, None, None, &result);
         result.map(Response::History)
+    }
+
+    /// A deleted session's saved output (`session_history_read`).
+    fn history_read(
+        &self,
+        caller: &Caller,
+        id: &SessionId,
+        lines: Option<u32>,
+        format: TextFormat,
+    ) -> Result<Response, ApiError> {
+        policy::authorize(caller, Op::History, None)?;
+        {
+            let state = self.lock();
+            if registry(&state.registry)?.deleted(id)?.is_none() {
+                return Err(ApiError::new(
+                    ErrorCode::NotFound,
+                    format!("no deleted session {id}"),
+                ));
+            }
+        }
+        let saved = self.store.load(id).map_err(|e| {
+            ApiError::new(ErrorCode::Internal, format!("reading saved output: {e}"))
+        })?;
+        Ok(Response::Read(saved::read(
+            saved.as_ref(),
+            ReadSource::Recent,
+            lines,
+            format,
+        )))
     }
 
     fn restore(&self, caller: &Caller, id: &SessionId) -> Result<Response, ApiError> {

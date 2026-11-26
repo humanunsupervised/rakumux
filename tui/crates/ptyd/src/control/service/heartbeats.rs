@@ -17,6 +17,10 @@
 //!   them; while one is at work or asking something (or still starting) the
 //!   due time is skipped. The newest [`RUNS_KEPT`] runs stay listed; older
 //!   ended ones go to the session history.
+//! - **The run record** (`heartbeat_runs`): every due time and every run
+//!   asked for, skipped and failed ones too, with its session's id and what
+//!   became of its task, kept as long as the heartbeat; each says where its
+//!   session is now (listed, in the history, gone).
 //! - **Missed due times** (the machine asleep, the daemon down) give one run
 //!   when it's back, then the next due time is counted from then.
 
@@ -36,8 +40,9 @@ use session_core::api::{
 };
 use session_core::commands;
 use session_core::heartbeat::{
-    Heartbeat, HeartbeatEdit, HeartbeatFields, HeartbeatRun, HeartbeatRunRef, HeartbeatSpec,
-    RunOutcome, MAX_COMMAND_BYTES, MAX_HEARTBEATS, MAX_PROMPT_BYTES, RUNS_KEPT,
+    Heartbeat, HeartbeatEdit, HeartbeatFields, HeartbeatRun, HeartbeatRunPage, HeartbeatRunRecord,
+    HeartbeatRunRef, HeartbeatSpec, RunOutcome, RunPlace, MAX_COMMAND_BYTES, MAX_HEARTBEATS,
+    MAX_PROMPT_BYTES, MAX_RUN_RECORD_LIMIT, RUNS_KEPT, RUN_RECORD_LIMIT,
 };
 use session_core::ids::{HeartbeatId, SessionId, TerminalId};
 use session_core::model::{
@@ -158,6 +163,49 @@ impl Inner {
             .cloned()
             .ok_or_else(|| missing(id))?;
         Ok(Response::Heartbeat { heartbeat })
+    }
+
+    pub(super) fn heartbeat_runs(
+        &self,
+        caller: &Caller,
+        id: &HeartbeatId,
+        limit: Option<u32>,
+        before: Option<u64>,
+    ) -> Result<Response, ApiError> {
+        policy::authorize(caller, Op::HeartbeatGet, None)?;
+        let state = self.lock();
+        if !state.heartbeats.contains_key(id) {
+            return Err(missing(id));
+        }
+        let limit = limit
+            .unwrap_or(RUN_RECORD_LIMIT)
+            .clamp(1, MAX_RUN_RECORD_LIMIT);
+        let registry = registry_of(&state)?;
+        let (rows, more) = registry.heartbeat_run_log(id, before, limit)?;
+        let mut runs = Vec::with_capacity(rows.len());
+        for (seq, run) in rows {
+            let mut record = HeartbeatRunRecord {
+                seq,
+                run,
+                place: None,
+                status: None,
+                lifecycle: None,
+            };
+            if let Some(session) = record.run.session_id.clone() {
+                record.place = Some(match registry.get(&session)? {
+                    Some(listed) => {
+                        let status = self.runtime(&state, &listed).status;
+                        record.status = Some(status);
+                        record.lifecycle = Some(self.lifecycle(&state, &session, status));
+                        RunPlace::Listed
+                    }
+                    None if registry.deleted(&session)?.is_some() => RunPlace::History,
+                    None => RunPlace::Gone,
+                });
+            }
+            runs.push(record);
+        }
+        Ok(Response::HeartbeatRuns(HeartbeatRunPage { runs, more }))
     }
 
     pub(super) fn heartbeat_create(
@@ -577,6 +625,11 @@ impl Inner {
                 }
             }
         };
+        if let Err(error) =
+            registry_of(state).and_then(|r| r.log_heartbeat_run(id, &run).map_err(ApiError::from))
+        {
+            crate::log_warn!("control: recording heartbeat {id}'s run: {}", error.message);
+        }
         heartbeat.last_run = Some(run);
         if heartbeat.enabled {
             heartbeat.next_run_at = next_due(&heartbeat, now_s);
@@ -913,7 +966,8 @@ impl Inner {
         }
     }
 
-    /// What became of a run's task, on its heartbeat's last run.
+    /// What became of a run's task, in its heartbeat's run record and on
+    /// its last run.
     fn note_first_input(
         &self,
         state: &mut State,
@@ -924,6 +978,15 @@ impl Inner {
         let Some(run) = state.runs.get(session).cloned() else {
             return;
         };
+        if let Err(error) = registry_of(state).and_then(|r| {
+            r.set_run_outcome(session, outcome, detail.as_deref())
+                .map_err(ApiError::from)
+        }) {
+            crate::log_warn!(
+                "control: recording run {session}'s outcome: {}",
+                error.message
+            );
+        }
         let Some(mut heartbeat) = state.heartbeats.get(&run.heartbeat).cloned() else {
             return;
         };

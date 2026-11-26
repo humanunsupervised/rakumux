@@ -11,10 +11,10 @@ use crate::api::{
     AgentReply, ApiError, AttachRequest, Attached, Auth, CallerInfo, CreateSession,
     DaemonStatusInfo, ErrorCode, EventEnvelope, Hello, HelloOk, HistoryPage, ReadRequest,
     ReadResult, Report, Request, Response, ReviveSession, SendRequest, StreamCommand, StreamEvent,
-    SubscribeRequest, WaitRequest, WaitResult,
+    SubscribeRequest, TextFormat, WaitRequest, WaitResult,
 };
 use crate::frame::{self, Frame};
-use crate::heartbeat::{Heartbeat, HeartbeatEdit, HeartbeatSpec};
+use crate::heartbeat::{Heartbeat, HeartbeatEdit, HeartbeatRunPage, HeartbeatSpec};
 use crate::ids::{HeartbeatId, MachineId, ReplyId, SessionId};
 use crate::model::{MachineView, ProjectView, ScopeRoot, SessionView};
 use crate::paths::{Layout, Registration};
@@ -133,6 +133,28 @@ pub trait SessionApi: Send + Sync {
     fn heartbeat_run(&self, id: &HeartbeatId) -> Result<SessionView> {
         let _ = id;
         Err(unsupported("heartbeats"))
+    }
+    /// A heartbeat's run record, newest first (daemon capability
+    /// `heartbeats.runs`): see `Request::HeartbeatRuns`.
+    fn heartbeat_runs(
+        &self,
+        id: &HeartbeatId,
+        limit: Option<u32>,
+        before: Option<u64>,
+    ) -> Result<HeartbeatRunPage> {
+        let _ = (id, limit, before);
+        Err(unsupported("heartbeat run records"))
+    }
+    /// A deleted session's saved output (user only, daemon capability
+    /// `session.history.read`).
+    fn history_read(
+        &self,
+        id: &SessionId,
+        lines: Option<u32>,
+        format: TextFormat,
+    ) -> Result<ReadResult> {
+        let _ = (id, lines, format);
+        Err(unsupported("reading deleted sessions"))
     }
     fn report(&self, report: Report) -> Result<()>;
     fn read(&self, request: ReadRequest) -> Result<ReadResult>;
@@ -877,6 +899,38 @@ impl SessionApi for Client {
         self.expect_session(&Request::HeartbeatRun { id: id.clone() })
     }
 
+    fn heartbeat_runs(
+        &self,
+        id: &HeartbeatId,
+        limit: Option<u32>,
+        before: Option<u64>,
+    ) -> Result<HeartbeatRunPage> {
+        match self.request(&Request::HeartbeatRuns {
+            id: id.clone(),
+            limit,
+            before,
+        })? {
+            Response::HeartbeatRuns(page) => Ok(page),
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    fn history_read(
+        &self,
+        id: &SessionId,
+        lines: Option<u32>,
+        format: TextFormat,
+    ) -> Result<ReadResult> {
+        match self.request(&Request::SessionHistoryRead {
+            id: id.clone(),
+            lines,
+            format,
+        })? {
+            Response::Read(result) => Ok(result),
+            other => Err(unexpected(&other)),
+        }
+    }
+
     fn report(&self, report: Report) -> Result<()> {
         self.expect_ok(&Request::SessionReport(report))
     }
@@ -1480,6 +1534,8 @@ fn is_idempotent(request: &Request) -> bool {
             | Request::WorkspaceRename { .. }
             | Request::SessionGet { .. }
             | Request::SessionRead(_)
+            | Request::SessionHistoryRead { .. }
+            | Request::HeartbeatRuns { .. }
             | Request::SessionTurn { .. }
             | Request::SessionTranscript { .. }
             | Request::SessionTouch { .. }
@@ -2207,7 +2263,9 @@ mod tests {
                 | Request::HeartbeatUpdate(_)
                 | Request::HeartbeatEnable { .. }
                 | Request::HeartbeatDelete { .. }
-                | Request::HeartbeatRun { .. } => Response::Error {
+                | Request::HeartbeatRun { .. }
+                | Request::HeartbeatRuns { .. }
+                | Request::SessionHistoryRead { .. } => Response::Error {
                     error: ApiError::new(ErrorCode::Unsupported, "no heartbeats here"),
                 },
                 Request::ProjectRelocate { .. } => Response::Ok,

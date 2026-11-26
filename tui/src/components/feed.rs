@@ -356,7 +356,7 @@ fn working_line() -> Line<'static> {
 /// `at` (Unix seconds) as a card shows it: within a day the time of day and
 /// how long ago (`14:32 · 3m`), else the date and time (`Nov 22 14:32`);
 /// `short`, the time or the date alone.
-fn card_stamp(at: i64, now: i64, short: bool) -> String {
+pub(crate) fn card_stamp(at: i64, now: i64, short: bool) -> String {
     let age = relative_time(now, at);
     let Some(time) = chrono::DateTime::from_timestamp(at, 0) else {
         return age;

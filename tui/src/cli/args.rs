@@ -366,6 +366,18 @@ pub enum HeartbeatCommand {
         /// Its name or `hb_` id
         target: String,
     },
+    /// Every run of a heartbeat, newest first: when, what became of it,
+    /// and its session
+    Runs {
+        /// Its name or `hb_` id
+        target: String,
+        /// At most this many (default 50)
+        #[arg(short = 'n', long, value_name = "N", default_value_t = 50)]
+        limit: u32,
+        /// Print JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Forget a heartbeat; its runs stay as sessions
     #[command(alias = "remove")]
     Rm {

@@ -1295,7 +1295,11 @@ impl App {
             AppEvent::PhoneOff(result) => self.on_phone_off(result),
             AppEvent::AccountChecked(result) => self.on_account_checked(result),
             AppEvent::Resources { generation, result } => self.on_resources(generation, result),
-            AppEvent::Heartbeats { generation, result } => self.on_heartbeats(generation, result),
+            AppEvent::Heartbeats {
+                generation,
+                result,
+                runs,
+            } => self.on_heartbeats(generation, result, runs),
             AppEvent::HeartbeatDone { result } => self.on_heartbeat_done(result),
             AppEvent::HeartbeatForm { submit, result } => self.on_heartbeat_form(submit, result),
             AppEvent::SignIn(result) => self.on_sign_in(result),

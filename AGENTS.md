@@ -1209,7 +1209,18 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   enabled?}`, `heartbeat_update {id, name?, agent?, command?, prompt?, schedule?, by_agent?}`,
   and, user only, `heartbeat_enable {id, enabled}`, `heartbeat_delete {id}` (its runs stay as
   plain sessions) and `heartbeat_run {id}` (a run now, answered with its `Session`). Ids read
-  with or without their `hb_`. Without a command, a new heartbeat's (and a changed agent's) is
+  with or without their `hb_`. **The run record** (capability `heartbeats.runs`):
+  `heartbeat_runs {id, limit?, before?}` (anyone who may `heartbeat_get`) answers
+  `HeartbeatRunPage {runs, more}`, newest first, 100 a page by default and at most 500, `before` a
+  `seq` of an earlier page: every due time and every run asked for, skipped and failed ones too,
+  as `HeartbeatRunRecord {seq, run, at, session_id?, outcome, detail?, place?, status?,
+  lifecycle?}`, kept as long as the heartbeat (`heartbeat_run_log`; runs listed before 0.1.83
+  start it, their outcome `unknown`). `outcome` follows the run's task (`started`, then
+  `task_given` or `no_agent`); `place` says where its session is now: `listed` (with its status
+  and lifecycle, read when asked), `history` (deleted, as older runs are: its saved output read
+  with `session_history_read {id, lines?, format?}`, user only, capability
+  `session.history.read`, answered with `Read` as `session_read` reads an ended session), or
+  `gone` (purged after 90 days). Without a command, a new heartbeat's (and a changed agent's) is
   the one the user last started that agent (or any) with in the folder: the newest session's
   known-agent resume command without what names its conversation (`resume::start_command`,
   the flags that shape a session kept), else the agent's name, else `claude`. What a session
@@ -1380,8 +1391,10 @@ accidents; they don't stop a hostile process running as the same user.
   rows go on serving until it's restored or purged (90 days); the loaders skip them meanwhile.
   `heartbeats(id, scope_root, name, agent, command, prompt, schedule_json, enabled,
   awaiting_approval, created_by_json, created_at, updated_at, next_run_at, runs, last_run_json)`
-  (unique `(scope_root, name)`) and `heartbeat_runs(session_id, heartbeat_id, run, started_at)`
-  (a run's row goes with its session's delete), created when missing.
+  (unique `(scope_root, name)`), `heartbeat_runs(session_id, heartbeat_id, run, started_at)`
+  (a listed run; its row goes with its session's delete) and `heartbeat_run_log(seq, heartbeat_id,
+  run, at, session_id, outcome, detail)` (every run, kept until the heartbeat is deleted), created
+  when missing.
   `workspaces(id, name, created_at)` (unique `name`) and `session_workspaces(session_id,
   workspace_id)` (a session in none has no row; kept while the session is in the history,
   removed with the workspace or when the session is purged), created when missing.
@@ -1740,7 +1753,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 | `rakumux rename [<name\|id>] <new name>` | Rename (defaults to the current session) |
 | `rakumux pin <name\|id>` / `rakumux unpin <name\|id>` | Pin (into the list's Pinned tab) / unpin |
 | `rakumux kill <name\|id> [--tree]` / `rakumux rm <name\|id>` | Terminate / delete (into the session history, 90 days) |
-| `rakumux heartbeat ls [--json] [--folder DIR \| --all] \| show <name\|id> \| add [NAME] (--every 30m \| --daily HH:MM \| --days mon,fri --at HH:MM) [--agent A] [--command C] [--prompt P \| -- PROMPT] [--paused] \| update <name\|id> … \| enable \| pause \| run \| rm <name\|id>` | Heartbeats: tasks run on a clock (`add` enables one that has a prompt and a schedule; `enable` approves an agent's; `run` starts a run now). Inside a session `add` and `update` work and wait for approval, so an agent needs no MCP (`$RAKUMUX_BIN heartbeat update hb_… --prompt … --every …`) |
+| `rakumux heartbeat ls [--json] [--folder DIR \| --all] \| show <name\|id> \| runs <name\|id> [-n N] [--json] \| add [NAME] (--every 30m \| --daily HH:MM \| --days mon,fri --at HH:MM) [--agent A] [--command C] [--prompt P \| -- PROMPT] [--paused] \| update <name\|id> … \| enable \| pause \| run \| rm <name\|id>` | Heartbeats: tasks run on a clock (`add` enables one that has a prompt and a schedule; `enable` approves an agent's; `run` starts a run now; `runs` lists every run, newest first, with where its session is). Inside a session `add` and `update` work and wait for approval, so an agent needs no MCP (`$RAKUMUX_BIN heartbeat update hb_… --prompt … --every …`) |
 | `rakumux workspace ls [--json] \| add NAME \| rename <name\|id> NAME \| rm <name\|id> \| move <session> (<workspace> \| --none)` | Workspaces: list them with their sessions' count (and how many are in none), make one, rename one, forget one (its sessions are then in none), move a session into one (made when there's none of that name) or out of any. Inside a session `ls` works and `move` moves that session itself |
 | `rakumux history [QUERY] [--json]` / `rakumux restore <id\|name>` | Deleted sessions, most recently deleted first / bring one back into its folder, dead (`attach` or Enter revives it); a name only when one deleted session has it |
 | `rakumux folders [--json]` / `rakumux folders add\|rm <dir>` | List folders / add one / forget one without sessions (`projects` is a hidden alias; `--json` prints `{"folders": [...], "projects": [...]}`, the same list twice) |
@@ -2154,8 +2167,15 @@ name. Under the selected one its buttons (`BeatAction`: `r run`, `p pause` or `e
 `c edit`, `d delete`; short of room edit and delete stay), each a click target, and under
 them all `+ New heartbeat`, a row to select like them (`BeatsView::on_new`; the only one when
 there are none). `↑`/`↓` (`j`/`k`) select; `Enter` shows one whole (its
-buttons, how it runs, its command and prompt in full, then its runs, newest first: `↑`/`↓` pick
-one, `Enter` goes into it); `e` from the list shows it whole first, and there approves or enables
+buttons, how it runs, its command and prompt in full, then every run the daemon recorded,
+newest first (`heartbeat_runs`, read with the heartbeats; more as the selection nears the last
+read): its number, what became of it (`working`, `done`, `ended`, `deleted`, `skipped: …`,
+`failed: …`) and when; the newest is selected and stays so as runs come, another stays selected
+by its `seq`. In Rakumux mode the session pane shows the selected run (`App::run_peek`, which
+`shown_session` and `reconcile_detail` follow while Heartbeats shows one whole): its terminal,
+live while it runs, its final screen once it ended, a deleted run's saved output
+(`session_history_read`), or why there's none (`DetailView::Note`). `↑`/`↓` pick a run,
+`Enter` goes into it (a deleted one is restored first)); `e` from the list shows it whole first, and there approves or enables
 it, so nothing an agent wrote runs unread (one waiting for approval has no `r run` button); `p`
 pauses; `r` runs it now; `c` edits it (the form below on it, `HeartbeatForm::edit`, the keys in its name:
 `Save` sends `heartbeat_update` only what was changed there, so an untouched command of any shape

@@ -3739,12 +3739,9 @@ mod tests {
         let screen = render(&mut h.app, 160, 48);
         assert!(screen.contains("♥ nightly #1"), "{screen}");
         h.press(KeyCode::Char('B')).await;
-        assert_eq!(
-            h.app
-                .heartbeat_runs(&run.heartbeat.as_ref().unwrap().heartbeat)
-                .len(),
-            1
-        );
+        assert_eq!(h.app.beats.runs().map(<[_]>::len), Some(1));
+        // The session pane shows the run.
+        assert_eq!(h.app.detail.view.session_id(), Some(&run.id));
 
         // Esc back to the list; d twice deletes the selected one.
         h.press(KeyCode::Esc).await;
@@ -3784,6 +3781,138 @@ mod tests {
             first.text
         );
         assert_eq!(h.app.focus, Focus::Session);
+    }
+
+    /// A heartbeat read whole lists every run the daemon recorded, newest
+    /// first, those that started no session too; the session pane shows
+    /// the selected one: live, why there's none, or a deleted run's saved
+    /// output, and Enter brings that one back and goes into it.
+    #[tokio::test]
+    async fn every_run_of_a_heartbeat_is_listed_and_the_selected_one_shown() {
+        use crate::app::DetailView;
+        use crate::components::format::now_secs;
+        use session_core::heartbeat::{HeartbeatRun, HeartbeatRunRecord, RunOutcome, RunPlace};
+        use session_core::ids::SessionId;
+        let mut live = view("R2", "nightly #2", 30);
+        live.lifecycle = Lifecycle::Working;
+        let mut h = harness(vec![view("A", "fix-login", 20), live.clone()]);
+        let id = session_core::ids::HeartbeatId::from_string("HB1");
+        let record =
+            |seq: u64, run: u32, session: Option<&str>, outcome, detail: Option<&str>, place| {
+                (
+                    id.clone(),
+                    HeartbeatRunRecord {
+                        seq,
+                        run: HeartbeatRun {
+                            run,
+                            at: now_secs() - 600 + seq as i64,
+                            session_id: session.map(SessionId::from_string),
+                            outcome,
+                            detail: detail.map(str::to_owned),
+                        },
+                        place,
+                        status: None,
+                        lifecycle: None,
+                    },
+                )
+            };
+        {
+            let mut state = h.fake.state.lock().unwrap();
+            state.heartbeats = vec![heartbeat(
+                "HB1",
+                "nightly",
+                false,
+                "Run the tests.",
+                "claude",
+            )];
+            state.run_records = vec![
+                record(
+                    1,
+                    1,
+                    Some("D1"),
+                    RunOutcome::TaskGiven,
+                    None,
+                    Some(RunPlace::History),
+                ),
+                record(
+                    2,
+                    0,
+                    None,
+                    RunOutcome::Skipped,
+                    Some("run #1 is still at work"),
+                    None,
+                ),
+                record(
+                    3,
+                    2,
+                    Some("R2"),
+                    RunOutcome::TaskGiven,
+                    None,
+                    Some(RunPlace::Listed),
+                ),
+            ];
+            state.deleted = vec![view("D1", "nightly #1", 10)];
+        }
+        h.fake.set_read("D1", "what run one wrote");
+        h.press(KeyCode::Char('B')).await;
+        h.press(KeyCode::Enter).await;
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("#2 working"), "{screen}");
+        assert!(
+            screen.contains("skipped: run #1 is still at work"),
+            "{screen}"
+        );
+        assert!(screen.contains("#1 deleted"), "{screen}");
+        // The newest is shown, live.
+        assert_eq!(h.app.detail.view.session_id(), Some(&live.id));
+        assert_eq!(h.last_attach().1.id, live.id);
+
+        // A due time that was skipped started nothing: the pane says why.
+        h.press(KeyCode::Down).await;
+        assert!(
+            matches!(&h.app.detail.view, DetailView::Note(note) if note.contains("Skipped: run #1")),
+            "{:?}",
+            h.app.detail.view
+        );
+        // A run in the session history: its saved output.
+        h.press(KeyCode::Down).await;
+        assert!(h
+            .fake
+            .calls()
+            .iter()
+            .any(|c| c.starts_with("history_read D1")));
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("what run one wrote"), "{screen}");
+
+        // A new run doesn't move the selection.
+        h.fake.state.lock().unwrap().run_records.push(record(
+            4,
+            3,
+            None,
+            RunOutcome::Failed,
+            Some("the folder is gone"),
+            None,
+        ));
+        h.app.reread_heartbeats();
+        h.app.process_pending();
+        assert_eq!(h.app.beats.selected_run().map(|r| r.seq), Some(1));
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("failed: the folder is gone"), "{screen}");
+
+        // Enter brings it back from the history and goes into it.
+        h.press(KeyCode::Enter).await;
+        assert!(h.fake.calls().contains(&"restore D1".to_string()));
+        assert_eq!(h.selected().as_deref(), Some("D1"));
+        // Back in Rakumux mode the run is in view again.
+        h.rakumux().await;
+        assert_eq!(
+            h.app.detail.view.session_id(),
+            Some(&SessionId::from_string("D1"))
+        );
+        // Leaving the heartbeat shows the list's selection.
+        h.press(KeyCode::Esc).await;
+        h.press(KeyCode::Char('B')).await;
+        assert!(!h.app.beats_shown());
     }
 
     /// Click the first place `text` is drawn at, on a `width` × `height`
