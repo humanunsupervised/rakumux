@@ -1064,6 +1064,9 @@ mod tests {
         let body: ReviveSessionBody = serde_json::from_str(r#"{"cols":80,"rows":24}"#).unwrap();
         assert_eq!((body.cols, body.rows), (Some(80), Some(24)));
         assert!(serde_json::from_str::<ReviveSessionBody>(r#"{"resume":false}"#).is_err());
+        let body: RunHeartbeatBody = serde_json::from_str(r#"{"by_agent":true}"#).unwrap();
+        assert!(body.by_agent);
+        assert!(serde_json::from_str::<RunHeartbeatBody>(r#"{"now":true}"#).is_err());
     }
 
     #[test]
@@ -1213,6 +1216,16 @@ pub struct UpdateHeartbeatBody {
     pub schedule: Option<Schedule>,
     /// Changed for an agent (MCP sets it): a change to what it runs waits
     /// for approval.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub by_agent: bool,
+}
+
+/// `POST /v1/heartbeats/{id}/run`: its optional body.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunHeartbeatBody {
+    /// Asked for by an agent (MCP sets it): refused while the heartbeat
+    /// waits for the user's approval, whoever the caller is.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub by_agent: bool,
 }

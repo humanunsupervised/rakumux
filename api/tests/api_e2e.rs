@@ -1412,7 +1412,7 @@ fn heartbeats_are_made_run_and_approved_over_http() {
     assert_eq!(reply.body["heartbeat"]["last_run"]["outcome"], "started");
 
     // An agent's heartbeat (a session caller) waits for approval; it can't
-    // approve, run or delete one.
+    // approve or delete one, nor run one that waits.
     let agent = create(
         &api,
         &api.env.project,
@@ -1447,6 +1447,39 @@ fn heartbeats_are_made_run_and_approved_over_http() {
         let reply = api.call_as(&agent_id, &token, method, &path, None);
         assert_eq!(reply.status, 403, "{method} {path}: {:?}", reply.body);
     }
+    let run_nightly = format!("/v1/heartbeats/{nightly_id}/run");
+    let reply = api.call_as(&agent_id, &token, "POST", &run_nightly, None);
+    let refused = reply.body["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        refused.contains(&format!("`rakumux heartbeat enable {nightly_id}`")),
+        "{:?}",
+        reply.body
+    );
+    // The user's caller for an agent (`by_agent`, as rakumux-mcp sends):
+    // the same; unknown fields are refused.
+    let reply = api.call("POST", &run_nightly, Some(json!({"by_agent": true})));
+    assert_eq!(reply.status, 403, "{:?}", reply.body);
+    let reply = api.call("POST", &run_nightly, Some(json!({"now": true})));
+    assert_eq!(reply.status, 400, "{:?}", reply.body);
+    // The user's own runs for the agent: a run like the user's.
+    let reply = api.call_as(
+        &agent_id,
+        &token,
+        "POST",
+        &format!("/v1/heartbeats/{id}/run"),
+        None,
+    );
+    assert_eq!(reply.status, 201, "{:?}", reply.body);
+    assert_eq!(reply.body["session"]["name"], "deps #2");
+    assert_eq!(reply.body["session"]["heartbeat"]["id"], id.as_str());
+    assert_eq!(reply.body["session"]["created_by"]["kind"], "user");
+    let reply = api.call(
+        "POST",
+        &format!("/v1/heartbeats/{id}/run"),
+        Some(json!({"by_agent": true})),
+    );
+    assert_eq!(reply.status, 201, "{:?}", reply.body);
+    assert_eq!(reply.body["session"]["name"], "deps #3");
     // The user approves it; the agent changing its prompt pauses it again.
     let reply = api.call("POST", &format!("/v1/heartbeats/{nightly_id}/enable"), None);
     assert_eq!(reply.status, 200, "{:?}", reply.body);

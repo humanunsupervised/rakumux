@@ -5,7 +5,9 @@
 //! - **Approval.** What a session caller makes or changes (or anything that
 //!   says `by_agent`, as `rakumux-mcp` does) waits for the user, paused:
 //!   creating one, or changing what an enabled one runs, sets
-//!   `awaiting_approval` and pauses it. Only the user enables it.
+//!   `awaiting_approval` and pauses it. Only the user enables it, and an
+//!   agent runs one now only once the user approved it (paused or not):
+//!   [`refuse_unapproved`].
 //! - **Runs.** At a due time the daemon starts `<name> #<n>` in the
 //!   heartbeat's folder, as the user would: a login shell that types the
 //!   heartbeat's command with its prompt as an argument (`claude --x --
@@ -275,13 +277,15 @@ impl Inner {
         &self,
         caller: &Caller,
         id: &HeartbeatId,
+        by_agent: bool,
     ) -> Result<Response, ApiError> {
         let mut state = self.lock();
         let found = state.heartbeats.get(id).cloned();
         let result = policy::authorize(caller, Op::HeartbeatRun, None).and_then(|()| {
-            if found.is_none() {
+            let Some(heartbeat) = &found else {
                 return Err(missing(id));
-            }
+            };
+            refuse_unapproved(heartbeat, caller.session_id().is_some() || by_agent)?;
             let now = self.now();
             let started = self.start_run(&mut state, id, true, now);
             let view = match &started {
@@ -1198,6 +1202,25 @@ fn name_taken(state: &State, scope: &ScopeRoot, name: &str, except: Option<&Hear
 fn name_in_use(name: &str) -> ApiError {
     invalid(format!(
         "another heartbeat of this folder is named {name:?}"
+    ))
+}
+
+/// An agent (a session caller, or `by_agent`) runs a heartbeat only once
+/// the user approved it: one an agent made or changed waits for approval
+/// until the user enables it. Whether it's paused doesn't matter.
+fn refuse_unapproved(heartbeat: &Heartbeat, by_agent: bool) -> Result<(), ApiError> {
+    if !(by_agent && heartbeat.awaiting_approval) {
+        return Ok(());
+    }
+    Err(ApiError::new(
+        ErrorCode::PermissionDenied,
+        format!(
+            "heartbeat {} ({}) waits for the user's approval; an agent runs it once the user \
+             approves it: `rakumux heartbeat enable {}`",
+            heartbeat.name,
+            heartbeat.handle(),
+            heartbeat.handle()
+        ),
     ))
 }
 

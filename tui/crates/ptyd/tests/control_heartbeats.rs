@@ -172,6 +172,7 @@ fn an_agent_that_never_shows_its_prompt_gets_no_task() {
         &h.user,
         Request::HeartbeatRun {
             id: created.id.clone(),
+            by_agent: false,
         },
     ));
     assert_eq!(view.heartbeat.as_ref().map(|r| r.run), Some(1));
@@ -230,6 +231,7 @@ fn earlier_runs_that_wait_end_and_busy_ones_skip_the_due_time() {
         &h.user,
         Request::HeartbeatRun {
             id: created.id.clone(),
+            by_agent: false,
         },
     ));
     assert_eq!(third.name, "deps #3");
@@ -257,6 +259,7 @@ fn a_long_sleep_gives_one_run_and_ten_runs_stay_listed() {
             &h.user,
             Request::HeartbeatRun {
                 id: created.id.clone(),
+                by_agent: false,
             },
         ));
         assert_eq!(view.heartbeat.as_ref().unwrap().run, n);
@@ -270,6 +273,7 @@ fn a_long_sleep_gives_one_run_and_ten_runs_stay_listed() {
         &h.user,
         Request::HeartbeatRun {
             id: created.id.clone(),
+            by_agent: false,
         },
     ));
     let runs = runs_of(&h, &created.id);
@@ -320,7 +324,7 @@ fn agents_heartbeats_wait_for_the_users_approval() {
         Response::Heartbeats { heartbeats } => assert_eq!(heartbeats.len(), 1),
         other => panic!("{other:?}"),
     }
-    // It can't approve, run or delete one.
+    // It can't approve or delete one, nor run it while it waits.
     denied(h.handle(
         &caller,
         Request::HeartbeatEnable {
@@ -328,12 +332,20 @@ fn agents_heartbeats_wait_for_the_users_approval() {
             enabled: true,
         },
     ));
-    denied(h.handle(
+    let refused = denied(h.handle(
         &caller,
         Request::HeartbeatRun {
             id: made.id.clone(),
+            by_agent: false,
         },
     ));
+    assert!(
+        refused
+            .message
+            .contains(&format!("`rakumux heartbeat enable hb_{}`", made.id)),
+        "{}",
+        refused.message
+    );
     denied(h.handle(
         &caller,
         Request::HeartbeatDelete {
@@ -423,6 +435,109 @@ fn agents_heartbeats_wait_for_the_users_approval() {
     assert!(audit
         .iter()
         .any(|row| row.method == "heartbeat.enable" && row.decision == "denied"));
+}
+
+fn run_now(id: &HeartbeatId, by_agent: bool) -> Request {
+    Request::HeartbeatRun {
+        id: id.clone(),
+        by_agent,
+    }
+}
+
+#[test]
+fn agents_run_a_heartbeat_now_only_once_the_user_approved_it() {
+    let (h, _skip) = harness();
+    let agent = h.create(Some("agent"));
+    let caller = h.session_caller(&agent.id);
+    let as_agent = format!("session:{}", agent.id);
+
+    // The user's own: the agent runs it, paused or not, as the user would.
+    let deps = heartbeat(h.handle(
+        &h.user,
+        Request::HeartbeatCreate(spec(&h, "deps", every(30))),
+    ));
+    heartbeat(h.handle(
+        &h.user,
+        Request::HeartbeatEnable {
+            id: deps.id.clone(),
+            enabled: false,
+        },
+    ));
+    let first = session(h.handle(&caller, run_now(&deps.id, false)));
+    assert_eq!(first.name, "deps #1");
+    assert_eq!(first.created_by, Creator::User);
+    let ran = get(&h, &deps.id);
+    assert!(!ran.enabled && ran.next_run_at.is_none(), "still paused");
+    let last = ran.last_run.unwrap();
+    assert_eq!(
+        (last.run, last.outcome, last.session_id),
+        (1, RunOutcome::Started, Some(first.id.clone()))
+    );
+    assert!(h.audit().iter().any(|row| row.caller == as_agent
+        && row.method == "heartbeat.run"
+        && row.decision == "allowed"));
+
+    // Changed by the agent, it waits for approval: refused, nothing run,
+    // the user still runs it.
+    heartbeat(h.handle(
+        &caller,
+        Request::HeartbeatUpdate(HeartbeatEdit {
+            id: deps.id.clone(),
+            name: None,
+            fields: HeartbeatFields {
+                prompt: Some("update them and push".into()),
+                ..Default::default()
+            },
+        }),
+    ));
+    let refused = denied(h.handle(&caller, run_now(&deps.id, false)));
+    assert!(
+        refused
+            .message
+            .contains(&format!("`rakumux heartbeat enable hb_{}`", deps.id)),
+        "{}",
+        refused.message
+    );
+    assert_eq!(get(&h, &deps.id).runs, 1);
+    assert_eq!(runs_of(&h, &deps.id).len(), 1);
+    // The user's caller for an agent (rakumux-mcp's `by_agent`): the same.
+    denied(h.handle(&h.user, run_now(&deps.id, true)));
+    let second = session(h.handle(&h.user, run_now(&deps.id, false)));
+    assert_eq!(second.name, "deps #2");
+    assert!(h.audit().iter().any(|row| row.caller == as_agent
+        && row.method == "heartbeat.run"
+        && row.decision == "denied"));
+
+    // Approved again, then paused: the agent runs it, by_agent too.
+    for enabled in [true, false] {
+        heartbeat(h.handle(
+            &h.user,
+            Request::HeartbeatEnable {
+                id: deps.id.clone(),
+                enabled,
+            },
+        ));
+    }
+    let third = session(h.handle(&caller, run_now(&deps.id, false)));
+    assert_eq!(third.name, "deps #3");
+    let fourth = session(h.handle(&h.user, run_now(&deps.id, true)));
+    assert_eq!(fourth.name, "deps #4");
+
+    // Enabling and deleting stay the user's.
+    denied(h.handle(
+        &caller,
+        Request::HeartbeatEnable {
+            id: deps.id.clone(),
+            enabled: true,
+        },
+    ));
+    denied(h.handle(
+        &caller,
+        Request::HeartbeatDelete {
+            id: deps.id.clone(),
+        },
+    ));
+    assert_eq!(heartbeats(&h).len(), 1);
 }
 
 #[test]
@@ -557,6 +672,7 @@ fn heartbeats_and_runs_survive_a_restart_and_deleting_one_leaves_its_runs() {
         &h.user,
         Request::HeartbeatRun {
             id: created.id.clone(),
+            by_agent: false,
         },
     ));
     // The run sets the next due time from its own second.

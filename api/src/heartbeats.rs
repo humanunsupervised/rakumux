@@ -1,9 +1,10 @@
 //! Heartbeat use cases of the API: list, get, create, change, enable or
 //! pause, run now and delete. Each takes the caller's `SessionApi`; the
 //! daemon decides what a caller may do (a session's heartbeats wait for the
-//! user's approval; enabling, running and deleting are the user's).
+//! user's approval, and it runs only approved ones; enabling and deleting
+//! are the user's).
 
-use crate::dto::{CreateHeartbeatBody, Heartbeat, Session, UpdateHeartbeatBody};
+use crate::dto::{CreateHeartbeatBody, Heartbeat, RunHeartbeatBody, Session, UpdateHeartbeatBody};
 use crate::error::HttpError;
 use crate::folders;
 use session_core::api::{ApiError, CallerInfo, ErrorCode};
@@ -101,9 +102,18 @@ pub fn enable(
     Ok(api.heartbeat_enable(id, enabled)?.into())
 }
 
-/// `POST /v1/heartbeats/{id}/run`: the run's session.
-pub fn run(api: &dyn SessionApi, id: &HeartbeatId) -> Result<Session, HttpError> {
-    Ok(api.heartbeat_run(id)?.into())
+/// `POST /v1/heartbeats/{id}/run`: the run's session. `by_agent` (or a
+/// session caller) runs only a heartbeat the user approved.
+pub fn run(
+    api: &dyn SessionApi,
+    id: &HeartbeatId,
+    body: RunHeartbeatBody,
+) -> Result<Session, HttpError> {
+    let session = match body.by_agent {
+        true => api.heartbeat_run_by_agent(id)?,
+        false => api.heartbeat_run(id)?,
+    };
+    Ok(session.into())
 }
 
 pub fn delete(api: &dyn SessionApi, id: &HeartbeatId) -> Result<(), HttpError> {

@@ -108,7 +108,8 @@ fn handshake_lists_tools_with_schemas_and_instructions() {
             "revive_session",
             "list_heartbeats",
             "create_heartbeat",
-            "update_heartbeat"
+            "update_heartbeat",
+            "run_heartbeat"
         ]
     );
     for tool in &tools {

@@ -382,10 +382,15 @@ pub enum Request {
     HeartbeatDelete {
         id: HeartbeatId,
     },
-    /// User only: start a run now, whatever its schedule. Answered with the
-    /// run's `Session`.
+    /// Start a run now, whatever its schedule (paused too). A session
+    /// caller, or one with `by_agent` (`rakumux-mcp` sets it), runs only a
+    /// heartbeat the user approved: one awaiting approval is
+    /// `permission_denied`. Answered with the run's `Session`.
     HeartbeatRun {
         id: HeartbeatId,
+        /// Asked for by an agent, whoever the caller is.
+        #[serde(default, skip_serializing_if = "is_false")]
+        by_agent: bool,
     },
     /// A heartbeat's run record (capability `heartbeats.runs`): every run,
     /// newest first, with where each run's session is now. `limit`
@@ -1537,6 +1542,26 @@ mod tests {
                 "prompt": "update", "schedule": {"kind": "every", "minutes": 30}, "by_agent": true})
         );
         assert_eq!(serde_json::from_value::<Request>(json).unwrap(), create);
+        // A run for an agent says so; anyone else's doesn't.
+        let id = crate::ids::HeartbeatId::from_string("01");
+        let run = Request::HeartbeatRun {
+            id: id.clone(),
+            by_agent: true,
+        };
+        let json = serde_json::to_value(&run).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"op": "heartbeat_run", "id": "01", "by_agent": true})
+        );
+        assert_eq!(serde_json::from_value::<Request>(json).unwrap(), run);
+        let plain = Request::HeartbeatRun {
+            id,
+            by_agent: false,
+        };
+        assert_eq!(
+            serde_json::to_value(&plain).unwrap(),
+            serde_json::json!({"op": "heartbeat_run", "id": "01"})
+        );
         let update: Request = serde_json::from_value(serde_json::json!(
             {"op": "heartbeat_update", "id": "hb_01", "command": "codex"}
         ))

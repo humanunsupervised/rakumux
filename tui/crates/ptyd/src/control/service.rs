@@ -688,7 +688,7 @@ impl Inner {
             Request::HeartbeatUpdate(edit) => self.heartbeat_update(caller, edit),
             Request::HeartbeatEnable { id, enabled } => self.heartbeat_enable(caller, &id, enabled),
             Request::HeartbeatDelete { id } => self.heartbeat_delete(caller, &id),
-            Request::HeartbeatRun { id } => self.heartbeat_run(caller, &id),
+            Request::HeartbeatRun { id, by_agent } => self.heartbeat_run(caller, &id, by_agent),
             Request::HeartbeatRuns { id, limit, before } => {
                 self.heartbeat_runs(caller, &id, limit, before)
             }

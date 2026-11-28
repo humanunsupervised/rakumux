@@ -10,8 +10,8 @@
 use crate::daemon::{DaemonPool, Identity};
 use crate::dto::{
     CreateHeartbeatBody, CreateSessionBody, FolderList, Health, HeartbeatEnvelope, HeartbeatList,
-    InputBody, ReviveSessionBody, SessionEnvelope, SessionList, SubmitBody, UpdateHeartbeatBody,
-    UpdateSessionBody, WaitBody,
+    InputBody, ReviveSessionBody, RunHeartbeatBody, SessionEnvelope, SessionList, SubmitBody,
+    UpdateHeartbeatBody, UpdateSessionBody, WaitBody,
 };
 use crate::error::HttpError;
 use crate::{folders, guard, heartbeats, log, query, sessions, streams};
@@ -363,7 +363,8 @@ async fn route(
         (Route::HeartbeatRun(id), _) => {
             query::parse_none(query.as_deref())?;
             let id = heartbeats::id(&id)?;
-            let session = call(state, identity, move |api| heartbeats::run(api, &id)).await?;
+            let body: RunHeartbeatBody = read_optional_json(request).await?;
+            let session = call(state, identity, move |api| heartbeats::run(api, &id, body)).await?;
             json(StatusCode::CREATED, SessionEnvelope { session })
         }
         (Route::HeartbeatEnable(id), _) => {

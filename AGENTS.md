@@ -120,7 +120,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    agent asks something; until it settles), `DELETE /v1/sessions/{id}`, the heartbeats
    (`GET|POST /v1/heartbeats`, `GET|PATCH|DELETE /v1/heartbeats/{id}`, `POST
    /v1/heartbeats/{id}/run|enable|pause`; `api/src/heartbeats.rs`; ids `hb_…`; a body's
-   `by_agent` makes it wait for approval), and the WebSockets `GET /v1/events` (session events) and `GET /v1/sessions/{id}/attach` (the
+   `by_agent` makes it wait for approval, or on `run` refuses one that waits), and the WebSockets `GET /v1/events` (session events) and `GET /v1/sessions/{id}/attach` (the
    live terminal: checkpoint, then output as binary frames; input and resize/promote/demote/fit
    back; `api/src/streams.rs`, tokio-tungstenite over a hyper upgrade). It says `folder` (a
    session's folder: the daemon's `scope`) and still accepts the deprecated `/v1/projects` and
@@ -140,9 +140,10 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    machine's own sessions only. Runs in the foreground or with `--detach`; a user client of
    the daemon (spawns it on demand), one API per Rakumux home. See `api/README.md`.
 9. **`rakumux-mcp`** (`mcp/`): MCP server on stdio for coding agents, built on `rmcp` (exact
-   pinned, confined to `mcp/src/server.rs`). Tools: `list_heartbeats`, `create_heartbeat` and
-   `update_heartbeat` (always `by_agent`: what an agent makes or changes waits for the user's
-   approval, whoever the API caller is), `list_folders`, `list_sessions`
+   pinned, confined to `mcp/src/server.rs`). Tools: `list_heartbeats`, `create_heartbeat`,
+   `update_heartbeat` and `run_heartbeat` (always `by_agent`: what an agent makes or changes
+   waits for the user's approval, and it runs only one the user approved, whoever the API caller
+   is), `list_folders`, `list_sessions`
    (`all_folders`), `get_session`, `create_session`, `read_session`, `rename_session`, and to
    **drive** a session: `send_prompt` (`POST …/submit`: a paste, then Enter; refused, typing
    nothing, while its agent asks something or isn't at its prompt yet, `refuse_if_blocked`, or
@@ -1214,8 +1215,11 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   once), `unknown` from a newer Rakumux. Requests: `heartbeat_list {scope?}`, `heartbeat_get
   {id}`, `heartbeat_create {scope?, name?, agent?, command?, prompt?, schedule?, by_agent?,
   enabled?}`, `heartbeat_update {id, name?, agent?, command?, prompt?, schedule?, by_agent?}`,
-  and, user only, `heartbeat_enable {id, enabled}`, `heartbeat_delete {id}` (its runs stay as
-  plain sessions) and `heartbeat_run {id}` (a run now, answered with its `Session`). Ids read
+  `heartbeat_run {id, by_agent?}` (a run now, paused or not, answered with its `Session`; a
+  session caller, or one with `by_agent`, runs only one the user approved: one
+  `awaiting_approval` is `permission_denied` naming `rakumux heartbeat enable hb_…`, checked in
+  the service), and, user only, `heartbeat_enable {id, enabled}` and `heartbeat_delete {id}`
+  (its runs stay as plain sessions). Ids read
   with or without their `hb_`. **The run record** (capability `heartbeats.runs`):
   `heartbeat_runs {id, limit?, before?}` (anyone who may `heartbeat_get`) answers
   `HeartbeatRunPage {runs, more}`, newest first, 100 a page by default and at most 500, `before` a
@@ -1298,7 +1302,7 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
 | Caller | How it authenticates | May |
 |---|---|---|
 | User (TUI, CLI outside any session) | token from `service.json` | everything |
-| Session (any process inside a session, e.g. an agent) | `RAKUMUX_SESSION_ID` + `RAKUMUX_SESSION_TOKEN` | every folder of this machine: list/get/read/wait/subscribe any session (its own folder when it names none; `all` too) and list folders; create sessions in any folder, within `control::Limits` (→ `limit_exceeded`); **drive** any other session: send keys, submit, kill, revive (never itself: `permission_denied`); report, touch, rename and pin **itself**; bind its agent's conversations to itself (`session_bind`); delete, attach, answer a question dialog, read an agent's turn or chat, the session history, terminal panes, replies and managing folders → `permission_denied`; heartbeats: list, get, create (any folder, its own when it names none) and update, what it makes or changes waits for approval, paused; enable, run and delete → `permission_denied`; workspaces: list them and move **itself** (its sessions start in its workspace), make and forget one → `permission_denied`; other machines' sessions are the user's alone |
+| Session (any process inside a session, e.g. an agent) | `RAKUMUX_SESSION_ID` + `RAKUMUX_SESSION_TOKEN` | every folder of this machine: list/get/read/wait/subscribe any session (its own folder when it names none; `all` too) and list folders; create sessions in any folder, within `control::Limits` (→ `limit_exceeded`); **drive** any other session: send keys, submit, kill, revive (never itself: `permission_denied`); report, touch, rename and pin **itself**; bind its agent's conversations to itself (`session_bind`); delete, attach, answer a question dialog, read an agent's turn or chat, the session history, terminal panes, replies and managing folders → `permission_denied`; heartbeats: list, get, create (any folder, its own when it names none) and update, what it makes or changes waits for approval, paused; run one now, only one the user approved (paused or not; one awaiting approval → `permission_denied`); enable, pause and delete → `permission_denied`; workspaces: list them and move **itself** (its sessions start in its workspace), make and forget one → `permission_denied`; other machines' sessions are the user's alone |
 | Delegated (the API for an agent conversation, e.g. OpenCode 2.x via `rakumux-mcp`) | user token + agent kind + conversation id | exactly what the session that bound the conversation may do; `unauthenticated` when no running session bound it |
 
 `control::Limits` apply only to sessions created by sessions: at most 4 running per creating session,
@@ -1760,7 +1764,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 | `rakumux rename [<name\|id>] <new name>` | Rename (defaults to the current session) |
 | `rakumux pin <name\|id>` / `rakumux unpin <name\|id>` | Pin (into the list's Pinned tab) / unpin |
 | `rakumux kill <name\|id> [--tree]` / `rakumux rm <name\|id>` | Terminate / delete (into the session history, 90 days) |
-| `rakumux heartbeat ls [--json] [--folder DIR \| --all] \| show <name\|id> \| runs <name\|id> [-n N] [--json] \| add [NAME] (--every 30m \| --daily HH:MM \| --days mon,fri --at HH:MM) [--agent A] [--command C] [--prompt P \| -- PROMPT] [--paused] \| update <name\|id> … \| enable \| pause \| run \| rm <name\|id>` | Heartbeats: tasks run on a clock (`add` enables one that has a prompt and a schedule; `enable` approves an agent's; `run` starts a run now; `runs` lists every run, newest first, with where its session is). Inside a session `add` and `update` work and wait for approval, so an agent needs no MCP (`$RAKUMUX_BIN heartbeat update hb_… --prompt … --every …`) |
+| `rakumux heartbeat ls [--json] [--folder DIR \| --all] \| show <name\|id> \| runs <name\|id> [-n N] [--json] \| add [NAME] (--every 30m \| --daily HH:MM \| --days mon,fri --at HH:MM) [--agent A] [--command C] [--prompt P \| -- PROMPT] [--paused] \| update <name\|id> … \| enable \| pause \| run \| rm <name\|id>` | Heartbeats: tasks run on a clock (`add` enables one that has a prompt and a schedule; `enable` approves an agent's; `run` starts a run now; `runs` lists every run, newest first, with where its session is). Inside a session `add` and `update` work and wait for approval, so an agent needs no MCP (`$RAKUMUX_BIN heartbeat update hb_… --prompt … --every …`), and `run` runs one the user approved |
 | `rakumux workspace ls [--json] \| add NAME \| rename <name\|id> NAME \| rm <name\|id> \| move <session> (<workspace> \| --none)` | Workspaces: list them with their sessions' count (and how many are in none), make one, rename one, forget one (its sessions are then in none), move a session into one (made when there's none of that name) or out of any. Inside a session `ls` works and `move` moves that session itself |
 | `rakumux history [QUERY] [--json]` / `rakumux restore <id\|name>` | Deleted sessions, most recently deleted first / bring one back into its folder, dead (`attach` or Enter revives it); a name only when one deleted session has it |
 | `rakumux folders [--json]` / `rakumux folders add\|rm <dir>` | List folders / add one / forget one without sessions (`projects` is a hidden alias; `--json` prints `{"folders": [...], "projects": [...]}`, the same list twice) |

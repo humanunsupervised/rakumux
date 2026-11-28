@@ -376,6 +376,21 @@ fn an_agent_saves_a_heartbeat_that_waits_for_the_users_approval() {
     );
     assert_eq!(result["isError"], true, "{result}");
 
+    // Neither runs while it waits for approval, inside a session or not:
+    // the refusal names the command that approves it.
+    for (mcp, name) in [(&mut agent, "nightly"), (&mut user, "deps")] {
+        let result = mcp.call("run_heartbeat", json!({"heartbeat": name}));
+        assert_eq!(result["isError"], true, "{result}");
+        assert_eq!(
+            result["structuredContent"]["error"]["code"], "permission_denied",
+            "{result}"
+        );
+        assert!(
+            text(&result).contains("`rakumux heartbeat enable hb_"),
+            "{result}"
+        );
+    }
+
     // The user approves it; the agent changing its prompt (by name) pauses it.
     let client = Client::connect(ClientConfig {
         layout: layout.clone(),
@@ -393,6 +408,26 @@ fn an_agent_saves_a_heartbeat_that_waits_for_the_users_approval() {
         )
         .unwrap();
     assert!(approved.enabled);
+    // Approved, the agent runs it now: a run like the user's, recorded with
+    // its session.
+    let result = agent.call("run_heartbeat", json!({"heartbeat": "nightly"}));
+    assert_eq!(result["isError"], false, "{result}");
+    let run = &result["structuredContent"]["session"];
+    assert_eq!(run["name"], "nightly #1", "{result}");
+    assert_eq!(run["folder"], json!(here));
+    assert!(text(&result).contains("a run of heartbeat"), "{result}");
+    let record = client
+        .heartbeat_runs(
+            &session_core::ids::HeartbeatId::from_string(hb.as_str()),
+            None,
+            None,
+        )
+        .unwrap();
+    assert_eq!(record.runs.len(), 1);
+    assert_eq!(
+        record.runs[0].run.session_id.as_ref().map(|id| id.as_str()),
+        run["id"].as_str()
+    );
     let result = agent.call(
         "update_heartbeat",
         json!({"heartbeat": "nightly", "prompt": "Run the tests, fix what fails, push."}),
@@ -415,5 +450,13 @@ fn an_agent_saves_a_heartbeat_that_waits_for_the_users_approval() {
     assert_eq!(
         nightly["untrusted"]["prompt"],
         "Run the tests, fix what fails, push."
+    );
+    assert_eq!(nightly["runs"], 1);
+    // Changed by the agent, it waits again: refused.
+    let result = agent.call("run_heartbeat", json!({"heartbeat": hb}));
+    assert_eq!(result["isError"], true, "{result}");
+    assert_eq!(
+        result["structuredContent"]["error"]["code"], "permission_denied",
+        "{result}"
     );
 }

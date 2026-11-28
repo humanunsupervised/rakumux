@@ -15,8 +15,9 @@
 //!   (`Caller::reaches_machines`).
 //! - Heartbeats: session callers list, read, create and change them in any
 //!   folder (what they make or change waits for the user's approval, paused:
-//!   the service sees to that); enabling, running and deleting one are the
-//!   user's.
+//!   the service sees to that) and run one now, but only one the user
+//!   approved (the service refuses one awaiting approval); enabling,
+//!   pausing and deleting one are the user's.
 //! - Workspaces: session callers list them and move themselves between them
 //!   (the sessions they create start in theirs); making and forgetting one
 //!   are the user's.
@@ -182,11 +183,16 @@ pub(crate) fn authorize(
     let on_self = target.is_some_and(|target| target.id == self_id);
     match op {
         Op::Get | Op::Read | Op::Wait | Op::ProjectList => Ok(()),
-        // What a session makes or changes waits for approval (the service).
-        Op::HeartbeatList | Op::HeartbeatGet | Op::HeartbeatCreate | Op::HeartbeatUpdate => Ok(()),
-        Op::HeartbeatEnable | Op::HeartbeatDelete | Op::HeartbeatRun => Err(denied(
+        // What a session makes or changes waits for approval, and it runs
+        // only one the user approved (the service checks both).
+        Op::HeartbeatList
+        | Op::HeartbeatGet
+        | Op::HeartbeatCreate
+        | Op::HeartbeatUpdate
+        | Op::HeartbeatRun => Ok(()),
+        Op::HeartbeatEnable | Op::HeartbeatDelete => Err(denied(
             op,
-            "heartbeats are enabled, run and deleted by the user",
+            "heartbeats are enabled, paused and deleted by the user",
         )),
         // In any folder: the service applies the limits.
         Op::Create => Ok(()),
@@ -331,6 +337,7 @@ mod tests {
                     | Op::HeartbeatGet
                     | Op::HeartbeatCreate
                     | Op::HeartbeatUpdate
+                    | Op::HeartbeatRun
             );
             let self_only = matches!(op, Op::Report | Op::Touch | Op::Rename | Op::Pin);
             let drives = matches!(op, Op::Send | Op::Submit | Op::Kill | Op::Revive);

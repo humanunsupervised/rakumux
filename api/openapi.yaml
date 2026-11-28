@@ -767,11 +767,19 @@ paths:
     post:
       tags: [heartbeats]
       operationId: runHeartbeat
-      summary: Start a run now, whatever its schedule. User callers only.
+      summary: Start a run now, whatever its schedule.
       description: >
         Ends the heartbeat's earlier runs whose agent waits, then starts the next
         one beside any still at work. The heartbeat needs a command, a prompt and
-        a schedule (400 otherwise).
+        a schedule (400 otherwise). A session caller, or a body with `by_agent`
+        (rakumux-mcp sets it), runs only a heartbeat the user approved, paused or
+        not: one awaiting approval is a 403 naming `rakumux heartbeat enable`.
+        The body is optional.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RunHeartbeat" }
       responses:
         "201":
           description: The run's session.
@@ -782,6 +790,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
         "503": { $ref: "#/components/responses/DaemonUnavailable" }
   /v1/heartbeats/{id}/enable:
     parameters:
@@ -1203,6 +1212,12 @@ components:
         prompt: { type: string }
         schedule: { $ref: "#/components/schemas/Schedule" }
         by_agent: { type: boolean, description: Changed for an agent; a change to what it runs pauses it until approved. }
+    RunHeartbeat:
+      type: object
+      additionalProperties: false
+      description: Optional body of `POST /v1/heartbeats/{id}/run`.
+      properties:
+        by_agent: { type: boolean, description: Asked for by an agent; refused while it waits for the user's approval. }
     CreateSession:
       type: object
       additionalProperties: false

@@ -129,8 +129,16 @@ pub trait SessionApi: Send + Sync {
         let _ = id;
         Err(unsupported("heartbeats"))
     }
-    /// Start a heartbeat's run now (user only): the run's session.
+    /// Start a heartbeat's run now: the run's session. A session caller
+    /// runs only one the user approved; see `Request::HeartbeatRun`.
     fn heartbeat_run(&self, id: &HeartbeatId) -> Result<SessionView> {
+        let _ = id;
+        Err(unsupported("heartbeats"))
+    }
+    /// Start a heartbeat's run now for an agent, whoever the caller is
+    /// (`by_agent`, as `rakumux-mcp` asks): refused while it waits for the
+    /// user's approval.
+    fn heartbeat_run_by_agent(&self, id: &HeartbeatId) -> Result<SessionView> {
         let _ = id;
         Err(unsupported("heartbeats"))
     }
@@ -896,7 +904,17 @@ impl SessionApi for Client {
     }
 
     fn heartbeat_run(&self, id: &HeartbeatId) -> Result<SessionView> {
-        self.expect_session(&Request::HeartbeatRun { id: id.clone() })
+        self.expect_session(&Request::HeartbeatRun {
+            id: id.clone(),
+            by_agent: false,
+        })
+    }
+
+    fn heartbeat_run_by_agent(&self, id: &HeartbeatId) -> Result<SessionView> {
+        self.expect_session(&Request::HeartbeatRun {
+            id: id.clone(),
+            by_agent: true,
+        })
     }
 
     fn heartbeat_runs(

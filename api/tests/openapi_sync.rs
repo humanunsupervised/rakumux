@@ -358,6 +358,7 @@ fn every_json_field_is_documented() {
             by_agent: true,
         },
     );
+    assert_documented("RunHeartbeat", RunHeartbeatBody { by_agent: true });
     assert_documented(
         "ReviveSession",
         ReviveSessionBody {

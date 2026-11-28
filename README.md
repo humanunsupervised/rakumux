@@ -146,7 +146,9 @@ sessions. The tab counts the replies that came in since you last looked.
 `+ New heartbeat`) makes one: its schedule, agent, arguments (suggested as you type) and prompt.
 `c` edits it (`Ctrl-S` saves), `d` twice deletes it. `Enter` shows one with every run it made:
 the session pane shows the selected run, live while it runs, and `Enter` goes into it
-(`rakumux heartbeat runs <name>` lists them too).
+(`rakumux heartbeat runs <name>` lists them too). An agent in a session can make or change one,
+which then waits for your approval (`e`), and run one you approved (`rakumux heartbeat run`, or
+`run_heartbeat` over MCP).
 
 `t` shows **rtop** in a drawer on the right: the CPU, memory and network this machine, Rakumux and
 each session's processes use, graphed over the last few minutes as btop does. `s` sorts, `←` `→` fold a session's processes, `Enter` goes

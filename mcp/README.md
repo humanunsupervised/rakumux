@@ -39,6 +39,7 @@ A session's **folder** is the directory it was started in (a repository, a workt
 | `list_heartbeats` | Heartbeats (tasks Rakumux runs on a clock), `folder` narrows; prompts under `untrusted` | read-only |
 | `create_heartbeat` | Save a task to run on a schedule: `prompt`, `schedule` (`{"kind": "every", "minutes": 30}`, `{"kind": "daily", "at": "09:00"}`, `{"kind": "weekdays", "days": ["mon"], "at": "09:00"}`), `folder?`, `name?`, `agent?`, `command?`. It waits for the user's approval | creates |
 | `update_heartbeat` | Change one (`heartbeat`: id or name; `name?`, `prompt?`, `schedule?`, `agent?`, `command?`); a change to what it runs pauses it for approval again | idempotent |
+| `run_heartbeat` | Start a run now, whatever its schedule (`heartbeat`: id or name; `folder?`): the run's session. Only one the user approved; one waiting for approval is refused (`permission_denied`) | creates |
 
 Driving an agent goes `send_prompt` → `wait_for_session` → `read_session`; a `blocked` agent asks
 something, which `read_session` shows and `send_keys` answers. No tool drives the session the

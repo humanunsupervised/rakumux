@@ -124,7 +124,8 @@ pub enum Command {
     /// the heartbeat's folder and gives its agent the task
     ///
     /// One an agent makes or changes from inside a session waits for your
-    /// approval (`rakumux heartbeat enable`).
+    /// approval (`rakumux heartbeat enable`); an agent runs only one you
+    /// approved.
     #[command(alias = "heartbeats")]
     Heartbeat {
         #[command(subcommand)]
@@ -361,7 +362,8 @@ pub enum HeartbeatCommand {
         /// Its name or `hb_` id
         target: String,
     },
-    /// Start a run now, whatever its schedule
+    /// Start a run now, whatever its schedule (from inside a session, one
+    /// the user approved)
     Run {
         /// Its name or `hb_` id
         target: String,

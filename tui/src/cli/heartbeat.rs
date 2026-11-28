@@ -1,7 +1,8 @@
 //! `rakumux heartbeat`: tasks the daemon runs on a clock (`ls`, `show`,
 //! `runs`, `add`, `update`, `enable`, `pause`, `run`, `rm`). From inside a session
 //! (an agent) `add` and `update` work too, and what they make or change waits
-//! for the user's approval; `enable`, `run` and `rm` are the user's.
+//! for the user's approval; `run` runs only one the user approved; `enable`,
+//! `pause` and `rm` are the user's.
 
 use super::args::{HeartbeatAddArgs, HeartbeatCommand, HeartbeatUpdateArgs, ScheduleArgs};
 use super::table::{self, ago, Column};

@@ -532,6 +532,29 @@ pub fn catalogue() -> Vec<ToolSpec> {
             idempotent: true,
             mutating: true,
         },
+        ToolSpec {
+            name: "run_heartbeat",
+            title: "Run a Rakumux heartbeat now",
+            description: "Start a heartbeat's next run now, whatever its schedule (a paused one \
+                too): a new session (`<name> #<n>`) in its folder whose agent is given its \
+                prompt. Only a heartbeat the user approved runs: one waiting for approval (one \
+                an agent made or changed) is refused until the user approves it in Rakumux (the \
+                Heartbeats tab, `e`) or with `rakumux heartbeat enable`. Follow the run with \
+                wait_for_session and read_session.",
+            input_schema: object(
+                json!({
+                    "heartbeat": {"type": "string", "minLength": 1, "description": "Its id (hb_…) or name."},
+                    "folder": folder_input("The heartbeat's folder, when its name isn't unique."),
+                    "project": project_alias()
+                }),
+                &["heartbeat"],
+            ),
+            output_schema: object(json!({ "session": session_schema(false) }), &["session"]),
+            read_only: false,
+            destructive: false,
+            idempotent: false,
+            mutating: true,
+        },
     ]
 }
 
@@ -592,6 +615,10 @@ pub async fn call(api: &Api<'_>, name: &str, args: Map<String, Value>) -> Option
         },
         "update_heartbeat" => match parse(args) {
             Ok(args) => update_heartbeat(api, args).await,
+            Err(error) => Err(error),
+        },
+        "run_heartbeat" => match parse(args) {
+            Ok(args) => run_heartbeat(api, args).await,
             Err(error) => Err(error),
         },
         _ => return None,
@@ -1275,6 +1302,15 @@ struct UpdateHeartbeatArgs {
     command: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RunHeartbeatArgs {
+    heartbeat: String,
+    folder: Option<String>,
+    /// Deprecated alias of `folder`.
+    project: Option<String>,
+}
+
 async fn list_heartbeats(
     api: &Api<'_>,
     args: ListHeartbeatsArgs,
@@ -1370,6 +1406,30 @@ async fn update_heartbeat(
     );
     Ok(ToolOutcome::ok(
         json!({ "heartbeat": heartbeat_json(heartbeat) }),
+        text,
+    ))
+}
+
+async fn run_heartbeat(api: &Api<'_>, args: RunHeartbeatArgs) -> Result<ToolOutcome, ToolError> {
+    let folder = folder_arg(args.folder, args.project)?;
+    let found = find_heartbeat(api, &args.heartbeat, folder.as_deref()).await?;
+    // Whoever calls, an agent asks: one awaiting approval is refused.
+    let started: SessionEnvelope = api
+        .post(
+            &format!("/v1/heartbeats/{}/run", found.id),
+            &json!({ "by_agent": true }),
+        )
+        .await?;
+    let text = format!(
+        "Started {} ({}), a run of heartbeat {} ({}). Follow it with wait_for_session and \
+         read_session.",
+        render::quote(&untrusted::inline(&started.session.name, 128)),
+        started.session.id,
+        render::quote(&untrusted::inline(&found.name, 128)),
+        found.id,
+    );
+    Ok(ToolOutcome::ok(
+        json!({ "session": render::session(&started.session, false) }),
         text,
     ))
 }
@@ -1604,7 +1664,8 @@ mod tests {
                 "revive_session",
                 "list_heartbeats",
                 "create_heartbeat",
-                "update_heartbeat"
+                "update_heartbeat",
+                "run_heartbeat"
             ]
         );
         for tool in &tools {

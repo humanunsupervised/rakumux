@@ -2140,7 +2140,10 @@ mod tests {
                 enabled: true,
             },
             Request::HeartbeatDelete { id: hb.clone() },
-            Request::HeartbeatRun { id: hb.clone() },
+            Request::HeartbeatRun {
+                id: hb.clone(),
+                by_agent: false,
+            },
             Request::WorkspaceList,
             Request::WorkspaceCreate {
                 name: "Launch".into(),

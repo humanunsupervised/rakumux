@@ -114,7 +114,7 @@ absolute directory (`~/` expanded) or the name of a known folder.
 | `GET /v1/heartbeats?folder=` | Heartbeats (tasks Rakumux runs on a clock), every folder's or one folder's: `{"heartbeats": [...]}`. A daemon without `heartbeats` answers 501. |
 | `POST /v1/heartbeats` | Make one: `{folder, name?, agent?, command?, prompt?, schedule?, enabled?, by_agent?}` → 201 + `Location`. `schedule` is `{"kind": "every", "minutes"}` (≥ 5), `{"kind": "daily", "at": "HH:MM"}` or `{"kind": "weekdays", "days": ["mon", …], "at"}`, local time. `command` starts the agent, flags included; each run adds the prompt to it. Without it, the agent the user last ran in the folder, flags kept. A session caller's (or one with `by_agent`) waits for approval, paused. |
 | `GET /v1/heartbeats/{id}` / `PATCH` / `DELETE` | One heartbeat (`hb_…` or the bare id); change it (`{name?, agent?, command?, prompt?, schedule?, by_agent?}`; an agent's change to what it runs pauses it for approval); forget it (user only; its runs stay as sessions) → 204. |
-| `POST /v1/heartbeats/{id}/run` | User only: start a run now → 201 `{"session": {...}}`. |
+| `POST /v1/heartbeats/{id}/run` | Start a run now, whatever its schedule → 201 `{"session": {...}}`. Optional body `{by_agent?}`. A session caller (or `by_agent`) runs only one the user approved: one awaiting approval → 403 naming `rakumux heartbeat enable hb_…`. |
 | `POST /v1/heartbeats/{id}/enable` / `pause` | User only: run it on its schedule (approving it) / stop → 200 `{"heartbeat": {...}}`. |
 | `GET /v1/events` (WebSocket) | Session events of every folder. |
 | `GET /v1/sessions/{id}/attach?role=observer\|controller&cols=&rows=` (WebSocket) | The live terminal. `cols`/`rows` are required for a controller. |
