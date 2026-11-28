@@ -2,7 +2,7 @@
 
 **A terminal multiplexer for coding agents.**
 
-[rakumux.com](https://rakumux.com) · [Docs](https://docs.rakumux.com) · [Join the waitlist](https://rakumux.com/sign-up) · [Releases](https://github.com/humanunsupervised/rakumux/releases) · [Pricing](https://rakumux.com/pricing)
+[rakumux.com](https://rakumux.com) · [Docs](https://docs.rakumux.com) · [Sign up](https://rakumux.com/sign-up) · [Releases](https://github.com/humanunsupervised/rakumux/releases) · [Pricing](https://rakumux.com/pricing)
 
 楽 (*raku*) means easy, and read *gaku* it means music: tmux, made easy.
 
@@ -244,8 +244,7 @@ For the other agents and session identity, see the [MCP guide](mcp/README.md).
 
 Everything above works without an account.
 
-**Sign up** at [rakumux.com/sign-up](https://rakumux.com/sign-up) (early access, through a
-waitlist for now), then **sign in** with `a` in Rakumux mode, or `rakumux account login`. Everything
+**Sign up** free at [rakumux.com/sign-up](https://rakumux.com/sign-up), then **sign in** with `a` in Rakumux mode, or `rakumux account login`. Everything
 below is then on; only acting from rakumux.com needs your browser paired.
 
 **AI session titles** name each agent session after what it's doing. A name you give (`r`)
