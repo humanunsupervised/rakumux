@@ -53,7 +53,7 @@ impl App {
             return None;
         }
         let panel = self.screen().panel?;
-        layout::feed_tab_columns(layout::panel_split(layout::left_split(panel).0).1)
+        layout::feed_tab_columns(layout::panel_split(layout::left_split(panel).0, true).1)
     }
 
     /// The selected reply is on screen whole: read in the cards' place, or

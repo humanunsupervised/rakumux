@@ -2632,7 +2632,9 @@ mod tests {
         assert_eq!(band.get(5, 1).fg, p.text_bright, "{wide}");
         assert_eq!(band.get(40, 0).bg, p.surface, "{wide}");
         assert_eq!(band.get(3, 2).fg, p.accent_primary, "{wide}");
-        let pane = &pane[3..];
+        // A blank row under the band.
+        assert_eq!(pane[3], "", "{wide}");
+        let pane = &pane[4..];
         // Under its time period, the newest first, each a card: when, its
         // session, agent and folder (no branch known) on the top border,
         // then `sending` while it isn't uploaded, `done` once it is (only
@@ -2660,9 +2662,9 @@ mod tests {
         let buffer = terminal.backend().buffer();
         // The selected card's heavy border is the accent's while the Inbox
         // has the keys; the next one's is plain.
-        assert_eq!(buffer.get(1, 4).fg, p.accent_primary, "{wide}");
-        assert_eq!(buffer.get(1, end as u16 + 5).fg, p.border, "{wide}");
-        for row in [5, end + 6] {
+        assert_eq!(buffer.get(1, 5).fg, p.accent_primary, "{wide}");
+        assert_eq!(buffer.get(1, end as u16 + 6).fg, p.border, "{wide}");
+        for row in [6, end + 7] {
             assert_eq!(buffer.get(3, row as u16).fg, p.text_primary, "{wide}");
         }
         assert_eq!(
@@ -2773,11 +2775,11 @@ mod tests {
         let wide = render(&mut h.app, 240, 48);
         let pane = list_column(&wide, 70);
         assert!(
-            pane[4].contains(" · 3m  parser  claude · repo ⎇ fix/csv ━"),
+            pane[5].contains(" · 3m  parser  claude · repo ⎇ fix/csv ━"),
             "{wide}"
         );
         // Selected, so heavy.
-        assert!(pane[4].ends_with("━ ✓ answered ┓"), "{wide}");
+        assert!(pane[5].ends_with("━ ✓ answered ┓"), "{wide}");
         // Short of room, the status's word goes first: the mark stays.
         let phone = render(&mut h.app, 45, 30);
         let top = phone
@@ -3044,7 +3046,7 @@ mod tests {
             h.press(KeyCode::Down).await;
             let screen = render(&mut h.app, 160, 20);
             let pane = list_column(&screen, 48);
-            assert!(pane[3].contains("◷ "), "{screen}");
+            assert!(pane[4].contains("◷ "), "{screen}");
             let name = h.app.feed.selected().unwrap().session_name.clone();
             assert!(
                 pane.iter().any(|row| row.contains(&format!("  {name}  "))),
@@ -3217,8 +3219,8 @@ mod tests {
         );
         // Under the band, which spans both.
         assert_eq!(cards[2], "   ≡ Inbox", "{screen}");
-        assert!(cards[4].starts_with("   ◷ last hour"), "{screen}");
-        assert!(cards[5].contains(" · 2m  api  claude · repo ━"), "{screen}");
+        assert!(cards[5].starts_with("   ◷ last hour"), "{screen}");
+        assert!(cards[6].contains(" · 2m  api  claude · repo ━"), "{screen}");
         assert!(rows[2].chars().nth(width) == Some(' '), "{screen}");
         assert!(rows[5].chars().nth(width) == Some('│'), "{screen}");
         assert!(screen.contains("finished 2m ago"), "{screen}");

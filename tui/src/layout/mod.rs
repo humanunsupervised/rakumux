@@ -617,16 +617,18 @@ pub const fn panel_band_rows(height: u16) -> u16 {
 }
 
 /// The left column's body while it shows the Inbox or Heartbeats: their
-/// band, then what's under it.
-pub fn panel_split(body: Rect) -> (Rect, Rect) {
+/// band, then what's under it, a blank row apart when `gap` (the Inbox's)
+/// and the band is full height.
+pub fn panel_split(body: Rect, gap: bool) -> (Rect, Rect) {
     let rows = panel_band_rows(body.height);
     let band = Rect {
         height: rows,
         ..body
     };
+    let skip = rows + u16::from(gap && rows == 3);
     let rest = Rect {
-        y: band.bottom(),
-        height: body.height - rows,
+        y: body.y + skip,
+        height: body.height - skip,
         ..body
     };
     (band, rest)

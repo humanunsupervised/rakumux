@@ -82,7 +82,8 @@ impl App {
     /// What the Inbox or Heartbeats draw in: the left column without its
     /// tabs and the band over them.
     pub fn left_panel_body(&self) -> Option<Rect> {
-        self.left_body().map(|body| layout::panel_split(body).1)
+        self.left_body()
+            .map(|body| layout::panel_split(body, self.left_tab == LeftTab::Inbox).1)
     }
 
     /// The left column shows `tab`, on screen.

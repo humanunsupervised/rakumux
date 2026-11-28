@@ -43,7 +43,6 @@ pub fn draw_left(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit
                 Block::default().style(Style::default().fg(p.text_primary).bg(p.panel)),
                 body,
             );
-            let (band, rest) = panel_split(body);
             let (panel, focused, back) = match app.left_tab() {
                 LeftTab::Beats => (
                     Panel::Beats,
@@ -56,6 +55,7 @@ pub fn draw_left(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit
                     (app.feed.reading && app.feed_columns().is_none()).then_some(Hit::FeedBack),
                 ),
             };
+            let (band, rest) = panel_split(body, panel == Panel::Feed);
             draw_panel_band(f, app, panel, focused, back.is_some(), band);
             if let Some(hit) = back {
                 hits.push((band, hit));

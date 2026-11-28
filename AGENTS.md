@@ -1844,7 +1844,8 @@ sessions of the workspace shown, the list with its own tabs over it, and its tab
 workspace and opens the menu of them (below); the Inbox (`f`, or Settings; `app/feed/pane.rs`) and Heartbeats (`B`, or Settings;
 below) show in its place under a band naming them as the drawer's does (`≡ Inbox`, `♥  Heartbeats`:
 the mark and name, bold and underlined, in the accent while they have the keys, on
-`Palette::surface`; as tall as the list's tabs, 3 rows or 1, `layout::panel_split`), and `‹`
+`Palette::surface`; as tall as the list's tabs, 3 rows or 1, `layout::panel_split`; the Inbox's
+cards a blank row under its full band), and `‹`
 before the name while one thing is read whole, the band then going back (`Hit::FeedBack`,
 `Hit::BeatBack`). What the tab shows has Rakumux mode's keys
 (`App::keys_panel`, `drawer::Panel`; `App::panel_key`) unless the drawer has them; `f` (`B`) again,
