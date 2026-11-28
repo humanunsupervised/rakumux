@@ -42,6 +42,15 @@ impl LeftTab {
         }
     }
 
+    /// The key that shows it, after its name on its tab.
+    pub fn key(self) -> &'static str {
+        match self {
+            LeftTab::Sessions => "w",
+            LeftTab::Inbox => "f",
+            LeftTab::Beats => "B",
+        }
+    }
+
     /// What it shows besides the sessions.
     pub fn panel(self) -> Option<Panel> {
         match self {
@@ -125,6 +134,12 @@ impl App {
             LeftTab::Inbox | LeftTab::Beats => {}
         }
         self.show_left_tab(tab);
+    }
+
+    /// `w`: the sessions, and the workspaces to switch among.
+    pub fn workspaces_key(&mut self) {
+        self.show_left_tab(LeftTab::Sessions);
+        self.open_workspaces();
     }
 
     /// A click on the Workspaces tab: the sessions, and the menu of the

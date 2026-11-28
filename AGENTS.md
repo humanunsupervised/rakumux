@@ -1683,7 +1683,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 - **Pin**: a user mark that lists a session in the list's Pinned tab (and shows `★` before its
   name in the list).
 - **Workspace**: a named group of this machine's sessions (`workspace_*`); the list shows every
-  session (All), one workspace's, or those in none (No workspace), picked in the menu of
+  session (All workspaces), one workspace's, or those in none (No workspace), picked in the menu of
   the left column's Workspaces tab.
   `w` switches, adds, renames or deletes one; `W` moves a session.
 - **Session order**: where the user put each session in the list (drag, `J`/`K`); a TUI setting,
@@ -1826,8 +1826,10 @@ those shown (`layout::render_tabs_from`, `App::tab_first`), and the ends say how
 (`‹3`, `5›`; a click goes to the nearest one).
 **The left column** (`app/left.rs`, `components/left.rs`) has three tabs fixed at its bottom, a level
 above the list tabs (`layout::left_split`: a band of `left_tabs_rows`, 3 rows or 1 on short
-columns): `▴ Launch   ≡ Inbox ●N   ♥ Heartbeats` (the first is the workspace shown; the active one bold with a line over it, in the accent
-while the column has the keys; short rows narrow the gaps, then drop the marks, then the count),
+columns): `▴ Launch (w)   ≡ Inbox ●N (f)   ♥  Heartbeats (B)` (the first is the workspace shown; each
+says the key that shows it, `w` showing the sessions and the menu of workspaces; `♥` has two
+columns after it, as many fonts draw it wider; the active one bold with a line over it, in the accent
+while the column has the keys; short rows narrow the gaps, then drop the keys, then the marks, then the count),
 each a click target (`Hit::LeftTab`; on the active one, what's read whole goes back to its list)
 and, beside the session, `«` at their right, which hides the column. Workspaces is the
 sessions of the workspace shown, the list with its own tabs over it, and its tab names that
@@ -1902,7 +1904,7 @@ row has (in Rakumux mode the selected session, else the one kept in view, or the
 while the feed has the keys; the one taking the keys in session mode; none for the terminal
 panel), since the detail has no title row: the session's terminal fills it from its top row;
 then messages and the daemon connection while it isn't up (`⠋ connecting`, `✕ daemon
-unavailable`). In the centre the label, the name of the workspace shown (`Launch`, `All`, `No
+unavailable`). In the centre the label, the name of the workspace shown (`Launch`, `All workspaces` (`All` short of room), `No
 workspace`; quiet on the blue bar; a long one cut to a quarter of the row; `TERMINAL MODE` while the
 terminal panel has the keys; the bar's colour says the mode), centred while it clears both sides, else between them. On the right buttons
 (a darker shade of the orange bar; dark chips on the blue one): in Rakumux mode, while the left
@@ -2113,7 +2115,7 @@ hides adds that folder to the filter. Other folders, commands and startup comman
 Tabs.
 
 **Workspaces.** With a daemon that has `workspaces`, the left column's Workspaces tab names the one
-shown after a chevron, and nothing else (`▴ Launch`, `▾` while its menu is open; cut short of room): All (every session), a workspace, or No workspace (the sessions in
+shown after a chevron, and nothing else (`▴ Launch`, `▾` while its menu is open; cut short of room; `All` for All workspaces): All workspaces (every session), a workspace, or No workspace (the sessions in
 none). A click on it (`App::click_left_tab`; from the Inbox, Heartbeats or a session it shows the sessions
 too) opens the workspaces menu as a popover just over it (`components/workspaces.rs`, `popover`): a
 row each with its sessions' count, the one shown ticked; Enter or a click switches the sessions
@@ -2123,7 +2125,7 @@ the footer's left, in the session's place
 (`components/footer.rs::fit_tabs`, `tab_styles`, after a light `workspaces` label while everything
 fits beside it, `label_tabs`); short of room the one shown stays with as many others, in order, as
 fit beside `+N`, which opens the menu. `w` or Settings → Workspace
-(`app/workspaces.rs`, `components/workspaces.rs`) opens the workspaces modal: All, each
+(`app/workspaces.rs`, `components/workspaces.rs`) opens the workspaces modal: All workspaces, each
 workspace, No workspace, each with its count, the one shown marked `✓`, then `+ Add new
 workspace`, which turns into a field for the new name (Enter makes it and shows it). Enter or a
 click shows the row under the cursor; `e` renames the workspace under it in place, `d` twice

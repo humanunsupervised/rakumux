@@ -27,6 +27,7 @@ use super::runtime::AppEvent;
 use super::text_input::TextInput;
 use super::types::{AppMode, Focus};
 use super::{App, WorkspaceView};
+use crate::layout::{str_width, truncate};
 
 /// What the workspaces modal is open for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,6 +70,12 @@ pub struct WorkspacePicker {
 /// What the sessions in no workspace are listed under.
 pub const NO_WORKSPACE: &str = "No workspace";
 
+/// What the view of every session is called (the menu's first row, the tab and footer naming it).
+pub const ALL_WORKSPACES: &str = "All workspaces";
+
+/// [`ALL_WORKSPACES`] where it doesn't fit whole (a phone's footer).
+pub const ALL_SHORT: &str = "All";
+
 impl App {
     /// The connected daemon keeps workspaces.
     pub fn has_workspaces(&self) -> bool {
@@ -77,7 +84,7 @@ impl App {
             .is_some_and(|capabilities| capabilities.iter().any(|c| c == CAPABILITY_WORKSPACES))
     }
 
-    /// What the view shown is called: `All`, `No workspace` or the
+    /// What the view shown is called: `All workspaces`, `No workspace` or the
     /// workspace's name.
     pub fn workspace_name(&self) -> String {
         self.view_name(self.list.workspace_view())
@@ -86,10 +93,21 @@ impl App {
     /// What `view` is called.
     pub fn view_name(&self, view: &WorkspaceView) -> String {
         match view {
-            WorkspaceView::All => "All".to_owned(),
+            WorkspaceView::All => ALL_WORKSPACES.to_owned(),
             WorkspaceView::Unassigned => NO_WORKSPACE.to_owned(),
             WorkspaceView::In(id) => self.name_of(Some(id)),
         }
+    }
+
+    /// What `view` is called in at most `cols` columns: its name, or for
+    /// every session `All` once `All workspaces` doesn't fit, else the name
+    /// cut short.
+    pub fn view_name_within(&self, view: &WorkspaceView, cols: usize) -> String {
+        let name = self.view_name(view);
+        if str_width(&name) > cols && *view == WorkspaceView::All {
+            return truncate(ALL_SHORT, cols);
+        }
+        truncate(&name, cols)
     }
 
     /// The name of workspace `id`, or `No workspace`.
@@ -715,16 +733,29 @@ mod tests {
         // No row of buttons: the tab names it, after a chevron.
         let rows = column(&mut h, 160);
         assert!(
-            rows[37].starts_with("▴ All   ≡ Inbox   ♥ Heartbeats"),
+            rows[37].starts_with("▴ All workspaces   ≡ Inbox   ♥  Heartbeats"),
             "{rows:#?}"
         );
         assert!(!rows.join("\n").contains("Launch"), "{rows:#?}");
         assert!(footer(&mut h, 160).starts_with(" session: ●"));
+        // Wide enough, each tab says the key that shows it; w from the
+        // Inbox shows the sessions and the menu.
+        let rows = column(&mut h, 240);
+        assert!(
+            rows[37].starts_with("▴ All workspaces (w)   ≡ Inbox (f)   ♥  Heartbeats (B)"),
+            "{rows:#?}"
+        );
+        h.press(KeyCode::Char('f')).await;
+        assert_eq!(h.app.left_tab(), LeftTab::Inbox);
+        h.press(KeyCode::Char('w')).await;
+        assert_eq!(h.app.left_tab(), LeftTab::Sessions);
+        assert!(matches!(h.app.mode, AppMode::Workspaces(_)));
+        h.press(KeyCode::Esc).await;
         // A click on it: the menu, over it, a row each, the one shown ticked.
         let tab = Hit::LeftTab(LeftTab::Sessions);
         click(&mut h, tab);
         let rows = column(&mut h, 160);
-        assert!(rows[37].starts_with("▾ All"), "{rows:#?}");
+        assert!(rows[37].starts_with("▾ All workspaces"), "{rows:#?}");
         let menu: Vec<String> = rows[29..36]
             .iter()
             .map(|row| {
@@ -736,7 +767,7 @@ mod tests {
         assert_eq!(
             menu[1..5],
             [
-                "✓ All 3",
+                "✓ All workspaces 3",
                 "Launch 1",
                 "No workspace 2",
                 "+ Add new workspace"
@@ -834,8 +865,13 @@ mod tests {
         assert!(narrow.contains('+'), "{narrow:?}");
         assert!(!narrow.contains("Infrastructure"), "{narrow:?}");
         // A button switches; ⊞ opens the menu, in the middle there.
+        draw(&mut h, 200, 40);
         click(&mut h, Hit::WorkspaceTab(0));
         assert_eq!(shown(&h), ["A", "B", "C"]);
+        // Every session's is All workspaces, and All where that wouldn't fit.
+        assert!(footer(&mut h, 200).contains(" All workspaces 3 "));
+        let narrow = footer(&mut h, 110);
+        assert!(narrow.contains(" ⊞   All 3 "), "{narrow:?}");
         draw(&mut h, 110, 40);
         click(&mut h, Hit::FooterKey(FooterKey::Workspace));
         assert!(matches!(h.app.mode, AppMode::Workspaces(_)));
@@ -1070,7 +1106,7 @@ mod tests {
             .on_tick(std::time::Instant::now() + std::time::Duration::from_secs(10));
         let line = footer(&mut h, 160);
         assert!(
-            line.starts_with(" workspaces  ⊞   All 3   Launch 2   No workspace 1  "),
+            line.starts_with(" workspaces  ⊞   All workspaces 3   Launch 2   No workspace 1  "),
             "{line:?}"
         );
     }

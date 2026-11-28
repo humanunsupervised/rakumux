@@ -14,7 +14,9 @@ use ratatui::{
 };
 
 use super::format::truncate;
-use crate::app::workspaces::{WorkspacePicker, WorkspacePurpose, WorkspaceRow, NO_WORKSPACE};
+use crate::app::workspaces::{
+    WorkspacePicker, WorkspacePurpose, WorkspaceRow, ALL_WORKSPACES, NO_WORKSPACE,
+};
 use crate::app::{App, Hit, WorkspaceView};
 use crate::layout::{left_split, str_width};
 use crate::theme;
@@ -222,7 +224,7 @@ pub fn draw_workspaces(
                         Some(w) => (WorkspaceView::In(w.id.clone()), w.name.as_str()),
                         None => continue,
                     },
-                    WorkspaceRow::All => (WorkspaceView::All, "All"),
+                    WorkspaceRow::All => (WorkspaceView::All, ALL_WORKSPACES),
                     _ => (WorkspaceView::Unassigned, NO_WORKSPACE),
                 };
                 let deleting = row_id.is_some() && picker.deleting.as_ref() == row_id;

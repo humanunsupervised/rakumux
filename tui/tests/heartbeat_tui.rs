@@ -300,7 +300,7 @@ fn the_left_columns_tabs_switch_and_help_is_searched_in_the_real_tui() {
     let screen = start_tui(&world);
     // A start shows the sessions, over the column's tabs.
     screen.shows("+ New session");
-    let shown = screen.shows("▴ All   ≡ Inbox   ♥ Heartbeats");
+    let shown = screen.shows("▴ All workspaces   ≡ Inbox   ♥  Heartbeats");
     assert!(shown.contains("◔ Status"), "{shown}");
     // f: the Inbox in their place; Esc: the sessions.
     screen.send("f", &[]);
@@ -310,16 +310,22 @@ fn the_left_columns_tabs_switch_and_help_is_searched_in_the_real_tui() {
     screen.until("the sessions", |text| {
         text.contains("◔ Status") && !text.contains("Sign in to see")
     });
-    // A click on a tab at the bottom shows it (SGR mouse: press, release).
-    screen.click(25, 46);
+    // A click on a tab at the bottom shows it (SGR mouse: press, release;
+    // columns from 1).
+    let tabs = shown
+        .lines()
+        .find(|line| line.contains("♥  Heartbeats"))
+        .unwrap();
+    let heartbeats = tabs[..tabs.find("♥  Heartbeats").unwrap()].chars().count() as u16;
+    screen.click(heartbeats + 3, 46);
     screen.shows("+ New heartbeat");
     // The Workspaces tab's shows the sessions and the menu over it; Esc
     // closes the menu.
     screen.click(5, 46);
     let menu = screen.shows("+ Add new workspace");
-    assert!(menu.contains("▾ All"), "{menu}");
+    assert!(menu.contains("▾ All workspaces"), "{menu}");
     assert!(
-        menu.contains("✓ All") && menu.contains("No workspace"),
+        menu.contains("✓ All workspaces") && menu.contains("No workspace"),
         "{menu}"
     );
     screen.keys(&["esc"]);
@@ -341,7 +347,7 @@ fn the_left_columns_tabs_switch_and_help_is_searched_in_the_real_tui() {
         .position(|line| line.contains("No workspace"))
         .unwrap();
     screen.click(8, row as u16 + 1);
-    screen.shows("▴ No workspace   ≡ Inbox   ♥ Heartbeats");
+    screen.shows("▴ No workspace   ≡ Inbox   ♥  Heartbeats");
     // The middle of the footer names it too, and no mode.
     screen.until("the footer's workspace", |text| {
         footer(text).contains(" No workspace ") && !footer(text).contains("MODE")
@@ -349,11 +355,11 @@ fn the_left_columns_tabs_switch_and_help_is_searched_in_the_real_tui() {
     screen.click(5, 46);
     screen.shows("✓ No workspace");
     screen.keys(&["up", "enter"]);
-    screen.shows("▴ All");
+    screen.shows("▴ All workspaces");
     // rtop is the drawer's, on the right, beside it.
     screen.send("t", &[]);
     let both = screen.shows("▥ rtop");
-    assert!(both.contains("≡ Inbox   ♥ Heartbeats"), "{both}");
+    assert!(both.contains("≡ Inbox   ♥  Heartbeats"), "{both}");
     screen.send("t", &[]);
     screen.until("rtop hidden", |text| !text.contains("▥ rtop"));
     screen.send("?", &[]);
@@ -373,14 +379,14 @@ fn the_left_columns_tabs_switch_and_help_is_searched_in_the_real_tui() {
     // A session keeps the workspace there; a click on it is the way out.
     screen.send("n", &[]);
     let session = screen.until("a session", |text| {
-        footer(text).contains("Ctrl-\\") && footer(text).contains(" All ")
+        footer(text).contains("Ctrl-\\") && footer(text).contains(" All workspaces ")
     });
     let line = footer(&session);
     assert!(!line.contains("MODE"), "{line}");
-    let before = &line[..line.find(" All ").unwrap()];
+    let before = &line[..line.find(" All workspaces ").unwrap()];
     screen.click(before.chars().count() as u16 + 2, 48);
     screen.until("Rakumux mode", |text| {
-        footer(text).contains("? Help") && footer(text).contains(" All ")
+        footer(text).contains("? Help") && footer(text).contains(" All workspaces ")
     });
 }
 
@@ -392,7 +398,7 @@ fn a_heartbeat_is_made_edited_and_deleted_in_the_real_tui() {
     // Heartbeats, empty: the row that makes one, and its form.
     screen.shows("+ New session");
     // The Workspaces tab names the one shown.
-    screen.shows("▴ All   ≡ Inbox   ♥ Heartbeats");
+    screen.shows("▴ All workspaces   ≡ Inbox   ♥  Heartbeats");
     screen.send("B", &[]);
     screen.shows("+ New heartbeat");
     screen.keys(&["enter"]);

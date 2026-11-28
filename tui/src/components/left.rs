@@ -64,36 +64,50 @@ const NAME_COLS: usize = 16;
 /// The fewest it's cut to.
 const NAME_MIN: usize = 6;
 
-/// One tab as it's drawn: its mark (when there's room), name and count.
+/// One tab as it's drawn: its mark (when there's room), name, count and the
+/// key that shows it (when there's room).
 struct Tab {
     tab: LeftTab,
     icon: Option<&'static str>,
     name: String,
     count: Option<String>,
+    key: Option<&'static str>,
 }
 
 impl Tab {
+    /// The columns between its mark and its name: two after Heartbeats' `♥`,
+    /// which many fonts draw wider than its column.
+    fn icon_gap(&self) -> usize {
+        match self.icon {
+            Some(icon) if self.tab == LeftTab::Beats && str_width(icon) == 1 => 2,
+            _ => 1,
+        }
+    }
+
     fn width(&self) -> usize {
-        let icon = self.icon.map_or(0, |icon| str_width(icon) + 1);
+        let icon = self
+            .icon
+            .map_or(0, |icon| str_width(icon) + self.icon_gap());
         let count = self.count.as_ref().map_or(0, |count| str_width(count) + 1);
-        icon + str_width(&self.name) + count
+        let key = self.key.map_or(0, |key| str_width(key) + 3);
+        icon + str_width(&self.name) + count + key
     }
 }
 
 /// The tabs, the indent and the gap between them, as wide as fits `room`:
-/// short of it the gaps narrow, then the marks of the Inbox and Heartbeats go,
-/// then the workspace's name is cut, then the count goes.
+/// short of it the gaps narrow, then the keys go, then the marks of the Inbox
+/// and Heartbeats, then the workspace's name is cut, then the count goes.
 fn fit(app: &App, room: usize) -> (Vec<Tab>, usize, usize) {
     let count = feed_count(app);
     let shown = app
         .has_workspaces()
-        .then(|| truncate(&printable(&app.workspace_name()), NAME_COLS));
+        .then(|| app.list.workspace_view().clone());
     let chevron = match (&shown, &app.mode) {
         (None, _) => None,
         (Some(_), AppMode::Workspaces(_)) => Some("▾"),
         (Some(_), _) => Some("▴"),
     };
-    let tabs = |cols: usize, icons: bool, counts: bool| -> Vec<Tab> {
+    let tabs = |cols: usize, icons: bool, counts: bool, keys: bool| -> Vec<Tab> {
         LeftTab::ALL
             .into_iter()
             .map(|tab| match tab {
@@ -102,48 +116,54 @@ fn fit(app: &App, room: usize) -> (Vec<Tab>, usize, usize) {
                     icon: chevron.or(icons.then(|| app.icons().sessions())),
                     // The workspace shown (an older daemon has none).
                     name: match &shown {
-                        Some(name) => truncate(name, cols),
+                        Some(view) => truncate(&printable(&app.view_name_within(view, cols)), cols),
                         None => tab.label().to_string(),
                     },
                     count: None,
+                    key: keys.then(|| tab.key()),
                 },
                 LeftTab::Inbox => Tab {
                     tab,
                     icon: icons.then(|| app.icons().feed()),
                     name: tab.label().to_string(),
                     count: count.clone().filter(|_| counts),
+                    key: keys.then(|| tab.key()),
                 },
                 LeftTab::Beats => Tab {
                     tab,
                     icon: icons.then(|| app.icons().beats()),
                     name: tab.label().to_string(),
                     count: None,
+                    key: keys.then(|| tab.key()),
                 },
             })
             .collect()
     };
     let mut tries = vec![
-        (NAME_COLS, true, true, INDENT, 3),
-        (NAME_COLS, true, true, INDENT, 2),
-        (NAME_COLS, true, true, 1, 1),
-        (NAME_COLS, false, true, 1, 2),
-        (NAME_COLS, false, true, 1, 1),
+        (NAME_COLS, true, true, true, INDENT, 3),
+        (NAME_COLS, true, true, true, INDENT, 2),
+        (NAME_COLS, true, true, true, 1, 1),
+        (NAME_COLS, true, true, false, INDENT, 3),
+        (NAME_COLS, true, true, false, INDENT, 2),
+        (NAME_COLS, true, true, false, 1, 1),
+        (NAME_COLS, false, true, false, 1, 2),
+        (NAME_COLS, false, true, false, 1, 1),
     ];
     for counts in [true, false] {
         tries.extend(
             (NAME_MIN..NAME_COLS)
                 .rev()
-                .map(|cols| (cols, false, counts, 1, 1)),
+                .map(|cols| (cols, false, counts, false, 1, 1)),
         );
     }
-    for (cols, icons, counts, indent, gap) in tries {
-        let tabs = tabs(cols, icons, counts);
+    for (cols, icons, counts, keys, indent, gap) in tries {
+        let tabs = tabs(cols, icons, counts, keys);
         let width: usize = tabs.iter().map(Tab::width).sum();
         if indent + width + gap * (tabs.len() - 1) <= room {
             return (tabs, indent, gap);
         }
     }
-    (tabs(NAME_MIN, false, false), 0, 1)
+    (tabs(NAME_MIN, false, false, false), 0, 1)
 }
 
 fn draw_left_tabs(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) {
@@ -189,13 +209,20 @@ fn draw_left_tabs(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hi
             (quiet, quiet)
         };
         if let Some(icon) = tab.icon {
-            spans.push(Span::styled(format!("{icon} "), icon_style));
+            let gap = " ".repeat(tab.icon_gap());
+            spans.push(Span::styled(format!("{icon}{gap}"), icon_style));
         }
         spans.push(Span::styled(tab.name.clone(), name_style));
         if let Some(count) = &tab.count {
             spans.push(Span::styled(
                 format!(" {count}"),
                 Style::default().fg(p.accent_gold),
+            ));
+        }
+        if let Some(key) = tab.key {
+            spans.push(Span::styled(
+                format!(" ({key})"),
+                Style::default().fg(p.text_muted),
             ));
         }
         let width = tab.width();

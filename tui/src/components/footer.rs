@@ -45,7 +45,8 @@ use session_core::model::SessionView;
 use super::format::{activity_badge, status_glyph};
 use super::utils::get_spinner_char;
 use crate::app::types::{AccountStatus, AppMode, Focus};
-use crate::app::{App, Connection, FooterKey, Hit};
+use crate::app::workspaces::ALL_SHORT;
+use crate::app::{App, Connection, FooterKey, Hit, WorkspaceView};
 use crate::layout::{str_width, truncate, SessionLayout};
 use crate::theme;
 
@@ -118,6 +119,8 @@ fn feed_button(app: &App) -> Button {
 /// the one shown.
 struct WorkspaceTab {
     name: String,
+    /// Its name where the tabs don't fit whole: `All` for every session's.
+    short: Option<String>,
     count: usize,
     selected: bool,
 }
@@ -134,7 +137,8 @@ fn workspace_tabs(app: &App) -> Vec<WorkspaceTab> {
     app.workspace_views()
         .iter()
         .map(|view| WorkspaceTab {
-            name: truncate(&app.view_name(view), WORKSPACE_NAME_COLS),
+            name: app.view_name_within(view, WORKSPACE_NAME_COLS),
+            short: (*view == WorkspaceView::All).then(|| ALL_SHORT.to_owned()),
             count: app.view_count(view),
             selected: view == shown,
         })
@@ -295,7 +299,7 @@ const LABEL_MAX: usize = 34;
 const LABEL_MIN: usize = 15;
 
 /// The label, in the centre of the footer: the name of the workspace shown
-/// (`All`, `No workspace`), bold and dark on the orange bar while the keys
+/// (`All workspaces`, `All` where that doesn't fit, `No workspace`), bold and dark on the orange bar while the keys
 /// drive Rakumux, quiet on the blue one while they go to a session; `TERMINAL
 /// MODE` while they go to the terminal panel, which the footer names no
 /// session for. A long name is cut to a quarter of the row (within
@@ -307,13 +311,14 @@ pub fn centre_label(app: &App, room: usize) -> Span<'static> {
         Focus::Session => Style::default().fg(p.neutral_gray).bg(p.selection),
         Focus::Terminal => Style::default().fg(p.text_primary).bg(p.selection),
     };
+    let most = (room / 4).clamp(LABEL_MIN, LABEL_MAX).min(room);
+    let cols = most.saturating_sub(2);
     let name = match app.focus {
-        Focus::List | Focus::Session => app.workspace_name(),
+        Focus::List | Focus::Session => app.view_name_within(app.list.workspace_view(), cols),
         Focus::Terminal if room < LABEL_MIN => "TERMINAL".to_owned(),
         Focus::Terminal => "TERMINAL MODE".to_owned(),
     };
-    let most = (room / 4).clamp(LABEL_MIN, LABEL_MAX).min(room);
-    let content = format!(" {} ", truncate(&name, most.saturating_sub(2)));
+    let content = format!(" {} ", truncate(&name, cols));
     Span::styled(content, style.add_modifier(Modifier::BOLD))
 }
 
@@ -662,8 +667,21 @@ fn footer_on(app: &App, width: usize, day: i32) -> (Line<'static>, Vec<FooterTar
         (Some(tabs), _) => {
             let icon = app.icons().workspace();
             let room = room.saturating_sub(taken);
-            let all = spans_width(&fit_tabs(tabs, icon, usize::MAX, app.focus).0);
-            let fitted = fit_tabs(tabs, icon, room, app.focus);
+            let mut all = spans_width(&fit_tabs(tabs, icon, usize::MAX, app.focus).0);
+            let mut fitted = fit_tabs(tabs, icon, room, app.focus);
+            if fitted.0.is_empty() {
+                // Short of room, `All` for every session's.
+                let short: Vec<WorkspaceTab> = tabs
+                    .iter()
+                    .map(|tab| WorkspaceTab {
+                        name: tab.short.clone().unwrap_or_else(|| tab.name.clone()),
+                        short: None,
+                        ..*tab
+                    })
+                    .collect();
+                all = spans_width(&fit_tabs(&short, icon, usize::MAX, app.focus).0);
+                fitted = fit_tabs(&short, icon, room, app.focus);
+            }
             let (spans, targets) = label_tabs(fitted, all, room, app.focus);
             tab_targets = targets;
             spans
@@ -821,7 +839,7 @@ pub(crate) fn without_version(line: &str) -> &str {
 mod tests {
     use super::*;
     use crate::app::testing::{options, scope, start, view, FakeApi, Harness};
-    use crate::app::WorkspaceView;
+
     use crossterm::event::KeyCode;
     use session_core::api::{ApiError, ErrorCode};
     use session_core::{ids::WorkspaceId, workspace::Workspace};
@@ -1287,12 +1305,15 @@ mod tests {
             // The other views by what they're called.
             h.app.focus = Focus::List;
             for (view, called) in [
-                (WorkspaceView::All, " All "),
+                (WorkspaceView::All, " All workspaces "),
                 (WorkspaceView::Unassigned, " No workspace "),
             ] {
                 h.app.list.set_workspace_view(view);
                 assert_eq!(centre_label(&h.app, 120).content, called);
             }
+            // Short of room every session's view is All, not cut.
+            h.app.list.set_workspace_view(WorkspaceView::All);
+            assert_eq!(centre_label(&h.app, 40).content, " All ");
         }
     }
 
@@ -1642,6 +1663,7 @@ mod tests {
         ]
         .map(|(name, count, selected)| WorkspaceTab {
             name: name.to_owned(),
+            short: None,
             count,
             selected,
         });

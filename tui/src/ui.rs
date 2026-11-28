@@ -387,6 +387,13 @@ mod tests {
         for layout in [SessionLayout::Sidebar, SessionLayout::Tabs] {
             let mut h = with_layout(vec![view("A", "api", 10)], layout);
             for (width, height) in [(160, 48), (120, 30), (90, 24), (60, 20), (40, 20)] {
+                // All workspaces, or All where that doesn't fit (a phone).
+                let called = if width >= 64 {
+                    " All workspaces "
+                } else {
+                    " All "
+                };
+                let wide = called.chars().count() as u16;
                 // Rakumux mode: bold dark ink on the orange bar, in the
                 // centre while it's clear of the buttons and the version
                 // (from 160 columns), else just before the buttons.
@@ -395,7 +402,7 @@ mod tests {
                 }
                 assert_eq!(h.app.focus, Focus::List);
                 let (text, x, fg, bg) = label(&mut h, width, height);
-                assert_eq!(text, " All ");
+                assert_eq!(text, called);
                 assert_eq!((fg, bg), (p.background, p.accent_orange));
                 let buttons = h
                     .app
@@ -412,14 +419,14 @@ mod tests {
                     120
                 };
                 if width >= centred {
-                    assert_eq!(x, (width - 5) / 2, "{width}");
+                    assert_eq!(x, (width - wide) / 2, "{width}");
                 } else {
-                    assert!(x + 5 < buttons, "{width}");
+                    assert!(x + wide < buttons, "{width}");
                 }
                 // Help/Settings keep the mode bar visible on short screens too.
                 h.press(KeyCode::Char('?')).await;
                 let mode = crate::components::footer::centre_label(&h.app, width.into());
-                assert_eq!(mode.content, " All ");
+                assert_eq!(mode.content, called);
                 assert_eq!(mode.style.fg, Some(p.background));
                 assert_eq!(mode.style.bg, Some(p.accent_orange));
                 h.press(KeyCode::Esc).await;
@@ -427,9 +434,9 @@ mod tests {
                 h.press(KeyCode::Enter).await;
                 assert_eq!(h.app.focus, Focus::Session);
                 let (text, x, fg, bg) = label(&mut h, width, height);
-                assert_eq!(text, " All ");
+                assert_eq!(text, called);
                 assert_eq!((fg, bg), (p.neutral_gray, p.selection));
-                assert_eq!(x, (width - 5) / 2, "{width}");
+                assert_eq!(x, (width - wide) / 2, "{width}");
             }
         }
     }
@@ -757,7 +764,7 @@ mod tests {
             // The footer names it, then says why.
             let footer = screen.lines().last().unwrap();
             assert!(
-                footer.starts_with(" session: ✕ build  build exited with code 3 "),
+                footer.contains("✕ build  build exited with code 3 "),
                 "{footer:?}"
             );
         }
@@ -2465,7 +2472,12 @@ mod tests {
                     .filter(|(area, _)| area.y == height - 1)
                     .copied()
                     .collect();
-                assert_eq!(text(targets[0].0), " All ");
+                let called = if width >= 64 {
+                    " All workspaces "
+                } else {
+                    " All "
+                };
+                assert_eq!(text(targets[0].0), called);
                 assert_eq!(targets[0].1, Hit::ModeBadge);
                 for (area, hit) in &targets[1..] {
                     let shown = text(*area);
@@ -2601,7 +2613,7 @@ mod tests {
         assert_eq!(screen.detail.unwrap().right(), 160);
         // The column's tabs at its bottom, the Inbox's in the accent.
         assert_eq!(
-            pane[45], "   ❯ Workspaces   ≡ Inbox   ♥ Heartbeats      «",
+            pane[45], "   ❯ Workspaces   ≡ Inbox   ♥  Heartbeats     «",
             "{wide}"
         );
         assert_eq!(pane[44], "                  ▔▔▔▔▔▔▔", "{wide}");
@@ -2665,7 +2677,7 @@ mod tests {
         assert!(h.app.screen().divider.is_none());
         assert!(narrow.contains("api  claude · repo"), "{narrow}");
         assert!(
-            narrow.contains("❯ Workspaces   ≡ Inbox   ♥ Heartbeats"),
+            narrow.contains("❯ Workspaces (w)   ≡ Inbox (f)   ♥  Heartbeats (B)"),
             "{narrow}"
         );
         assert!(!narrow.contains("«"), "{narrow}");
@@ -3090,7 +3102,7 @@ mod tests {
         h.app.process_pending();
         let screen = render(&mut h.app, 160, 48);
         assert!(
-            screen.contains("❯ Workspaces   ≡ Inbox ●1   ♥ Heartbeats"),
+            screen.contains("❯ Workspaces   ≡ Inbox ●1   ♥  Heartbeats"),
             "{screen}"
         );
         let phone = render(&mut h.app, 40, 20);
@@ -3116,7 +3128,7 @@ mod tests {
         let phone = render(&mut h.app, 45, 40);
         assert_eq!(
             phone.lines().nth(37).unwrap().trim_end(),
-            "   ❯ Workspaces   ≡ Inbox   ♥ Heartbeats",
+            "   ❯ Workspaces   ≡ Inbox   ♥  Heartbeats",
             "{phone}"
         );
         assert!(phone.contains("nightly-build"), "{phone}");
@@ -3167,7 +3179,7 @@ mod tests {
         let width = usize::from(crate::layout::sidebar_width(160));
         let cards = list_column(&screen, width);
         assert_eq!(
-            cards[45], "   ❯ Workspaces   ≡ Inbox   ♥ Heartbeats",
+            cards[45], "   ❯ Workspaces (w)   ≡ Inbox (f)   ♥  Heartbeat",
             "{screen}"
         );
         assert!(cards[1].starts_with("   ◷ last hour"), "{screen}");
@@ -3693,7 +3705,7 @@ mod tests {
         h.press(KeyCode::Char('B')).await;
         assert!(h.app.beats_has_keys());
         let screen = render(&mut h.app, 160, 48);
-        assert!(screen.contains("♥ Heartbeats"), "{screen}");
+        assert!(screen.contains("♥  Heartbeats"), "{screen}");
         assert!(screen.contains("? nightly"), "{screen}");
         assert!(screen.contains("approve?"), "{screen}");
         assert!(screen.contains("● deps"), "{screen}");
