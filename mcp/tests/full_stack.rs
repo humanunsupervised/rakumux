@@ -6,7 +6,11 @@ mod support;
 
 use rakumux_api::discovery::ApiInfo;
 use serde_json::json;
+use session_core::api::ErrorCode;
 use session_core::client::{AuthMode, Client, ClientConfig, SessionApi};
+use session_core::heartbeat::{HeartbeatFields, HeartbeatSpec};
+use session_core::ids::SessionId;
+use session_core::model::ScopeRoot;
 use session_core::paths::Layout;
 use std::time::{Duration, Instant};
 use support::*;
@@ -301,7 +305,7 @@ fn an_agent_in_one_session_drives_a_session_in_another_folder() {
 }
 
 #[test]
-fn an_agent_saves_a_heartbeat_that_waits_for_the_users_approval() {
+fn an_agent_sets_up_changes_and_runs_heartbeats_without_the_users_approval() {
     let api_bin = workspace_binary("rakumux-api", "rakumux-api");
     let ptyd_bin = workspace_binary("rakumux-ptyd", "rakumux-ptyd");
     let (dir, layout) = temp_home();
@@ -330,16 +334,16 @@ fn an_agent_saves_a_heartbeat_that_waits_for_the_users_approval() {
         .unwrap()
         .to_owned();
     let token = session_token(&mut user, &id);
+    let hb_id = |id: &str| session_core::ids::HeartbeatId::from_string(id);
 
-    // The agent in that session saves one: in its folder, waiting.
+    // The agent in that session saves one: in its folder, on at once.
     let mut env = base.to_vec();
     env.push(("RAKUMUX_SESSION_ID", id.as_str()));
     env.push(("RAKUMUX_SESSION_TOKEN", token.as_str()));
     let (mut agent, init) = Mcp::initialized(&layout, &env);
-    assert!(init["instructions"]
-        .as_str()
-        .unwrap()
-        .contains("create_heartbeat"));
+    let instructions = init["instructions"].as_str().unwrap();
+    assert!(instructions.contains("create_heartbeat"));
+    assert!(!instructions.contains("approv"), "{instructions}");
     let result = agent.call(
         "create_heartbeat",
         json!({"name": "nightly", "prompt": "Run the tests and fix what fails.",
@@ -348,27 +352,25 @@ fn an_agent_saves_a_heartbeat_that_waits_for_the_users_approval() {
     assert_eq!(result["isError"], false, "{result}");
     let heartbeat = &result["structuredContent"]["heartbeat"];
     assert_eq!(heartbeat["folder"], json!(here));
-    assert_eq!(heartbeat["enabled"], false);
-    assert_eq!(heartbeat["awaiting_approval"], true);
-    assert!(
-        text(&result).contains("waits for the user's approval"),
-        "{result}"
-    );
+    assert_eq!(heartbeat["enabled"], true);
+    assert_eq!(heartbeat["awaiting_approval"], false);
+    assert!(heartbeat["next_run_at"].is_string(), "{result}");
+    assert!(text(&result).contains("It's on."), "{result}");
     let hb = heartbeat["id"].as_str().unwrap().to_owned();
     assert!(hb.starts_with("hb_"));
 
-    // Even outside any session (the user's caller), what MCP makes waits.
+    // Outside any session (the user's caller) too.
     let result = user.call(
         "create_heartbeat",
         json!({"folder": here, "name": "deps", "prompt": "Update the dependencies.",
-               "schedule": {"kind": "every", "minutes": 60}}),
+               "schedule": {"kind": "every", "minutes": 60}, "command": "echo deps"}),
     );
     assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(result["structuredContent"]["heartbeat"]["enabled"], true);
     assert_eq!(
         result["structuredContent"]["heartbeat"]["awaiting_approval"],
-        true
+        false
     );
-    assert_eq!(result["structuredContent"]["heartbeat"]["enabled"], false);
     // Bad schedules are the daemon's to refuse.
     let result = agent.call(
         "create_heartbeat",
@@ -376,22 +378,14 @@ fn an_agent_saves_a_heartbeat_that_waits_for_the_users_approval() {
     );
     assert_eq!(result["isError"], true, "{result}");
 
-    // Neither runs while it waits for approval, inside a session or not:
-    // the refusal names the command that approves it.
-    for (mcp, name) in [(&mut agent, "nightly"), (&mut user, "deps")] {
-        let result = mcp.call("run_heartbeat", json!({"heartbeat": name}));
-        assert_eq!(result["isError"], true, "{result}");
-        assert_eq!(
-            result["structuredContent"]["error"]["code"], "permission_denied",
-            "{result}"
-        );
-        assert!(
-            text(&result).contains("`rakumux heartbeat enable hb_"),
-            "{result}"
-        );
-    }
-
-    // The user approves it; the agent changing its prompt (by name) pauses it.
+    // The agent runs it now: a run like the user's, recorded with its
+    // session.
+    let result = agent.call("run_heartbeat", json!({"heartbeat": "nightly"}));
+    assert_eq!(result["isError"], false, "{result}");
+    let run = &result["structuredContent"]["session"];
+    assert_eq!(run["name"], "nightly #1", "{result}");
+    assert_eq!(run["folder"], json!(here));
+    assert!(text(&result).contains("a run of heartbeat"), "{result}");
     let client = Client::connect(ClientConfig {
         layout: layout.clone(),
         client_name: "mcp-test".into(),
@@ -401,43 +395,25 @@ fn an_agent_saves_a_heartbeat_that_waits_for_the_users_approval() {
         ptyd_path: None,
     })
     .unwrap();
-    let approved = client
-        .heartbeat_enable(
-            &session_core::ids::HeartbeatId::from_string(hb.as_str()),
-            true,
-        )
-        .unwrap();
-    assert!(approved.enabled);
-    // Approved, the agent runs it now: a run like the user's, recorded with
-    // its session.
-    let result = agent.call("run_heartbeat", json!({"heartbeat": "nightly"}));
-    assert_eq!(result["isError"], false, "{result}");
-    let run = &result["structuredContent"]["session"];
-    assert_eq!(run["name"], "nightly #1", "{result}");
-    assert_eq!(run["folder"], json!(here));
-    assert!(text(&result).contains("a run of heartbeat"), "{result}");
-    let record = client
-        .heartbeat_runs(
-            &session_core::ids::HeartbeatId::from_string(hb.as_str()),
-            None,
-            None,
-        )
-        .unwrap();
+    let record = client.heartbeat_runs(&hb_id(&hb), None, None).unwrap();
     assert_eq!(record.runs.len(), 1);
     assert_eq!(
         record.runs[0].run.session_id.as_ref().map(|id| id.as_str()),
         run["id"].as_str()
     );
+
+    // Its change (by name) keeps it on.
     let result = agent.call(
         "update_heartbeat",
         json!({"heartbeat": "nightly", "prompt": "Run the tests, fix what fails, push."}),
     );
     assert_eq!(result["isError"], false, "{result}");
-    assert_eq!(result["structuredContent"]["heartbeat"]["enabled"], false);
+    assert_eq!(result["structuredContent"]["heartbeat"]["enabled"], true);
     assert_eq!(
         result["structuredContent"]["heartbeat"]["awaiting_approval"],
-        true
+        false
     );
+    assert!(text(&result).contains("It's on."), "{result}");
     let result = agent.call("list_heartbeats", json!({}));
     assert_eq!(result["structuredContent"]["count"], 2, "{result}");
     let nightly = result["structuredContent"]["heartbeats"]
@@ -452,11 +428,77 @@ fn an_agent_saves_a_heartbeat_that_waits_for_the_users_approval() {
         "Run the tests, fix what fails, push."
     );
     assert_eq!(nightly["runs"], 1);
-    // Changed by the agent, it waits again: refused.
-    let result = agent.call("run_heartbeat", json!({"heartbeat": hb}));
-    assert_eq!(result["isError"], true, "{result}");
-    assert_eq!(
-        result["structuredContent"]["error"]["code"], "permission_denied",
-        "{result}"
+
+    // One the user paused stays paused whatever the agent changes, and the
+    // agent still runs it.
+    let paused = client.heartbeat_enable(&hb_id(&hb), false).unwrap();
+    assert!(!paused.enabled);
+    let result = agent.call(
+        "update_heartbeat",
+        json!({"heartbeat": hb, "schedule": {"kind": "every", "minutes": 30}}),
     );
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(result["structuredContent"]["heartbeat"]["enabled"], false);
+    assert_eq!(
+        result["structuredContent"]["heartbeat"]["awaiting_approval"],
+        false
+    );
+    assert!(text(&result).contains("It's paused"), "{result}");
+    let result = agent.call("run_heartbeat", json!({"heartbeat": hb}));
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(result["structuredContent"]["session"]["name"], "nightly #2");
+
+    // Ask agent (the New heartbeat form): made for the agent, without a
+    // prompt or schedule, it waits for it; the agent's update saving them
+    // turns it on, nobody pressing `e`.
+    let asked = client
+        .heartbeat_create(HeartbeatSpec {
+            scope: Some(ScopeRoot::resolve(&here).unwrap()),
+            name: Some("asked".into()),
+            fields: HeartbeatFields {
+                command: Some("echo asked".into()),
+                by_agent: true,
+                ..Default::default()
+            },
+            enabled: false,
+        })
+        .unwrap();
+    assert!(!asked.enabled && asked.awaiting_approval);
+    let result = agent.call("list_heartbeats", json!({}));
+    assert!(text(&result).contains("being set up"), "{result}");
+    let result = agent.call(
+        "update_heartbeat",
+        json!({"heartbeat": asked.handle(), "prompt": "Tidy the changelog.",
+               "schedule": {"kind": "weekdays", "days": ["mon"], "at": "09:00"}}),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(result["structuredContent"]["heartbeat"]["enabled"], true);
+    assert_eq!(
+        result["structuredContent"]["heartbeat"]["awaiting_approval"],
+        false
+    );
+    let on = client.heartbeat(&asked.id).unwrap();
+    assert!(on.enabled && !on.awaiting_approval && on.next_run_at.is_some());
+
+    // Enabling, pausing and deleting stay the user's: the agent's session
+    // is refused them.
+    let session = Client::connect(ClientConfig {
+        layout: layout.clone(),
+        client_name: "mcp-test".into(),
+        version: "test".into(),
+        auth: AuthMode::Session {
+            id: SessionId::from_string(id.as_str()),
+            token: token.clone(),
+        },
+        spawn: false,
+        ptyd_path: None,
+    })
+    .unwrap();
+    for enabled in [true, false] {
+        let refused = session.heartbeat_enable(&hb_id(&hb), enabled).unwrap_err();
+        assert_eq!(refused.code, ErrorCode::PermissionDenied, "{refused:?}");
+    }
+    let refused = session.heartbeat_delete(&hb_id(&hb)).unwrap_err();
+    assert_eq!(refused.code, ErrorCode::PermissionDenied, "{refused:?}");
+    assert_eq!(client.heartbeats(None).unwrap().len(), 3);
 }

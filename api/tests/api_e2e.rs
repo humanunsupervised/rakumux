@@ -1353,7 +1353,7 @@ fn session_events_stream_over_websocket() {
 }
 
 #[test]
-fn heartbeats_are_made_run_and_approved_over_http() {
+fn heartbeats_are_made_changed_and_run_by_agents_over_http() {
     let api = Api::start();
     let folder = api.env.project.display().to_string();
     // A user's heartbeat, enabled: due on its schedule.
@@ -1411,8 +1411,9 @@ fn heartbeats_are_made_run_and_approved_over_http() {
     assert_eq!(reply.body["heartbeat"]["runs"], 1);
     assert_eq!(reply.body["heartbeat"]["last_run"]["outcome"], "started");
 
-    // An agent's heartbeat (a session caller) waits for approval; it can't
-    // approve or delete one, nor run one that waits.
+    // An agent (a session caller) makes, changes and runs heartbeats
+    // without the user's approval; enabling, pausing and deleting stay the
+    // user's.
     let agent = create(
         &api,
         &api.env.project,
@@ -1421,13 +1422,16 @@ fn heartbeats_are_made_run_and_approved_over_http() {
     );
     let agent_id = agent["id"].as_str().unwrap().to_owned();
     let token = wait_for_session_token(&api, &agent_id);
-    let reply = api.call_as(
-        &agent_id,
-        &token,
+    let as_agent = |method: &str, path: &str, body: Option<serde_json::Value>| {
+        api.call_as(&agent_id, &token, method, path, body)
+    };
+    // Complete and enabled: on at once.
+    let reply = as_agent(
         "POST",
         "/v1/heartbeats",
         Some(json!({
             "name": "nightly",
+            "command": "echo started-nightly",
             "prompt": "run the tests",
             "schedule": {"kind": "daily", "at": "02:00"},
             "enabled": true,
@@ -1436,39 +1440,74 @@ fn heartbeats_are_made_run_and_approved_over_http() {
     assert_eq!(reply.status, 201, "{:?}", reply.body);
     let nightly = reply.body["heartbeat"].clone();
     let nightly_id = nightly["id"].as_str().unwrap().to_owned();
-    assert_eq!(nightly["enabled"], false);
-    assert_eq!(nightly["awaiting_approval"], true);
+    assert_eq!(nightly["enabled"], true);
+    assert_eq!(nightly["awaiting_approval"], false);
+    assert!(nightly["next_run_at"].is_string(), "{nightly:?}");
     assert_eq!(nightly["folder"], folder.as_str());
     for (method, path) in [
         ("POST", format!("/v1/heartbeats/{nightly_id}/enable")),
-        ("POST", format!("/v1/heartbeats/{nightly_id}/run")),
+        ("POST", format!("/v1/heartbeats/{nightly_id}/pause")),
         ("DELETE", format!("/v1/heartbeats/{nightly_id}")),
     ] {
-        let reply = api.call_as(&agent_id, &token, method, &path, None);
+        let reply = as_agent(method, &path, None);
         assert_eq!(reply.status, 403, "{method} {path}: {:?}", reply.body);
     }
-    let run_nightly = format!("/v1/heartbeats/{nightly_id}/run");
-    let reply = api.call_as(&agent_id, &token, "POST", &run_nightly, None);
-    let refused = reply.body["error"]["message"].as_str().unwrap_or_default();
-    assert!(
-        refused.contains(&format!("`rakumux heartbeat enable {nightly_id}`")),
-        "{:?}",
-        reply.body
+    // Its change keeps it on.
+    let nightly_path = format!("/v1/heartbeats/{nightly_id}");
+    let reply = as_agent(
+        "PATCH",
+        &nightly_path,
+        Some(json!({"prompt": "run the tests, then push"})),
     );
+    assert_eq!(reply.status, 200, "{:?}", reply.body);
+    assert_eq!(reply.body["heartbeat"]["enabled"], true);
+    assert_eq!(reply.body["heartbeat"]["awaiting_approval"], false);
+    // Made without its prompt: it waits for its agent, then turns on once
+    // the agent's update gives it one.
+    let reply = as_agent(
+        "POST",
+        "/v1/heartbeats",
+        Some(json!({"name": "setup", "command": "echo started-setup"})),
+    );
+    assert_eq!(reply.status, 201, "{:?}", reply.body);
+    let setup = reply.body["heartbeat"].clone();
+    assert_eq!(setup["enabled"], false);
+    assert_eq!(setup["awaiting_approval"], true);
+    let setup_path = format!("/v1/heartbeats/{}", setup["id"].as_str().unwrap());
+    let reply = as_agent(
+        "PATCH",
+        &setup_path,
+        Some(json!({"prompt": "tidy up", "schedule": {"kind": "every", "minutes": 60}})),
+    );
+    assert_eq!(reply.status, 200, "{:?}", reply.body);
+    assert_eq!(reply.body["heartbeat"]["enabled"], true);
+    assert_eq!(reply.body["heartbeat"]["awaiting_approval"], false);
+    assert!(reply.body["heartbeat"]["next_run_at"].is_string());
+    // One the user paused stays paused whatever the agent changes, and the
+    // agent still runs it.
+    let reply = api.call("POST", &format!("{nightly_path}/pause"), None);
+    assert_eq!(reply.body["heartbeat"]["enabled"], false);
+    let reply = as_agent(
+        "PATCH",
+        &nightly_path,
+        Some(json!({"schedule": {"kind": "every", "minutes": 30}})),
+    );
+    assert_eq!(reply.status, 200, "{:?}", reply.body);
+    assert_eq!(reply.body["heartbeat"]["enabled"], false);
+    assert_eq!(reply.body["heartbeat"]["awaiting_approval"], false);
+    let run_nightly = format!("{nightly_path}/run");
+    let reply = as_agent("POST", &run_nightly, None);
+    assert_eq!(reply.status, 201, "{:?}", reply.body);
+    assert_eq!(reply.body["session"]["name"], "nightly #1");
     // The user's caller for an agent (`by_agent`, as rakumux-mcp sends):
     // the same; unknown fields are refused.
     let reply = api.call("POST", &run_nightly, Some(json!({"by_agent": true})));
-    assert_eq!(reply.status, 403, "{:?}", reply.body);
+    assert_eq!(reply.status, 201, "{:?}", reply.body);
+    assert_eq!(reply.body["session"]["name"], "nightly #2");
     let reply = api.call("POST", &run_nightly, Some(json!({"now": true})));
     assert_eq!(reply.status, 400, "{:?}", reply.body);
     // The user's own runs for the agent: a run like the user's.
-    let reply = api.call_as(
-        &agent_id,
-        &token,
-        "POST",
-        &format!("/v1/heartbeats/{id}/run"),
-        None,
-    );
+    let reply = as_agent("POST", &format!("/v1/heartbeats/{id}/run"), None);
     assert_eq!(reply.status, 201, "{:?}", reply.body);
     assert_eq!(reply.body["session"]["name"], "deps #2");
     assert_eq!(reply.body["session"]["heartbeat"]["id"], id.as_str());
@@ -1480,26 +1519,12 @@ fn heartbeats_are_made_run_and_approved_over_http() {
     );
     assert_eq!(reply.status, 201, "{:?}", reply.body);
     assert_eq!(reply.body["session"]["name"], "deps #3");
-    // The user approves it; the agent changing its prompt pauses it again.
-    let reply = api.call("POST", &format!("/v1/heartbeats/{nightly_id}/enable"), None);
-    assert_eq!(reply.status, 200, "{:?}", reply.body);
-    assert_eq!(reply.body["heartbeat"]["enabled"], true);
-    let reply = api.call_as(
-        &agent_id,
-        &token,
-        "PATCH",
-        &format!("/v1/heartbeats/{nightly_id}"),
-        Some(json!({"prompt": "run the tests, then push"})),
-    );
-    assert_eq!(reply.status, 200, "{:?}", reply.body);
-    assert_eq!(reply.body["heartbeat"]["enabled"], false);
-    assert_eq!(reply.body["heartbeat"]["awaiting_approval"], true);
 
     // Listed by folder; paused and deleted by the user.
     let path = format!("/v1/heartbeats?folder={}", enc(&folder));
     let reply = api.call("GET", &path, None);
     assert_eq!(reply.status, 200, "{:?}", reply.body);
-    assert_eq!(reply.body["heartbeats"].as_array().unwrap().len(), 2);
+    assert_eq!(reply.body["heartbeats"].as_array().unwrap().len(), 3);
     let reply = api.call("POST", &format!("/v1/heartbeats/{id}/pause"), None);
     assert_eq!(reply.body["heartbeat"]["enabled"], false);
     let reply = api.call("DELETE", &format!("/v1/heartbeats/{id}"), None);
@@ -1507,5 +1532,5 @@ fn heartbeats_are_made_run_and_approved_over_http() {
     let reply = api.call("GET", &format!("/v1/heartbeats/{id}"), None);
     assert_eq!(reply.status, 404, "{:?}", reply.body);
     let reply = api.call("GET", "/v1/heartbeats", None);
-    assert_eq!(reply.body["heartbeats"].as_array().unwrap().len(), 1);
+    assert_eq!(reply.body["heartbeats"].as_array().unwrap().len(), 2);
 }

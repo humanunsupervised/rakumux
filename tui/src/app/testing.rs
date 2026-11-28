@@ -449,6 +449,14 @@ impl SessionApi for FakeApi {
             runs: 0,
             last_run: None,
         };
+        // As the daemon: an agent's is on when complete and enabled, else
+        // it waits for its agent.
+        let mut heartbeat = heartbeat;
+        if spec.fields.by_agent && !(heartbeat.enabled && heartbeat.is_complete()) {
+            heartbeat.enabled = false;
+        } else {
+            heartbeat.awaiting_approval = false;
+        }
         state.heartbeats.push(heartbeat.clone());
         Ok(heartbeat)
     }
@@ -480,6 +488,10 @@ impl SessionApi for FakeApi {
         }
         if let Some(schedule) = edit.fields.schedule {
             heartbeat.schedule = Some(schedule);
+        }
+        if edit.fields.by_agent && heartbeat.awaiting_approval && heartbeat.is_complete() {
+            heartbeat.enabled = true;
+            heartbeat.awaiting_approval = false;
         }
         Ok(heartbeat.clone())
     }

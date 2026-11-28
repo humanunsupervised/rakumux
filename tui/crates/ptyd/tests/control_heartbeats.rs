@@ -1,8 +1,8 @@
 //! Heartbeats in the control layer, on a fake host and a clock the tests
 //! move: due runs start `<name> #<n>` sessions that type the command and
 //! give the agent its task once its prompt shows; earlier runs that wait
-//! end, busy ones skip a due time; ten runs stay listed; agents' heartbeats
-//! wait for the user's approval.
+//! end, busy ones skip a due time; ten runs stay listed; agents set
+//! heartbeats up, change and run them without the user's approval.
 
 mod control_common;
 
@@ -302,17 +302,25 @@ fn a_long_sleep_gives_one_run_and_ten_runs_stay_listed() {
 const RUNS_KEPT_PLUS_ONE: usize = 11;
 
 #[test]
-fn agents_heartbeats_wait_for_the_users_approval() {
+fn agents_set_heartbeats_up_and_change_them_without_the_users_approval() {
     let (h, _skip) = harness();
     let agent = h.create(Some("agent"));
     let caller = h.session_caller(&agent.id);
+    let edit = |id: &HeartbeatId, name: Option<&str>, fields: HeartbeatFields| {
+        Request::HeartbeatUpdate(HeartbeatEdit {
+            id: id.clone(),
+            name: name.map(String::from),
+            fields,
+        })
+    };
 
-    // Made by a session, in its own folder when it names none: paused.
+    // Made complete and enabled by a session, in its own folder when it
+    // names none: on at once.
     let mut asked = spec(&h, "nightly", Schedule::Daily { at: "02:00".into() });
     asked.scope = None;
     let made = heartbeat(h.handle(&caller, Request::HeartbeatCreate(asked)));
     assert_eq!(made.scope, h.scope);
-    assert!(!made.enabled && made.awaiting_approval && made.next_run_at.is_none());
+    assert!(made.enabled && !made.awaiting_approval && made.next_run_at.is_some());
     assert_eq!(
         made.created_by,
         Creator::Session {
@@ -324,59 +332,18 @@ fn agents_heartbeats_wait_for_the_users_approval() {
         Response::Heartbeats { heartbeats } => assert_eq!(heartbeats.len(), 1),
         other => panic!("{other:?}"),
     }
-    // It can't approve or delete one, nor run it while it waits.
-    denied(h.handle(
-        &caller,
-        Request::HeartbeatEnable {
-            id: made.id.clone(),
-            enabled: true,
-        },
-    ));
-    let refused = denied(h.handle(
-        &caller,
-        Request::HeartbeatRun {
-            id: made.id.clone(),
-            by_agent: false,
-        },
-    ));
-    assert!(
-        refused
-            .message
-            .contains(&format!("`rakumux heartbeat enable hb_{}`", made.id)),
-        "{}",
-        refused.message
-    );
-    denied(h.handle(
-        &caller,
-        Request::HeartbeatDelete {
-            id: made.id.clone(),
-        },
-    ));
 
-    // The user approves: it runs on its schedule.
-    let approved = heartbeat(h.handle(
-        &h.user,
-        Request::HeartbeatEnable {
-            id: made.id.clone(),
-            enabled: true,
-        },
+    // Its changes never pause it: a rename, a new prompt, a new schedule.
+    let due = made.next_run_at;
+    let renamed = heartbeat(h.handle(
+        &caller,
+        edit(&made.id, Some("nightly build"), Default::default()),
     ));
-    assert!(approved.enabled && !approved.awaiting_approval && approved.next_run_at.is_some());
-
-    // Renaming it doesn't change what it runs: still enabled.
-    let edit = |name: Option<&str>, fields: HeartbeatFields| {
-        Request::HeartbeatUpdate(HeartbeatEdit {
-            id: made.id.clone(),
-            name: name.map(String::from),
-            fields,
-        })
-    };
-    let renamed = heartbeat(h.handle(&caller, edit(Some("nightly build"), Default::default())));
     assert!(renamed.enabled && renamed.name == "nightly build");
-    // Changing its prompt does: paused again until approved.
     let changed = heartbeat(h.handle(
         &caller,
         edit(
+            &made.id,
             None,
             HeartbeatFields {
                 prompt: Some("and push to main".into()),
@@ -384,57 +351,154 @@ fn agents_heartbeats_wait_for_the_users_approval() {
             },
         ),
     ));
-    assert!(!changed.enabled && changed.awaiting_approval && changed.next_run_at.is_none());
-
-    // Through rakumux-mcp the user's caller says by_agent: the same.
-    let approved = heartbeat(h.handle(
-        &h.user,
-        Request::HeartbeatEnable {
-            id: made.id.clone(),
-            enabled: true,
-        },
-    ));
-    assert!(approved.enabled);
-    let by_agent = heartbeat(h.handle(
-        &h.user,
+    assert!(changed.enabled && !changed.awaiting_approval);
+    assert_eq!(
+        changed.next_run_at, due,
+        "the same schedule, the same due time"
+    );
+    let rescheduled = heartbeat(h.handle(
+        &caller,
         edit(
+            &made.id,
             None,
             HeartbeatFields {
                 schedule: Some(every(60)),
+                ..Default::default()
+            },
+        ),
+    ));
+    assert!(rescheduled.enabled && !rescheduled.awaiting_approval);
+    assert!(rescheduled.next_run_at.is_some() && rescheduled.next_run_at != due);
+
+    // Made without a prompt (Ask agent's, or an agent's first step): it
+    // waits for its agent, enabled asked for or not, and turns on once the
+    // agent's update completes it.
+    let mut unfinished = spec(&h, "setting up", every(30));
+    unfinished.fields.prompt = None;
+    let waiting = heartbeat(h.handle(&caller, Request::HeartbeatCreate(unfinished)));
+    assert!(!waiting.enabled && waiting.awaiting_approval && waiting.next_run_at.is_none());
+    let renamed = heartbeat(h.handle(
+        &caller,
+        edit(&waiting.id, Some("still setting up"), Default::default()),
+    ));
+    assert!(
+        !renamed.enabled && renamed.awaiting_approval,
+        "still incomplete"
+    );
+    let on = heartbeat(h.handle(
+        &caller,
+        edit(
+            &waiting.id,
+            None,
+            HeartbeatFields {
+                prompt: Some("tidy the changelog".into()),
+                ..Default::default()
+            },
+        ),
+    ));
+    assert!(on.enabled && !on.awaiting_approval && on.next_run_at.is_some());
+    // Complete but not asked for enabled: it waits too, and the agent's
+    // next update turns it on.
+    let mut later = spec(&h, "later", every(30));
+    later.enabled = false;
+    let waiting = heartbeat(h.handle(&caller, Request::HeartbeatCreate(later)));
+    assert!(!waiting.enabled && waiting.awaiting_approval);
+    let on = heartbeat(h.handle(
+        &caller,
+        edit(
+            &waiting.id,
+            None,
+            HeartbeatFields {
+                schedule: Some(every(45)),
+                ..Default::default()
+            },
+        ),
+    ));
+    assert!(on.enabled && !on.awaiting_approval && on.next_run_at.is_some());
+
+    // One the user paused stays paused, whatever the agent changes.
+    let paused = heartbeat(h.handle(
+        &h.user,
+        Request::HeartbeatEnable {
+            id: made.id.clone(),
+            enabled: false,
+        },
+    ));
+    assert!(!paused.enabled && !paused.awaiting_approval);
+    let still = heartbeat(h.handle(
+        &caller,
+        edit(
+            &made.id,
+            None,
+            HeartbeatFields {
+                prompt: Some("and tag a release".into()),
+                ..Default::default()
+            },
+        ),
+    ));
+    assert!(!still.enabled && !still.awaiting_approval && still.next_run_at.is_none());
+
+    // Through rakumux-mcp the user's caller says by_agent: the same rules.
+    let mut mcp = spec(&h, "from mcp", every(60));
+    mcp.fields.by_agent = true;
+    let made = heartbeat(h.handle(&h.user, Request::HeartbeatCreate(mcp)));
+    assert!(made.enabled && !made.awaiting_approval);
+    let mut mcp = spec(&h, "mcp unfinished", every(60));
+    mcp.fields.by_agent = true;
+    mcp.fields.prompt = None;
+    let waiting = heartbeat(h.handle(&h.user, Request::HeartbeatCreate(mcp)));
+    assert!(!waiting.enabled && waiting.awaiting_approval);
+    let on = heartbeat(h.handle(
+        &h.user,
+        edit(
+            &waiting.id,
+            None,
+            HeartbeatFields {
+                prompt: Some("check the build".into()),
                 by_agent: true,
                 ..Default::default()
             },
         ),
     ));
-    assert!(!by_agent.enabled && by_agent.awaiting_approval);
-    let mut mcp = spec(&h, "from mcp", every(60));
-    mcp.fields.by_agent = true;
-    let made = heartbeat(h.handle(&h.user, Request::HeartbeatCreate(mcp)));
-    assert!(!made.enabled && made.awaiting_approval);
-    // The user's own edits keep it enabled.
-    let approved = heartbeat(h.handle(
-        &h.user,
-        Request::HeartbeatEnable {
-            id: made.id.clone(),
-            enabled: true,
+    assert!(on.enabled && !on.awaiting_approval);
+
+    // The user's own: incomplete and enabled is refused; without enabled a
+    // plain pause, nothing awaited.
+    let mut incomplete = spec(&h, "mine", every(60));
+    incomplete.fields.prompt = None;
+    assert_eq!(
+        error(h.handle(&h.user, Request::HeartbeatCreate(incomplete))).code,
+        ErrorCode::InvalidArgument
+    );
+    let mut paused = spec(&h, "mine", every(60));
+    paused.enabled = false;
+    let mine = heartbeat(h.handle(&h.user, Request::HeartbeatCreate(paused)));
+    assert!(!mine.enabled && !mine.awaiting_approval);
+
+    // Enabling, pausing and deleting stay the user's.
+    for enabled in [true, false] {
+        denied(h.handle(
+            &caller,
+            Request::HeartbeatEnable {
+                id: mine.id.clone(),
+                enabled,
+            },
+        ));
+    }
+    denied(h.handle(
+        &caller,
+        Request::HeartbeatDelete {
+            id: mine.id.clone(),
         },
     ));
-    let kept = heartbeat(h.handle(
-        &h.user,
-        Request::HeartbeatUpdate(HeartbeatEdit {
-            id: approved.id.clone(),
-            name: None,
-            fields: HeartbeatFields {
-                prompt: Some("something else".into()),
-                ..Default::default()
-            },
-        }),
-    ));
-    assert!(kept.enabled && !kept.awaiting_approval);
+    assert!(!get(&h, &mine.id).enabled);
     let audit = h.audit();
     assert!(audit
         .iter()
         .any(|row| row.method == "heartbeat.enable" && row.decision == "denied"));
+    assert!(audit
+        .iter()
+        .any(|row| row.method == "heartbeat.delete" && row.decision == "denied"));
 }
 
 fn run_now(id: &HeartbeatId, by_agent: bool) -> Request {
@@ -445,13 +509,13 @@ fn run_now(id: &HeartbeatId, by_agent: bool) -> Request {
 }
 
 #[test]
-fn agents_run_a_heartbeat_now_only_once_the_user_approved_it() {
+fn agents_run_any_heartbeat_now() {
     let (h, _skip) = harness();
     let agent = h.create(Some("agent"));
     let caller = h.session_caller(&agent.id);
     let as_agent = format!("session:{}", agent.id);
 
-    // The user's own: the agent runs it, paused or not, as the user would.
+    // The user's own, paused: the agent runs it as the user would.
     let deps = heartbeat(h.handle(
         &h.user,
         Request::HeartbeatCreate(spec(&h, "deps", every(30))),
@@ -476,9 +540,8 @@ fn agents_run_a_heartbeat_now_only_once_the_user_approved_it() {
     assert!(h.audit().iter().any(|row| row.caller == as_agent
         && row.method == "heartbeat.run"
         && row.decision == "allowed"));
-
-    // Changed by the agent, it waits for approval: refused, nothing run,
-    // the user still runs it.
+    // Changed by the agent and enabled: it runs it now, and through
+    // rakumux-mcp (`by_agent`) too.
     heartbeat(h.handle(
         &caller,
         Request::HeartbeatUpdate(HeartbeatEdit {
@@ -490,54 +553,33 @@ fn agents_run_a_heartbeat_now_only_once_the_user_approved_it() {
             },
         }),
     ));
-    let refused = denied(h.handle(&caller, run_now(&deps.id, false)));
-    assert!(
-        refused
-            .message
-            .contains(&format!("`rakumux heartbeat enable hb_{}`", deps.id)),
-        "{}",
-        refused.message
-    );
-    assert_eq!(get(&h, &deps.id).runs, 1);
-    assert_eq!(runs_of(&h, &deps.id).len(), 1);
-    // The user's caller for an agent (rakumux-mcp's `by_agent`): the same.
-    denied(h.handle(&h.user, run_now(&deps.id, true)));
-    let second = session(h.handle(&h.user, run_now(&deps.id, false)));
-    assert_eq!(second.name, "deps #2");
-    assert!(h.audit().iter().any(|row| row.caller == as_agent
-        && row.method == "heartbeat.run"
-        && row.decision == "denied"));
-
-    // Approved again, then paused: the agent runs it, by_agent too.
-    for enabled in [true, false] {
-        heartbeat(h.handle(
-            &h.user,
-            Request::HeartbeatEnable {
-                id: deps.id.clone(),
-                enabled,
-            },
-        ));
-    }
-    let third = session(h.handle(&caller, run_now(&deps.id, false)));
-    assert_eq!(third.name, "deps #3");
-    let fourth = session(h.handle(&h.user, run_now(&deps.id, true)));
-    assert_eq!(fourth.name, "deps #4");
-
-    // Enabling and deleting stay the user's.
-    denied(h.handle(
-        &caller,
+    heartbeat(h.handle(
+        &h.user,
         Request::HeartbeatEnable {
             id: deps.id.clone(),
             enabled: true,
         },
     ));
-    denied(h.handle(
-        &caller,
-        Request::HeartbeatDelete {
-            id: deps.id.clone(),
-        },
-    ));
-    assert_eq!(heartbeats(&h).len(), 1);
+    let second = session(h.handle(&caller, run_now(&deps.id, false)));
+    assert_eq!(second.name, "deps #2");
+    let third = session(h.handle(&h.user, run_now(&deps.id, true)));
+    assert_eq!(third.name, "deps #3");
+    assert!(get(&h, &deps.id).enabled);
+
+    // One still waiting for its agent runs too, and still waits.
+    let mut later = spec(&h, "later", every(30));
+    later.scope = None;
+    later.enabled = false;
+    let waiting = heartbeat(h.handle(&caller, Request::HeartbeatCreate(later)));
+    assert!(waiting.awaiting_approval);
+    let run = session(h.handle(&caller, run_now(&waiting.id, true)));
+    assert_eq!(run.name, "later #1");
+    let after = get(&h, &waiting.id);
+    assert!(!after.enabled && after.awaiting_approval);
+    assert!(!h
+        .audit()
+        .iter()
+        .any(|row| row.method == "heartbeat.run" && row.decision == "denied"));
 }
 
 #[test]

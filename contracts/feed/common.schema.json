@@ -1057,7 +1057,7 @@
         },
         "enabled": { "type": "boolean" },
         "awaiting_approval": {
-          "description": "An agent made or changed it: paused until the user reads it and approves it (`enable`).",
+          "description": "Not turned on yet: an agent made it and is still setting it up; it turns on once the agent's update gives it its prompt and schedule (or the user enables it). Releases up to 0.1.87 meant by it that an agent made or changed it and it waited for the user's approval.",
           "type": "boolean"
         },
         "by_agent": {

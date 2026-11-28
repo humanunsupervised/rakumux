@@ -13,8 +13,8 @@ send_prompt (a prompt to its agent, or a command line, then Enter), send_keys (a
 question, a menu or a permission prompt, interrupt), wait_for_session (until its agent \
 finishes or asks something), kill_session and revive_session. Heartbeats (tasks Rakumux runs \
 on a clock, each run a new session given the task): list_heartbeats, create_heartbeat, \
-update_heartbeat, run_heartbeat (a run now); what you make or change waits for the user's \
-approval, and you run only one the user approved.
+update_heartbeat, run_heartbeat (a run now); one you create with its prompt and schedule is \
+on at once, and your changes keep it as it was (on, or paused by the user).
 
 - Use them when the user asks about their Rakumux sessions, wants work started in a separate \
 terminal, or wants you to direct the agents in their other sessions; not just because work \

@@ -2,12 +2,14 @@
 //! scheduler that starts a run when one is due, and a new session's
 //! [`FirstInput`], typed once its agent's prompt shows.
 //!
-//! - **Approval.** What a session caller makes or changes (or anything that
-//!   says `by_agent`, as `rakumux-mcp` does) waits for the user, paused:
-//!   creating one, or changing what an enabled one runs, sets
-//!   `awaiting_approval` and pauses it. Only the user enables it, and an
-//!   agent runs one now only once the user approved it (paused or not):
-//!   [`refuse_unapproved`].
+//! - **Agents.** A session caller (or anything that says `by_agent`, as
+//!   `rakumux-mcp` does) makes, changes and runs heartbeats without the
+//!   user's approval. One it creates complete and `enabled` is on at once;
+//!   one it creates without everything a run needs, or not `enabled`, is
+//!   paused with `awaiting_approval` (its agent is still setting it up),
+//!   and an agent's update that leaves it complete turns it on. An agent's
+//!   update never pauses one, and one the user paused stays paused. It may
+//!   run any one now. Enabling, pausing and deleting are the user's.
 //! - **Runs.** At a due time the daemon starts `<name> #<n>` in the
 //!   heartbeat's folder, as the user would: a login shell that types the
 //!   heartbeat's command with its prompt as an argument (`claude --x --
@@ -277,15 +279,13 @@ impl Inner {
         &self,
         caller: &Caller,
         id: &HeartbeatId,
-        by_agent: bool,
     ) -> Result<Response, ApiError> {
         let mut state = self.lock();
         let found = state.heartbeats.get(id).cloned();
         let result = policy::authorize(caller, Op::HeartbeatRun, None).and_then(|()| {
-            let Some(heartbeat) = &found else {
+            if found.is_none() {
                 return Err(missing(id));
-            };
-            refuse_unapproved(heartbeat, caller.session_id().is_some() || by_agent)?;
+            }
             let now = self.now();
             let started = self.start_run(&mut state, id, true, now);
             let view = match &started {
@@ -364,12 +364,17 @@ impl Inner {
             last_run: None,
         };
         self.apply_fields(state, &mut heartbeat, &spec.fields, true);
-        if spec.enabled && !by_agent {
-            if !heartbeat.is_complete() {
-                return Err(incomplete(&heartbeat));
+        if spec.enabled {
+            match heartbeat.is_complete() {
+                true => {
+                    heartbeat.enabled = true;
+                    heartbeat.awaiting_approval = false;
+                    heartbeat.next_run_at = next_due(&heartbeat, now);
+                }
+                // An agent's waits for its update to complete it.
+                false if by_agent => {}
+                false => return Err(incomplete(&heartbeat)),
             }
-            heartbeat.enabled = true;
-            heartbeat.next_run_at = next_due(&heartbeat, now);
         }
         registry_of(state)?.save_heartbeat(&heartbeat)?;
         state
@@ -402,9 +407,12 @@ impl Inner {
         let schedule_before = heartbeat.schedule.clone();
         self.apply_fields(state, &mut heartbeat, &edit.fields, false);
         let now = self.now().div_euclid(1000);
-        if by_agent && edit.fields.changes_runs() {
-            heartbeat.enabled = false;
-            heartbeat.awaiting_approval = true;
+        // One its agent is still setting up turns on once complete; one the
+        // user paused stays paused.
+        if by_agent && heartbeat.awaiting_approval && heartbeat.is_complete() {
+            heartbeat.enabled = true;
+            heartbeat.awaiting_approval = false;
+            heartbeat.next_run_at = None;
         }
         if heartbeat.enabled && !heartbeat.is_complete() {
             heartbeat.enabled = false;
@@ -1202,25 +1210,6 @@ fn name_taken(state: &State, scope: &ScopeRoot, name: &str, except: Option<&Hear
 fn name_in_use(name: &str) -> ApiError {
     invalid(format!(
         "another heartbeat of this folder is named {name:?}"
-    ))
-}
-
-/// An agent (a session caller, or `by_agent`) runs a heartbeat only once
-/// the user approved it: one an agent made or changed waits for approval
-/// until the user enables it. Whether it's paused doesn't matter.
-fn refuse_unapproved(heartbeat: &Heartbeat, by_agent: bool) -> Result<(), ApiError> {
-    if !(by_agent && heartbeat.awaiting_approval) {
-        return Ok(());
-    }
-    Err(ApiError::new(
-        ErrorCode::PermissionDenied,
-        format!(
-            "heartbeat {} ({}) waits for the user's approval; an agent runs it once the user \
-             approves it: `rakumux heartbeat enable {}`",
-            heartbeat.name,
-            heartbeat.handle(),
-            heartbeat.handle()
-        ),
     ))
 }
 

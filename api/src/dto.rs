@@ -1108,7 +1108,9 @@ pub struct Heartbeat {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schedule: Option<Schedule>,
     pub enabled: bool,
-    /// An agent made or changed it: paused until the user enables it.
+    /// Not turned on yet: an agent made it and is still setting it up; an
+    /// agent's update that leaves it complete turns it on. (The name is kept
+    /// for compatibility.)
     pub awaiting_approval: bool,
     pub created_by: Creator,
     pub created_at: String,
@@ -1191,11 +1193,12 @@ pub struct CreateHeartbeatBody {
     pub prompt: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schedule: Option<Schedule>,
-    /// Start it enabled (user callers; one an agent makes waits for
-    /// approval).
+    /// Start it enabled. A user's needs a command, a prompt and a schedule;
+    /// an agent's without them waits until its update gives them.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub enabled: bool,
-    /// Made for an agent (MCP sets it): it waits for approval.
+    /// Made for an agent (MCP sets it): not complete and enabled, it waits
+    /// for its agent's update (`awaiting_approval`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub by_agent: bool,
 }
@@ -1214,8 +1217,8 @@ pub struct UpdateHeartbeatBody {
     pub prompt: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schedule: Option<Schedule>,
-    /// Changed for an agent (MCP sets it): a change to what it runs waits
-    /// for approval.
+    /// Changed for an agent (MCP sets it): never pauses it, and turns on one
+    /// waiting for its agent once complete.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub by_agent: bool,
 }
@@ -1224,8 +1227,8 @@ pub struct UpdateHeartbeatBody {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RunHeartbeatBody {
-    /// Asked for by an agent (MCP sets it): refused while the heartbeat
-    /// waits for the user's approval, whoever the caller is.
+    /// Asked for by an agent (MCP sets it). Kept for compatibility: an
+    /// agent runs any heartbeat.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub by_agent: bool,
 }

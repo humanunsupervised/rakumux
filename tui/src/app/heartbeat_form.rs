@@ -1,12 +1,14 @@
 //! The New heartbeat form (`AppMode::NewHeartbeat`; Heartbeats' `n` and
 //! `+ New heartbeat`): its name, schedule and folder, and the command each
 //! run is: the agent, its arguments and the prompt. `Create` makes it, on its
-//! schedule, and Heartbeats shows it whole; `Ask agent` makes it paused and
-//! opens a session whose agent is asked to fill it in.
+//! schedule, and Heartbeats shows it whole; `Ask agent` makes it for its
+//! agent (`by_agent`), paused while the agent sets it up, and opens a session
+//! whose agent is asked to fill it in: its update saving the prompt and
+//! schedule turns it on.
 //!
 //! Heartbeats' `c` opens it on a heartbeat (`Editing`): `Save` changes what
 //! was changed in it, and nothing else, so what an agent changed meanwhile
-//! stays and waits for approval. Its folder can't change.
+//! stays. Its folder can't change.
 //!
 //! Ctrl-S saves (or creates) from any field. `Tab`, `Enter` and `↑`/`↓` go through the fields (in a prompt of several
 //! rows `↑`/`↓` go through those first; Alt-Enter or Ctrl-J starts a new
@@ -519,7 +521,8 @@ impl HeartbeatForm {
     }
 
     /// What it makes: complete and on (`Create`), or for its agent to fill
-    /// in (`setup`); else the field that's wrong and why.
+    /// in (`setup`: made for the agent, it turns on once the agent saves its
+    /// prompt and schedule); else the field that's wrong and why.
     fn spec(&self, setup: bool) -> Result<HeartbeatSpec, (FormField, String)> {
         let prompt = self.prompt.value().trim();
         // With no prompt, the agent asks for the schedule too.
@@ -543,7 +546,7 @@ impl HeartbeatForm {
                 command,
                 prompt: (!prompt.is_empty()).then(|| prompt.to_string()),
                 schedule,
-                by_agent: false,
+                by_agent: setup,
             },
             enabled: !setup,
         })
@@ -958,7 +961,8 @@ mod tests {
         let mut form = form();
         assert_eq!(form.spec(false).unwrap_err().0, FormField::Prompt);
         let empty = form.spec(true).unwrap();
-        assert!(!empty.enabled && empty.name.is_none());
+        // Made for its agent: on once the agent saves what it's missing.
+        assert!(!empty.enabled && empty.fields.by_agent && empty.name.is_none());
         assert_eq!((empty.fields.prompt, empty.fields.schedule), (None, None));
         form.prompt.insert_str("Run the tests.\nFix them.\n");
         form.name.set(" nightly ");
@@ -971,7 +975,7 @@ mod tests {
         );
         assert_eq!(spec.fields.agent.as_deref(), Some("claude"));
         let asked = form.spec(true).unwrap();
-        assert!(!asked.enabled && asked.fields.schedule.is_some());
+        assert!(!asked.enabled && asked.fields.by_agent && asked.fields.schedule.is_some());
         form.every.set("x");
         assert_eq!(form.spec(false).unwrap_err().0, FormField::When);
     }

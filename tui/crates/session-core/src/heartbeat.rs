@@ -4,9 +4,12 @@
 //! the prompt ([`with_prompt`](crate::commands::with_prompt); capability
 //! [`CAPABILITY_HEARTBEATS`](crate::api::CAPABILITY_HEARTBEATS)).
 //!
-//! A heartbeat an agent made or changed (a session caller, or anything that
-//! came through `rakumux-mcp`) waits for the user's approval, paused, until
-//! the user enables it.
+//! An agent (a session caller, or anything that came through `rakumux-mcp`)
+//! makes, changes and runs heartbeats without the user's approval: one it
+//! creates complete and `enabled` is on at once; one it creates without
+//! everything a run needs (or not `enabled`) waits for it, paused
+//! (`awaiting_approval`), and turns on by itself once the agent's update
+//! completes it. Enabling, pausing and deleting are the user's.
 
 use crate::ids::{HeartbeatId, SessionId};
 use crate::model::{Creator, Lifecycle, ScopeRoot, SessionStatus};
@@ -57,7 +60,10 @@ pub struct Heartbeat {
     /// It runs on its schedule.
     #[serde(default)]
     pub enabled: bool,
-    /// An agent made or changed it: paused until the user enables it.
+    /// Not turned on yet: an agent made it and is still setting it up. It
+    /// turns on by itself once an agent's update leaves it complete (or the
+    /// user enables it). The name is kept for compatibility: it once meant
+    /// the user's approval was needed.
     #[serde(default)]
     pub awaiting_approval: bool,
     pub created_by: Creator,
@@ -392,8 +398,9 @@ pub struct HeartbeatSpec {
     pub name: Option<String>,
     #[serde(flatten)]
     pub fields: HeartbeatFields,
-    /// Start it enabled (user callers only, and only a complete heartbeat;
-    /// one an agent makes always waits for approval).
+    /// Start it enabled. A user's must be complete (else `invalid_argument`);
+    /// an agent's that isn't complete waits, `awaiting_approval`, until its
+    /// update completes it.
     #[serde(default, skip_serializing_if = "is_false")]
     pub enabled: bool,
 }
@@ -423,15 +430,16 @@ pub struct HeartbeatFields {
     pub prompt: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schedule: Option<Schedule>,
-    /// Made or changed for an agent (`rakumux-mcp` sets it): it waits for
-    /// the user's approval whoever the caller is.
+    /// Made or changed for an agent (`rakumux-mcp` sets it), whoever the
+    /// caller is: one made so that isn't complete and enabled waits for its
+    /// agent (`awaiting_approval`), and its update turns it on once complete.
     #[serde(default, skip_serializing_if = "is_false")]
     pub by_agent: bool,
 }
 
 impl HeartbeatFields {
-    /// Whether this changes what a run does (and an agent's change then
-    /// waits for approval).
+    /// Whether this changes what a run does (its agent, command, prompt or
+    /// schedule).
     pub fn changes_runs(&self) -> bool {
         self.agent.is_some()
             || self.command.is_some()

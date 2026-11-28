@@ -366,13 +366,15 @@ pub enum Request {
     HeartbeatGet {
         id: HeartbeatId,
     },
-    /// A new heartbeat, paused unless the user asks for it enabled (one an
-    /// agent makes waits for approval). Answered with `Heartbeat`.
+    /// A new heartbeat, paused unless asked for enabled; an agent's that
+    /// isn't complete and enabled waits for it, `awaiting_approval`, until
+    /// its update completes it. Answered with `Heartbeat`.
     HeartbeatCreate(HeartbeatSpec),
-    /// Change a heartbeat; an agent's change to what it runs pauses it for
-    /// approval. Answered with `Heartbeat`.
+    /// Change a heartbeat. An agent's change never pauses it, and turns on
+    /// one waiting for its agent once that leaves it complete (one the user
+    /// paused stays paused). Answered with `Heartbeat`.
     HeartbeatUpdate(HeartbeatEdit),
-    /// User only: run it on its schedule (approving it), or pause it.
+    /// User only: run it on its schedule, or pause it.
     /// Answered with `Heartbeat`.
     HeartbeatEnable {
         id: HeartbeatId,
@@ -382,13 +384,12 @@ pub enum Request {
     HeartbeatDelete {
         id: HeartbeatId,
     },
-    /// Start a run now, whatever its schedule (paused too). A session
-    /// caller, or one with `by_agent` (`rakumux-mcp` sets it), runs only a
-    /// heartbeat the user approved: one awaiting approval is
-    /// `permission_denied`. Answered with the run's `Session`.
+    /// Start a run now, whatever its schedule (paused or waiting for its
+    /// agent too), for any caller. Answered with the run's `Session`.
     HeartbeatRun {
         id: HeartbeatId,
-        /// Asked for by an agent, whoever the caller is.
+        /// Asked for by an agent, whoever the caller is (`rakumux-mcp` sets
+        /// it). Kept for compatibility: it no longer changes anything.
         #[serde(default, skip_serializing_if = "is_false")]
         by_agent: bool,
     },

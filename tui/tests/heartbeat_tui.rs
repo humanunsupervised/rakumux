@@ -1,6 +1,8 @@
 //! The real TUI in a real terminal (a session of one daemon), with a daemon
 //! of its own in a temp home. A heartbeat is made in Heartbeats' New heartbeat
-//! form, edited and deleted from the list, and the CLI sees each; a long
+//! form, edited and deleted from the list, and the CLI sees each; one the
+//! form's `Ask agent` makes turns on once its agent saves its prompt and
+//! schedule, nobody pressing `e`; a long
 //! prompt is pasted, scrolled and edited in the form and read whole; the left
 //! column's tabs switch what it shows, and Help is searched.
 #![cfg(target_os = "linux")]
@@ -212,7 +214,17 @@ impl Screen {
 
 /// The TUI, started in a 160 × 48 terminal.
 fn start_tui(world: &World) -> Screen {
+    start_tui_with_path(world, None)
+}
+
+/// The TUI, its `PATH` (and so its sessions') starting with `bin` when given.
+fn start_tui_with_path(world: &World, bin: Option<&Path>) -> Screen {
     world.ok("outer", &["daemon", "start"]);
+    let path = std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".into());
+    let path = match bin {
+        Some(bin) => format!("{}:{path}", bin.display()),
+        None => path,
+    };
     let api: Arc<dyn SessionApi> = Arc::new(
         Client::connect(ClientConfig {
             layout: Layout::with_home(world.root.join("outer")),
@@ -239,13 +251,7 @@ fn start_tui(world: &World) -> Screen {
             cwd: Some(work),
             argv: Some(vec!["/bin/bash".into(), "-c".into(), run]),
             startup_cmds: vec![],
-            env: vec![
-                (
-                    "PATH".into(),
-                    std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".into()),
-                ),
-                ("LANG".into(), "C.UTF-8".into()),
-            ],
+            env: vec![("PATH".into(), path), ("LANG".into(), "C.UTF-8".into())],
             cols: 160,
             rows: 48,
             machine: None,
@@ -534,6 +540,63 @@ fn a_heartbeat_is_made_edited_and_deleted_in_the_real_tui() {
     screen.until("it gone", |text| !text.contains("● nightly-run"));
     assert!(world.heartbeats().is_empty());
     screen.shows("+ New heartbeat");
+}
+
+/// `Ask agent` in the real TUI: the heartbeat is made for its agent, which
+/// a session running the agent's command is asked to fill in; the agent (a
+/// stand-in `claude` here) saving its prompt and schedule with `heartbeat
+/// update` turns it on, nobody pressing `e`.
+#[test]
+fn a_heartbeat_ask_agent_makes_turns_on_once_its_agent_saves_it_in_the_real_tui() {
+    let world = World::new();
+    let bin = world.root.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let before = world.root.join("before.json");
+    let after = world.root.join("after.out");
+    let agent = bin.join("claude");
+    std::fs::write(
+        &agent,
+        format!(
+            "#!/bin/bash\n\
+             '{TUI}' heartbeat show Heartbeat --json > '{before}' 2>&1\n\
+             '{TUI}' heartbeat update Heartbeat --prompt 'Check the build.' --every 30m > '{after}' 2>&1\n\
+             echo stand-in agent done\n\
+             exec sleep 600\n",
+            before = before.display(),
+            after = after.display(),
+        ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let screen = start_tui_with_path(&world, Some(&bin));
+
+    screen.shows("+ New session");
+    screen.send("B", &[]);
+    screen.shows("+ New heartbeat");
+    screen.keys(&["enter"]);
+    screen.shows("Ask agent");
+    // From the name, up to the buttons: Ask agent.
+    screen.keys(&["up", "enter"]);
+    screen.until("the form closed", |text| !text.contains("Ask agent"));
+    screen.shows("stand-in agent done");
+
+    // Made for its agent, it waited for it, then turned on by itself.
+    let shown: Value = serde_json::from_str(&std::fs::read_to_string(&before).unwrap())
+        .unwrap_or_else(|error| panic!("{error}: {}", std::fs::read_to_string(&before).unwrap()));
+    assert_eq!(shown["heartbeat"]["enabled"], false, "{shown}");
+    assert_eq!(shown["heartbeat"]["awaiting_approval"], true, "{shown}");
+    let said = std::fs::read_to_string(&after).unwrap();
+    assert!(said.contains("changed; next run in"), "{said}");
+    let made = world.heartbeats();
+    assert_eq!(made.len(), 1);
+    assert_eq!(made[0]["name"], "Heartbeat");
+    assert_eq!(made[0]["prompt"], "Check the build.");
+    assert_eq!(made[0]["schedule"]["minutes"], 30);
+    assert_eq!(made[0]["enabled"], true);
+    assert_eq!(made[0]["awaiting_approval"], false);
+    assert!(made[0]["next_run_at"].is_number(), "{made:?}");
+    assert_eq!(made[0]["created_by"]["kind"], "user");
 }
 
 /// A heartbeat's runs in the real TUI: read whole, it lists every run the

@@ -123,9 +123,10 @@ pub enum Command {
     /// Tasks Rakumux runs on a clock: each due time starts a new session in
     /// the heartbeat's folder and gives its agent the task
     ///
-    /// One an agent makes or changes from inside a session waits for your
-    /// approval (`rakumux heartbeat enable`); an agent runs only one you
-    /// approved.
+    /// An agent inside a session adds, changes and runs them too: one it adds
+    /// complete is on at once, and one it adds without its prompt or schedule
+    /// turns on once its `update` saves them. Enabling, pausing and removing
+    /// are yours.
     #[command(alias = "heartbeats")]
     Heartbeat {
         #[command(subcommand)]
@@ -351,7 +352,7 @@ pub enum HeartbeatCommand {
     Add(HeartbeatAddArgs),
     /// Change a heartbeat; what you don't name stays
     Update(HeartbeatUpdateArgs),
-    /// Run it on its schedule (approving it, when an agent made or changed it)
+    /// Run it on its schedule
     #[command(alias = "resume", alias = "approve")]
     Enable {
         /// Its name or `hb_` id
@@ -362,8 +363,7 @@ pub enum HeartbeatCommand {
         /// Its name or `hb_` id
         target: String,
     },
-    /// Start a run now, whatever its schedule (from inside a session, one
-    /// the user approved)
+    /// Start a run now, whatever its schedule (paused too)
     Run {
         /// Its name or `hb_` id
         target: String,

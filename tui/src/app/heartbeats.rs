@@ -8,9 +8,8 @@
 //! daemon's record of them, `heartbeat_runs`; there `↑`/`↓` pick a run, the
 //! session pane shows it, live while it runs, and `Enter` goes into it; a
 //! text taller than its room scrolls with PgUp/PgDn and the wheel over it), `e`
-//! approves or enables (from the list it
-//! first shows the heartbeat whole, so its prompt and command are read before
-//! they run), `p` pauses, `r` runs it now, `c` edits it, `d` twice deletes it, `n` (or Enter or a click on `+ New heartbeat`, the list's last
+//! enables a paused one (from the list it first shows the heartbeat whole, so
+//! its prompt and command are read before they run), `p` pauses, `r` runs it now, `c` edits it, `d` twice deletes it, `n` (or Enter or a click on `+ New heartbeat`, the list's last
 //! row) opens the New heartbeat form (`heartbeat_form.rs`), `Esc` goes back.
 //! The selected heartbeat shows these as buttons ([`BeatAction`]). `B` (or
 //! Settings) shows the tab.
@@ -44,7 +43,7 @@ const RUN_PAGE: usize = 100;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BeatAction {
     Run,
-    /// Approve or enable it, or (from the list) show it whole first.
+    /// Enable it, or (from the list) show it whole first.
     Enable,
     Pause,
     Edit,
@@ -55,7 +54,7 @@ impl BeatAction {
     /// `heartbeat`'s buttons, in order.
     pub fn of(heartbeat: &Heartbeat) -> Vec<BeatAction> {
         let mut actions = Vec::new();
-        if heartbeat.is_complete() && !heartbeat.awaiting_approval {
+        if heartbeat.is_complete() {
             actions.push(BeatAction::Run);
         }
         if heartbeat.enabled {
@@ -68,10 +67,9 @@ impl BeatAction {
     }
 
     /// Its key and what the button says.
-    pub fn label(self, heartbeat: &Heartbeat) -> (&'static str, &'static str) {
+    pub fn label(self) -> (&'static str, &'static str) {
         match self {
             BeatAction::Run => ("r", "run"),
-            BeatAction::Enable if heartbeat.awaiting_approval => ("e", "approve"),
             BeatAction::Enable => ("e", "enable"),
             BeatAction::Pause => ("p", "pause"),
             BeatAction::Edit => ("c", "edit"),
@@ -119,14 +117,10 @@ pub struct BeatsView {
 }
 
 impl BeatsView {
-    /// Take a reading: waiting for approval first, then by folder and name.
+    /// Take a reading: by folder and name.
     fn take(&mut self, mut heartbeats: Vec<Heartbeat>) {
         heartbeats.sort_by(|a, b| {
-            (!a.awaiting_approval, a.scope.path(), a.name.to_lowercase()).cmp(&(
-                !b.awaiting_approval,
-                b.scope.path(),
-                b.name.to_lowercase(),
-            ))
+            (a.scope.path(), a.name.to_lowercase()).cmp(&(b.scope.path(), b.name.to_lowercase()))
         });
         self.heartbeats = heartbeats;
         self.loaded = true;
@@ -624,8 +618,8 @@ impl App {
         self.beats.read().or_else(|| self.beats.selected()).cloned()
     }
 
-    /// `e`: read whole, approve or enable it; from the list, show it whole
-    /// first (its prompt and command), so nothing runs unread.
+    /// `e`: read whole, enable it; from the list, show it whole first (its
+    /// prompt and command), so nothing runs unread.
     pub fn beats_enable(&mut self) {
         if self.beats.reading.is_none() {
             if let Some(id) = self.beats.selected().map(|h| h.id.clone()) {
@@ -645,15 +639,13 @@ impl App {
             return;
         };
         let name = heartbeat.name.clone();
-        let approving = heartbeat.awaiting_approval;
         self.exec.job(move || AppEvent::HeartbeatDone {
-            result: api.heartbeat_enable(&heartbeat.id, enabled).map(|_| {
-                match (enabled, approving) {
-                    (true, true) => format!("Approved {name}: it runs on its schedule"),
-                    (true, false) => format!("{name} runs on its schedule"),
-                    (false, _) => format!("Paused {name}"),
-                }
-            }),
+            result: api
+                .heartbeat_enable(&heartbeat.id, enabled)
+                .map(|_| match enabled {
+                    true => format!("{name} runs on its schedule"),
+                    false => format!("Paused {name}"),
+                }),
         });
     }
 
@@ -790,7 +782,7 @@ mod tests {
     }
 
     #[test]
-    fn heartbeats_waiting_for_approval_come_first_and_the_selection_stays() {
+    fn heartbeats_go_by_folder_and_name_and_the_selection_stays() {
         let mut view = BeatsView::default();
         view.take(vec![
             heartbeat("b", false),
@@ -798,8 +790,8 @@ mod tests {
             heartbeat("a", false),
         ]);
         let names: Vec<&str> = view.heartbeats.iter().map(|h| h.name.as_str()).collect();
-        assert_eq!(names, ["z", "a", "b"]);
-        assert_eq!(view.selected().map(|h| h.name.as_str()), Some("z"));
+        assert_eq!(names, ["a", "b", "z"], "one being set up among them");
+        assert_eq!(view.selected().map(|h| h.name.as_str()), Some("a"));
         view.selected = Some(HeartbeatId::from_string("b"));
         view.reading = Some(HeartbeatId::from_string("a"));
         view.take(vec![heartbeat("b", false)]);
@@ -833,13 +825,18 @@ mod tests {
                 BeatAction::Delete
             ]
         );
-        // One waiting for approval can't be run unread from its row.
+        // One its agent is setting up, complete: run or enabled.
         let waiting = heartbeat("b", true);
         assert_eq!(
             BeatAction::of(&waiting),
-            [BeatAction::Enable, BeatAction::Edit, BeatAction::Delete]
+            [
+                BeatAction::Run,
+                BeatAction::Enable,
+                BeatAction::Edit,
+                BeatAction::Delete
+            ]
         );
-        assert_eq!(BeatAction::Enable.label(&waiting), ("e", "approve"));
+        assert_eq!(BeatAction::Enable.label(), ("e", "enable"));
         let mut empty = heartbeat("c", false);
         empty.enabled = false;
         empty.prompt.clear();

@@ -1,7 +1,8 @@
 //! `rakumux heartbeat`: tasks the daemon runs on a clock (`ls`, `show`,
 //! `runs`, `add`, `update`, `enable`, `pause`, `run`, `rm`). From inside a session
-//! (an agent) `add` and `update` work too, and what they make or change waits
-//! for the user's approval; `run` runs only one the user approved; `enable`,
+//! (an agent) `add`, `update` and `run` work too, without the user's
+//! approval: a complete one it adds is on at once, and one it adds without
+//! its prompt or schedule turns on once its `update` saves them; `enable`,
 //! `pause` and `rm` are the user's.
 
 use super::args::{HeartbeatAddArgs, HeartbeatCommand, HeartbeatUpdateArgs, ScheduleArgs};
@@ -317,10 +318,11 @@ fn done(out: &mut dyn Write, heartbeat: &Heartbeat, what: &str) -> Result<i32, C
                 .next_run_at
                 .map_or("-".into(), |at| until(table::now(), at))
         ),
-        (false, true, _) => format!(
-            "; it waits for approval: `rakumux heartbeat enable {}`",
-            heartbeat.handle()
-        ),
+        (false, true, false) => {
+            "; it turns on once its prompt and schedule are saved (`rakumux heartbeat update`)"
+                .into()
+        }
+        (false, true, true) => "; it turns on with its agent's next update".into(),
         (false, false, false) => "; it runs once it has a prompt and a schedule".into(),
         (false, false, true) => "; paused".into(),
     };
@@ -334,11 +336,11 @@ fn done(out: &mut dyn Write, heartbeat: &Heartbeat, what: &str) -> Result<i32, C
     Ok(0)
 }
 
-/// `on`, `paused`, `awaiting approval` or `incomplete`.
+/// `on`, `paused`, `setting up` (its agent is) or `incomplete`.
 fn state(heartbeat: &Heartbeat) -> &'static str {
     match (heartbeat.enabled, heartbeat.awaiting_approval) {
         (true, _) => "on",
-        (false, true) => "awaiting approval",
+        (false, true) => "setting up",
         (false, false) if !heartbeat.is_complete() => "incomplete",
         (false, false) => "paused",
     }

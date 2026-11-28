@@ -14,10 +14,8 @@
 //!   folders stay the user's. Other machines' sessions are the user's alone
 //!   (`Caller::reaches_machines`).
 //! - Heartbeats: session callers list, read, create and change them in any
-//!   folder (what they make or change waits for the user's approval, paused:
-//!   the service sees to that) and run one now, but only one the user
-//!   approved (the service refuses one awaiting approval); enabling,
-//!   pausing and deleting one are the user's.
+//!   folder and run any one now (the service decides when one an agent
+//!   made turns on); enabling, pausing and deleting one are the user's.
 //! - Workspaces: session callers list them and move themselves between them
 //!   (the sessions they create start in theirs); making and forgetting one
 //!   are the user's.
@@ -183,8 +181,7 @@ pub(crate) fn authorize(
     let on_self = target.is_some_and(|target| target.id == self_id);
     match op {
         Op::Get | Op::Read | Op::Wait | Op::ProjectList => Ok(()),
-        // What a session makes or changes waits for approval, and it runs
-        // only one the user approved (the service checks both).
+        // The service decides when what a session makes turns on.
         Op::HeartbeatList
         | Op::HeartbeatGet
         | Op::HeartbeatCreate

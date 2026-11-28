@@ -120,7 +120,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    agent asks something; until it settles), `DELETE /v1/sessions/{id}`, the heartbeats
    (`GET|POST /v1/heartbeats`, `GET|PATCH|DELETE /v1/heartbeats/{id}`, `POST
    /v1/heartbeats/{id}/run|enable|pause`; `api/src/heartbeats.rs`; ids `hb_…`; a body's
-   `by_agent` makes it wait for approval, or on `run` refuses one that waits), and the WebSockets `GET /v1/events` (session events) and `GET /v1/sessions/{id}/attach` (the
+   `by_agent` makes it an agent's: on at once when complete and enabled, else waiting for that
+   agent's update to complete it), and the WebSockets `GET /v1/events` (session events) and `GET /v1/sessions/{id}/attach` (the
    live terminal: checkpoint, then output as binary frames; input and resize/promote/demote/fit
    back; `api/src/streams.rs`, tokio-tungstenite over a hyper upgrade). It says `folder` (a
    session's folder: the daemon's `scope`) and still accepts the deprecated `/v1/projects` and
@@ -141,9 +142,9 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    the daemon (spawns it on demand), one API per Rakumux home. See `api/README.md`.
 9. **`rakumux-mcp`** (`mcp/`): MCP server on stdio for coding agents, built on `rmcp` (exact
    pinned, confined to `mcp/src/server.rs`). Tools: `list_heartbeats`, `create_heartbeat`,
-   `update_heartbeat` and `run_heartbeat` (always `by_agent`: what an agent makes or changes
-   waits for the user's approval, and it runs only one the user approved, whoever the API caller
-   is), `list_folders`, `list_sessions`
+   `update_heartbeat` and `run_heartbeat` (always `by_agent`, and `create_heartbeat` `enabled`:
+   what an agent makes is on at once, its changes never pause one, one the user paused stays
+   paused, and it runs any one, whoever the API caller is), `list_folders`, `list_sessions`
    (`all_folders`), `get_session`, `create_session`, `read_session`, `rename_session`, and to
    **drive** a session: `send_prompt` (`POST …/submit`: a paste, then Enter; refused, typing
    nothing, while its agent asks something or isn't at its prompt yet, `refuse_if_blocked`, or
@@ -554,16 +555,16 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    `heartbeats` the session list says `heartbeats`, and once its answer `accepts` `heartbeats` (with
    the feed on and the name confirmed) the service reads `heartbeat_list` every 5 s and uploads the
    whole list (`POST /api/v1/feed/heartbeats`, at most 50) when it changes and every 10 minutes:
-   each heartbeat's folder name (never a path), agent, schedule, whether it's on or waits for
-   approval, `by_agent` (a session made it), `updated_at`, next run, runs and last run, its command
+   each heartbeat's folder name (never a path), agent, schedule, whether it's on or its agent is
+   still setting it up (`awaiting_approval`), `by_agent` (a session made it), `updated_at`, next run, runs and last run, its command
    and task masked as chat text (the home directory as `~`); the session list marks each run
    (`heartbeat`). The replies read brings the actions asked of them on rakumux.com
    (`heartbeat_actions`), one at a time: only `pause` is carried out, signed by a paired device
    (`heartbeat_action`, below; else a signature refusal), as the user (`not_listed`,
    `incomplete` or `refused` when the daemon won't); `enable` and `run` fail `refused`, the daemon
    never asked, since whoever can write to rakumux.com could otherwise have a command run here:
-   heartbeats are approved, turned on and run only on this machine (the Heartbeats tab, `rakumux
-   heartbeat`) (`POST /api/v1/feed/heartbeat-actions/status`). Each id is
+   heartbeats are turned on and run only from this machine (the Heartbeats tab, `rakumux
+   heartbeat`, its agents) (`POST /api/v1/feed/heartbeat-actions/status`). Each id is
    marked handled before the daemon is asked and kept with the reports not yet taken in
    `sensagent/status/heartbeat-actions.json` (0600, two hours), so an action is carried out at most
    once.
@@ -1216,10 +1217,8 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   once), `unknown` from a newer Rakumux. Requests: `heartbeat_list {scope?}`, `heartbeat_get
   {id}`, `heartbeat_create {scope?, name?, agent?, command?, prompt?, schedule?, by_agent?,
   enabled?}`, `heartbeat_update {id, name?, agent?, command?, prompt?, schedule?, by_agent?}`,
-  `heartbeat_run {id, by_agent?}` (a run now, paused or not, answered with its `Session`; a
-  session caller, or one with `by_agent`, runs only one the user approved: one
-  `awaiting_approval` is `permission_denied` naming `rakumux heartbeat enable hb_…`, checked in
-  the service), and, user only, `heartbeat_enable {id, enabled}` and `heartbeat_delete {id}`
+  `heartbeat_run {id, by_agent?}` (a run now, paused or not, answered with its `Session`; any
+  caller, `by_agent` kept for compatibility and changing nothing since 0.1.88), and, user only, `heartbeat_enable {id, enabled}` and `heartbeat_delete {id}`
   (its runs stay as plain sessions). Ids read
   with or without their `hb_`. **The run record** (capability `heartbeats.runs`):
   `heartbeat_runs {id, limit?, before?}` (anyone who may `heartbeat_get`) answers
@@ -1235,12 +1234,16 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   `gone` (purged after 90 days). Without a command, a new heartbeat's (and a changed agent's) is
   the one the user last started that agent (or any) with in the folder: the newest session's
   known-agent resume command without what names its conversation (`resume::start_command`,
-  the flags that shape a session kept), else the agent's name, else `claude`. What a session
-  caller makes, or anything with `by_agent` (`rakumux-mcp` sets it), waits for the user's
-  approval: `awaiting_approval`, paused; an agent's change to an enabled one's agent, command,
-  prompt or schedule pauses it again, a rename doesn't. Enabling needs a command, a prompt and a
-  known schedule (`invalid_argument` names what's missing), clears `awaiting_approval` and sets
-  `next_run_at`. At most 50 heartbeats, names unique in a folder (`Heartbeat`, `Heartbeat 2`, …
+  the flags that shape a session kept), else the agent's name, else `claude`. **Agents' heartbeats**
+  need no approval: what a session caller makes, or anything with `by_agent` (`rakumux-mcp`
+  sets it, and the TUI's `Ask agent`), is on at once when it's complete and `enabled`; one that
+  isn't complete, or not `enabled`, is paused with `awaiting_approval` (the name kept from
+  0.1.87 and earlier, where it meant the user's approval; now: its agent is still setting it
+  up), and an agent's update that leaves it complete turns it on (`next_run_at` set). An agent's
+  update never pauses one, and one the user paused (not `awaiting_approval`) stays paused; the
+  user's `enabled` create of an incomplete one is `invalid_argument`, and without `enabled` a
+  plain pause. Enabling needs a command, a prompt and a known schedule (`invalid_argument` names
+  what's missing), clears `awaiting_approval` and sets `next_run_at`. At most 50 heartbeats, names unique in a folder (`Heartbeat`, `Heartbeat 2`, …
   without one). **Runs**: on the control tick, an enabled heartbeat whose `next_run_at` came
   starts `<name> #<n>` in its folder as the daemon for the user (`created_by: user`, depth 0, the
   daemon's environment, a login shell with the command as its startup command and the prompt as
@@ -1303,7 +1306,7 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
 | Caller | How it authenticates | May |
 |---|---|---|
 | User (TUI, CLI outside any session) | token from `service.json` | everything |
-| Session (any process inside a session, e.g. an agent) | `RAKUMUX_SESSION_ID` + `RAKUMUX_SESSION_TOKEN` | every folder of this machine: list/get/read/wait/subscribe any session (its own folder when it names none; `all` too) and list folders; create sessions in any folder, within `control::Limits` (→ `limit_exceeded`); **drive** any other session: send keys, submit, kill, revive (never itself: `permission_denied`); report, touch, rename and pin **itself**; bind its agent's conversations to itself (`session_bind`); delete, attach, answer a question dialog, read an agent's turn or chat, the session history, terminal panes, replies and managing folders → `permission_denied`; heartbeats: list, get, create (any folder, its own when it names none) and update, what it makes or changes waits for approval, paused; run one now, only one the user approved (paused or not; one awaiting approval → `permission_denied`); enable, pause and delete → `permission_denied`; workspaces: list them and move **itself** (its sessions start in its workspace), make and forget one → `permission_denied`; other machines' sessions are the user's alone |
+| Session (any process inside a session, e.g. an agent) | `RAKUMUX_SESSION_ID` + `RAKUMUX_SESSION_TOKEN` | every folder of this machine: list/get/read/wait/subscribe any session (its own folder when it names none; `all` too) and list folders; create sessions in any folder, within `control::Limits` (→ `limit_exceeded`); **drive** any other session: send keys, submit, kill, revive (never itself: `permission_denied`); report, touch, rename and pin **itself**; bind its agent's conversations to itself (`session_bind`); delete, attach, answer a question dialog, read an agent's turn or chat, the session history, terminal panes, replies and managing folders → `permission_denied`; heartbeats: list, get, create (any folder, its own when it names none; complete and `enabled`, on at once, else waiting for its update) and update (never pausing one; completing one it's setting up turns it on); run any one now (paused or not); enable, pause and delete → `permission_denied`; workspaces: list them and move **itself** (its sessions start in its workspace), make and forget one → `permission_denied`; other machines' sessions are the user's alone |
 | Delegated (the API for an agent conversation, e.g. OpenCode 2.x via `rakumux-mcp`) | user token + agent kind + conversation id | exactly what the session that bound the conversation may do; `unauthenticated` when no running session bound it |
 
 `control::Limits` apply only to sessions created by sessions: at most 4 running per creating session,
@@ -1765,7 +1768,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 | `rakumux rename [<name\|id>] <new name>` | Rename (defaults to the current session) |
 | `rakumux pin <name\|id>` / `rakumux unpin <name\|id>` | Pin (into the list's Pinned tab) / unpin |
 | `rakumux kill <name\|id> [--tree]` / `rakumux rm <name\|id>` | Terminate / delete (into the session history, 90 days) |
-| `rakumux heartbeat ls [--json] [--folder DIR \| --all] \| show <name\|id> \| runs <name\|id> [-n N] [--json] \| add [NAME] (--every 30m \| --daily HH:MM \| --days mon,fri --at HH:MM) [--agent A] [--command C] [--prompt P \| -- PROMPT] [--paused] \| update <name\|id> … \| enable \| pause \| run \| rm <name\|id>` | Heartbeats: tasks run on a clock (`add` enables one that has a prompt and a schedule; `enable` approves an agent's; `run` starts a run now; `runs` lists every run, newest first, with where its session is). Inside a session `add` and `update` work and wait for approval, so an agent needs no MCP (`$RAKUMUX_BIN heartbeat update hb_… --prompt … --every …`), and `run` runs one the user approved |
+| `rakumux heartbeat ls [--json] [--folder DIR \| --all] \| show <name\|id> \| runs <name\|id> [-n N] [--json] \| add [NAME] (--every 30m \| --daily HH:MM \| --days mon,fri --at HH:MM) [--agent A] [--command C] [--prompt P \| -- PROMPT] [--paused] \| update <name\|id> … \| enable \| pause \| run \| rm <name\|id>` | Heartbeats: tasks run on a clock (`add` enables one that has a prompt and a schedule; `enable` turns a paused one on; `run` starts a run now; `runs` lists every run, newest first, with where its session is). Inside a session `add`, `update` and `run` work without the user's approval, so an agent needs no MCP (`$RAKUMUX_BIN heartbeat update hb_… --prompt … --every …`): one it adds complete is on at once, one it adds without its prompt or schedule turns on once its `update` saves them |
 | `rakumux workspace ls [--json] \| add NAME \| rename <name\|id> NAME \| rm <name\|id> \| move <session> (<workspace> \| --none)` | Workspaces: list them with their sessions' count (and how many are in none), make one, rename one, forget one (its sessions are then in none), move a session into one (made when there's none of that name) or out of any. Inside a session `ls` works and `move` moves that session itself |
 | `rakumux history [QUERY] [--json]` / `rakumux restore <id\|name>` | Deleted sessions, most recently deleted first / bring one back into its folder, dead (`attach` or Enter revives it); a name only when one deleted session has it |
 | `rakumux folders [--json]` / `rakumux folders add\|rm <dir>` | List folders / add one / forget one without sessions (`projects` is a hidden alias; `--json` prints `{"folders": [...], "projects": [...]}`, the same list twice) |
@@ -2179,10 +2182,10 @@ list the keys; `t` hides the drawer. A daemon without `resources` gets "restart 
 **Heartbeats** (Beats in code). `B` in Rakumux mode or Settings → Heartbeats (`app/heartbeats.rs`,
 `components/heartbeats.rs`) shows the left column's Heartbeats tab: the heartbeats of every folder, read
 with `SessionApi::heartbeats` off the UI thread every 2 s while the tab is on screen (the daemon
-sends no heartbeat events), two lines each: a mark (`?` waiting for approval, orange; `●` on;
-`○` paused or empty), the name and when it runs next (`in 25m`, `approve?`, `paused`, `empty`),
-then its schedule, folder and last run; those waiting for approval first, then by folder and
-name. Under the selected one its buttons (`BeatAction`: `r run`, `p pause` or `e enable`/`approve`,
+sends no heartbeat events), two lines each: a mark (`◌` its agent is setting it up, purple; `●`
+on; `○` paused or empty), the name and when it runs next (`in 25m`, `setting up`, `paused`,
+`empty`), then its schedule, folder and last run; by folder and name. Under the selected one its
+buttons (`BeatAction`: `r run`, `p pause` or `e enable`,
 `c edit`, `d delete`; short of room edit and delete stay), each a click target, and under
 them all `+ New heartbeat`, a row to select like them (`BeatsView::on_new`; the only one when
 there are none). `↑`/`↓` (`j`/`k`) select; `Enter` shows one whole (its
@@ -2196,12 +2199,12 @@ by its `seq`. In Rakumux mode the session pane shows the selected run (`App::run
 `shown_session` and `reconcile_detail` follow while Heartbeats shows one whole): its terminal,
 live while it runs, its final screen once it ended, a deleted run's saved output
 (`session_history_read`), or why there's none (`DetailView::Note`). `↑`/`↓` pick a run,
-`Enter` goes into it (a deleted one is restored first)); `e` from the list shows it whole first, and there approves or enables
-it, so nothing an agent wrote runs unread (one waiting for approval has no `r run` button); `p`
+`Enter` goes into it (a deleted one is restored first)); `e` from the list shows it whole first, and there enables
+it (a paused one: an agent's heartbeats turn on by themselves); `p`
 pauses; `r` runs it now; `c` edits it (the form below on it, `HeartbeatForm::edit`, the keys in its name:
 `Save` sends `heartbeat_update` only what was changed there, so an untouched command of any shape
-(`FOO=1 ~/bin/claude --x`, `cd web && claude`) or a newer schedule stays; it runs on, or waits for
-approval, as before; its folder can't change); `d` twice (or two clicks) deletes it (its runs stay). `n`, `Enter` on
+(`FOO=1 ~/bin/claude --x`, `cd web && claude`) or a newer schedule stays; it runs on, or stays
+paused, as before; its folder can't change); `d` twice (or two clicks) deletes it (its runs stay). `n`, `Enter` on
 `+ New heartbeat` or one click on it opens the **New heartbeat form** (`AppMode::NewHeartbeat`,
 `app/heartbeat_form.rs`, `components/heartbeat_form.rs`): Name (the generated one when empty),
 Runs (`Every` an interval, 1h; `Daily` at a time; `Days`, Monday to Friday until ticked
@@ -2220,8 +2223,9 @@ before the cursor; a half-typed word's best is picked, `↑`/`↓` pick another,
 click takes it, `Esc` leaves what's typed. `Tab`, `Enter` and `↑`/`↓` go through them, `←`/`→` choose, `Space` ticks a day, `Esc`
 closes (a click off it doesn't, so nothing written is lost), `Ctrl-S` creates (or saves) from any field. `Create` needs the prompt and a
 schedule, and arguments a shell reads as one command's (`commands::problem`), makes it enabled (the user wrote it) and shows it whole; what's wrong, the daemon's
-refusal too, is said in the form. `Ask agent` makes it paused, with the prompt and schedule when
-a prompt was written, and a session in its folder running its command whose first input, typed once the agent's prompt shows and not
+refusal too, is said in the form. `Ask agent` makes it for its agent (`by_agent`), paused while
+the agent sets it up (`awaiting_approval`), with the prompt and schedule when a prompt was
+written; the agent's update saving them turns it on, nobody pressing `e`; and a session in its folder running its command whose first input, typed once the agent's prompt shows and not
 sent, asks the agent to ask the user what to run and how often and save both with
 `"$RAKUMUX_BIN" heartbeat update hb_… --prompt … --every …` (or `update_heartbeat`), then goes
 into it (`heartbeats::setup_prompt`); `Esc` goes back, then shows the sessions. A click

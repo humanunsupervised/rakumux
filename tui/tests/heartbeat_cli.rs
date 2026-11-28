@@ -1,9 +1,10 @@
 //! `rakumux heartbeat` end to end: the real `rakumux` (this crate's `tui`)
 //! and the real daemon in a temp home. The user makes, lists, shows, runs,
 //! pauses and deletes heartbeats; an agent inside a session makes one with
-//! the same command (`$RAKUMUX_BIN heartbeat add`, no MCP needed), which
-//! waits for the user's approval and which the agent can't approve itself.
-//! An agent runs one now only once the user approved it.
+//! the same command (`$RAKUMUX_BIN heartbeat add`, no MCP needed), which is
+//! on at once without the user's approval, or, made without its prompt and
+//! schedule, turns on once its agent's update saves them. An agent runs any
+//! heartbeat now; enabling, pausing and deleting stay the user's.
 #![cfg(target_os = "linux")]
 
 use serde_json::Value;
@@ -147,7 +148,7 @@ fn ptyd_binary() -> PathBuf {
 }
 
 #[test]
-fn heartbeats_are_made_and_run_from_the_cli_and_an_agents_wait_for_approval() {
+fn heartbeats_are_made_and_run_from_the_cli_and_an_agents_are_on_at_once() {
     let world = World::new();
     let made = world.ok(&[
         "heartbeat",
@@ -185,7 +186,8 @@ fn heartbeats_are_made_and_run_from_the_cli_and_an_agents_wait_for_approval() {
         world.ok(&["ls", "--json"]).contains("\"deps #1\"")
     });
 
-    // An agent in a session makes one with the same command: it waits.
+    // An agent in a session makes one with the same command: on at once;
+    // enabling is still the user's.
     let out = world.work.join("agent.out");
     let script = format!(
         "\"$RAKUMUX_BIN\" heartbeat add nightly --daily 02:00 --command 'echo nightly' --prompt 'run the tests' > {out} 2>&1; \
@@ -197,7 +199,9 @@ fn heartbeats_are_made_and_run_from_the_cli_and_an_agents_wait_for_approval() {
         std::fs::read_to_string(&out).is_ok_and(|text| text.contains("exit="))
     });
     let said = std::fs::read_to_string(&out).unwrap();
-    assert!(said.contains("waits for approval"), "{said}");
+    assert!(said.contains("Heartbeat nightly (hb_"), "{said}");
+    assert!(said.contains("next run in"), "{said}");
+    assert!(!said.contains("approv"), "{said}");
     assert!(said.contains("not allowed from inside a session"), "{said}");
     assert!(said.contains("exit=1"), "{said}");
     let nightly = world
@@ -205,17 +209,12 @@ fn heartbeats_are_made_and_run_from_the_cli_and_an_agents_wait_for_approval() {
         .into_iter()
         .find(|h| h["name"] == "nightly")
         .unwrap();
-    assert_eq!(nightly["enabled"], false);
-    assert_eq!(nightly["awaiting_approval"], true);
+    assert_eq!(nightly["enabled"], true);
+    assert_eq!(nightly["awaiting_approval"], false);
     assert_eq!(nightly["created_by"]["kind"], "session");
     assert_eq!(nightly["prompt"], "run the tests");
 
-    // The user approves it, pauses deps, and deletes it.
-    let approved = world.ok(&["heartbeat", "enable", "nightly"]);
-    assert!(
-        approved.contains("runs on its schedule; next run in"),
-        "{approved}"
-    );
+    // The user pauses deps, and deletes it.
     world.ok(&["heartbeat", "pause", "deps"]);
     let all = world.heartbeats();
     let deps = all.iter().find(|h| h["name"] == "deps").unwrap();
@@ -238,37 +237,52 @@ fn heartbeats_are_made_and_run_from_the_cli_and_an_agents_wait_for_approval() {
     // Its run stays, as a plain session.
     assert!(world.ok(&["ls", "--json"]).contains("\"deps #1\""));
 
-    // The TUI's `n`: an empty heartbeat, filled in by the agent of a session
-    // with the line its setup prompt gives (no MCP), then waiting.
-    let empty = world.ok(&["heartbeat", "add", "--json"]);
-    let empty: Value = serde_json::from_str(&empty).unwrap();
-    let handle = empty["heartbeat"]["id"].as_str().unwrap().to_owned();
-    assert_eq!(empty["heartbeat"]["name"], "Heartbeat");
-    assert_eq!(empty["heartbeat"]["enabled"], false);
-    let filled = world.work.join("filled.out");
-    let line = format!(
-        "\"$RAKUMUX_BIN\" heartbeat update hb_{handle} --prompt 'Check the build, fix it if red.' --every 30m > {} 2>&1",
-        filled.display()
+    // An empty heartbeat an agent made, filled in by the agent of a session
+    // with the line the TUI's setup prompt gives (no MCP): it turns on.
+    let said = world.in_session("asker", "\"$RAKUMUX_BIN\" heartbeat add");
+    assert!(
+        said.contains("it turns on once its prompt and schedule are saved"),
+        "{said}"
     );
-    world.ok(&["new", "--detach", "--name", "setup", "--cmd", &line]);
-    world.wait("the agent's update", || {
-        std::fs::read_to_string(&filled).is_ok_and(|text| text.contains("Heartbeat"))
-    });
-    let said = std::fs::read_to_string(&filled).unwrap();
-    assert!(said.contains("waits for approval"), "{said}");
-    let shown: Value =
-        serde_json::from_str(&world.ok(&["heartbeat", "show", &format!("hb_{handle}"), "--json"]))
-            .unwrap();
+    let empty = world.heartbeat("Heartbeat");
+    let handle = format!("hb_{}", empty["id"].as_str().unwrap());
+    assert_eq!(empty["enabled"], false);
+    assert_eq!(empty["awaiting_approval"], true);
+    let listed = world.ok(&["heartbeat", "ls"]);
+    assert!(listed.contains("setting up"), "{listed}");
+    let said = world.in_session(
+        "setup",
+        &format!(
+            "\"$RAKUMUX_BIN\" heartbeat update {handle} --prompt 'Check the build, fix it if red.' --every 30m"
+        ),
+    );
+    assert!(said.contains("changed; next run in"), "{said}");
+    let shown = world.heartbeat(&handle);
+    assert_eq!(shown["prompt"], "Check the build, fix it if red.");
+    assert_eq!(shown["schedule"]["minutes"], 30);
+    assert_eq!(shown["enabled"], true);
+    assert_eq!(shown["awaiting_approval"], false);
+    assert!(shown["next_run_at"].is_number(), "{shown}");
+
+    // One the user made empty is a plain pause: the agent filling it in
+    // leaves it paused.
+    let mine: Value =
+        serde_json::from_str(&world.ok(&["heartbeat", "add", "mine", "--json"])).unwrap();
+    assert_eq!(mine["heartbeat"]["awaiting_approval"], false);
+    let said = world.in_session(
+        "filler",
+        "\"$RAKUMUX_BIN\" heartbeat update mine --prompt 'Tidy up.' --every 1h",
+    );
+    assert!(said.contains("changed; paused"), "{said}");
+    let mine = world.heartbeat("mine");
     assert_eq!(
-        shown["heartbeat"]["prompt"],
-        "Check the build, fix it if red."
+        (mine["enabled"].clone(), mine["awaiting_approval"].clone()),
+        (Value::Bool(false), Value::Bool(false))
     );
-    assert_eq!(shown["heartbeat"]["schedule"]["minutes"], 30);
-    assert_eq!(shown["heartbeat"]["awaiting_approval"], true);
 }
 
 #[test]
-fn an_agent_in_a_session_runs_a_heartbeat_only_once_the_user_approved_it() {
+fn an_agent_in_a_session_runs_any_heartbeat_and_its_changes_never_pause_one() {
     let world = World::new();
     // The user's own, paused: an agent runs it now, as the user would.
     world.ok(&[
@@ -286,7 +300,6 @@ fn an_agent_in_a_session_runs_a_heartbeat_only_once_the_user_approved_it() {
         "dependencies",
     ]);
     let deps = world.heartbeat("deps");
-    let deps_handle = format!("hb_{}", deps["id"].as_str().unwrap());
     assert_eq!(deps["enabled"], false);
     assert_eq!(deps["awaiting_approval"], false);
     let said = world.in_session("runner", "\"$RAKUMUX_BIN\" heartbeat run deps");
@@ -308,43 +321,40 @@ fn an_agent_in_a_session_runs_a_heartbeat_only_once_the_user_approved_it() {
         (1.into(), false.into())
     );
 
-    // Changed by an agent, it waits for approval: the agent's run is refused
-    // and names the command that approves it; nothing runs.
+    // Changed by an agent, it stays as the user left it (paused), and the
+    // agent runs it with the change.
     let said = world.in_session(
         "changer",
         "\"$RAKUMUX_BIN\" heartbeat update deps --prompt 'update them and push' > /dev/null; \
          \"$RAKUMUX_BIN\" heartbeat run deps",
     );
-    assert!(said.contains("waits for the user's approval"), "{said}");
-    assert!(
-        said.contains(&format!("`rakumux heartbeat enable {deps_handle}`")),
-        "{said}"
+    assert!(said.starts_with("Started deps #2 ("), "{said}");
+    assert!(said.contains("done=0"), "{said}");
+    let deps = world.heartbeat("deps");
+    assert_eq!(deps["prompt"], "update them and push");
+    assert_eq!(
+        (deps["enabled"].clone(), deps["awaiting_approval"].clone()),
+        (false.into(), false.into())
     );
-    assert!(said.contains("done=1"), "{said}");
-    assert_eq!(world.heartbeat("deps")["awaiting_approval"], true);
-    assert_eq!(world.runs("deps").len(), 1);
-    // The user still runs it as before.
+    assert_eq!(world.runs("deps").len(), 2);
+    // The user runs it as before.
     let run = world.ok(&["heartbeat", "run", "deps"]);
-    assert!(run.starts_with("Started deps #2 ("), "{run}");
+    assert!(run.starts_with("Started deps #3 ("), "{run}");
 
-    // Made by an agent: refused until the user approves it; enabling and
-    // deleting stay the user's.
+    // Made by an agent: on at once, and the agent runs it; enabling,
+    // pausing and deleting stay the user's.
     let said = world.in_session(
         "maker",
         "\"$RAKUMUX_BIN\" heartbeat add nightly --daily 02:00 --command 'echo nightly' \
          --prompt 'run the tests' > /dev/null; \
          \"$RAKUMUX_BIN\" heartbeat run nightly; echo run=$?; \
          \"$RAKUMUX_BIN\" heartbeat enable nightly; echo enable=$?; \
+         \"$RAKUMUX_BIN\" heartbeat pause nightly; echo pause=$?; \
          \"$RAKUMUX_BIN\" heartbeat rm nightly; echo rm=$?",
     );
-    let nightly = world.heartbeat("nightly");
-    let nightly_handle = format!("hb_{}", nightly["id"].as_str().unwrap());
-    assert!(
-        said.contains(&format!("`rakumux heartbeat enable {nightly_handle}`")),
-        "{said}"
-    );
-    for refused in ["run=1", "enable=1", "rm=1"] {
-        assert!(said.contains(refused), "{refused}: {said}");
+    assert!(said.starts_with("Started nightly #1 ("), "{said}");
+    for outcome in ["run=0", "enable=1", "pause=1", "rm=1"] {
+        assert!(said.contains(outcome), "{outcome}: {said}");
     }
     assert!(
         said.contains("heartbeat.enable is not allowed from inside a session"),
@@ -354,23 +364,10 @@ fn an_agent_in_a_session_runs_a_heartbeat_only_once_the_user_approved_it() {
         said.contains("heartbeat.delete is not allowed from inside a session"),
         "{said}"
     );
-    assert_eq!(nightly["awaiting_approval"], true);
-    assert!(world.runs("nightly").is_empty());
-
-    // Approved by the user, the agent runs it; enabling and deleting are
-    // still refused.
-    world.ok(&["heartbeat", "enable", "nightly"]);
-    let said = world.in_session(
-        "approved",
-        "\"$RAKUMUX_BIN\" heartbeat run nightly; echo run=$?; \
-         \"$RAKUMUX_BIN\" heartbeat pause nightly; echo pause=$?; \
-         \"$RAKUMUX_BIN\" heartbeat rm nightly; echo rm=$?",
-    );
-    assert!(said.starts_with("Started nightly #1 ("), "{said}");
-    for outcome in ["run=0", "pause=1", "rm=1"] {
-        assert!(said.contains(outcome), "{outcome}: {said}");
-    }
-    world.wait("the approved run's session", || {
+    let nightly = world.heartbeat("nightly");
+    assert_eq!(nightly["enabled"], true);
+    assert_eq!(nightly["awaiting_approval"], false);
+    world.wait("the agent's run's session", || {
         world.ok(&["ls", "--json"]).contains("\"nightly #1\"")
     });
     let runs = world.runs("nightly");

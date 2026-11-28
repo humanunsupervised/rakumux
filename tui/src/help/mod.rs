@@ -688,8 +688,8 @@ impl KeyAction {
                  runs its command, an agent with its arguments and the prompt; earlier runs that wait are \
                  ended. Enter shows one whole: its prompt (PgUp/PgDn or the wheel scroll a \
                  long one), command and every run, the selected run beside it (live while it runs, its saved output once it ended); Enter there \
-                 goes into it. e approves or enables it (one an agent made or changed waits for \
-                 you, marked ?; an agent runs only those you approved), p pauses, r runs it now, c edits it (Ctrl-S saves), d twice deletes it. n or + \
+                 goes into it. e enables a paused one (one an agent is still setting up, marked ◌, \
+                 turns on once it saves its prompt and schedule), p pauses, r runs it now, c edits it (Ctrl-S saves), d twice deletes it. n or + \
                  New heartbeat makes one: its schedule, folder, agent, arguments and prompt (it \
                  grows with its text, then scrolls: PgUp/PgDn, Home/End, the wheel). An \
                  agent's arguments start as those with which it doesn't stop to ask \

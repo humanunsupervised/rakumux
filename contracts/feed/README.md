@@ -393,7 +393,7 @@ conformance tests, not an HTTP server, database or local runtime.
   session) says `heartbeats` in its session list's `capabilities`. Once a `sessions-stored` answer
   `accepts` `heartbeats`, it uploads its whole list of heartbeats (`heartbeats-upload`, at most 50,
   `heartbeatState` in common: name, folder name, agent, schedule in the machine's local time,
-  whether it's on or waits for approval, who made it, its command and task masked as chat text, when
+  whether it's on or its agent is still setting it up (`awaiting_approval`, a name kept from releases up to 0.1.87, where it meant the user's approval), who made it, its command and task masked as chat text, when
   it runs next and its last run), replacing what was stored, when the list changes and every 10
   minutes meanwhile, and marks each session that is a heartbeat's run (`sessionState` `heartbeat`).
   Never a path. On rakumux.com the user can ask the machine to `pause` one. The contract also

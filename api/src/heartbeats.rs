@@ -1,8 +1,7 @@
 //! Heartbeat use cases of the API: list, get, create, change, enable or
 //! pause, run now and delete. Each takes the caller's `SessionApi`; the
-//! daemon decides what a caller may do (a session's heartbeats wait for the
-//! user's approval, and it runs only approved ones; enabling and deleting
-//! are the user's).
+//! daemon decides what a caller may do (a session makes, changes and runs
+//! them; enabling, pausing and deleting are the user's).
 
 use crate::dto::{CreateHeartbeatBody, Heartbeat, RunHeartbeatBody, Session, UpdateHeartbeatBody};
 use crate::error::HttpError;
@@ -102,8 +101,8 @@ pub fn enable(
     Ok(api.heartbeat_enable(id, enabled)?.into())
 }
 
-/// `POST /v1/heartbeats/{id}/run`: the run's session. `by_agent` (or a
-/// session caller) runs only a heartbeat the user approved.
+/// `POST /v1/heartbeats/{id}/run`: the run's session, whoever asks, paused
+/// or not. `by_agent` is passed on for compatibility; it changes nothing.
 pub fn run(
     api: &dyn SessionApi,
     id: &HeartbeatId,

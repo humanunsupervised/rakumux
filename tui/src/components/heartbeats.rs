@@ -1,9 +1,9 @@
 //! The left column's Heartbeats tab (`app/heartbeats.rs`): the heartbeats, two lines
 //! each (a mark, the name and when it runs next; its schedule, folder and
-//! last run), those waiting for approval first, the selected one's buttons
-//! under it, then `+ New heartbeat`; or one heartbeat whole: its buttons, how
-//! it runs, its command and prompt in full (read before `e` approves it),
-//! and every run, newest first (the session pane shows the selected one).
+//! last run), by folder and name, the selected one's buttons under it, then
+//! `+ New heartbeat`; or one heartbeat whole: its buttons, how it runs, its
+//! command and prompt in full, and every run, newest first (the session pane
+//! shows the selected one).
 
 use ratatui::{
     layout::Rect,
@@ -67,11 +67,11 @@ pub fn draw_beats(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hi
     }
 }
 
-/// `?` waiting for approval, `●` on, `○` paused or not filled in yet.
+/// `◌` its agent is setting it up, `●` on, `○` paused or not filled in yet.
 fn mark(heartbeat: &Heartbeat) -> (&'static str, Style) {
     let p = theme::palette();
     match (heartbeat.enabled, heartbeat.awaiting_approval) {
-        (_, true) => ("?", Style::default().fg(p.accent_orange)),
+        (_, true) => ("◌", Style::default().fg(p.accent_purple)),
         (true, false) => ("●", Style::default().fg(p.accent_green)),
         (false, false) => ("○", Style::default().fg(p.text_muted)),
     }
@@ -84,7 +84,7 @@ fn when(heartbeat: &Heartbeat, now: i64) -> String {
         heartbeat.awaiting_approval,
         heartbeat.next_run_at,
     ) {
-        (_, true, _) => "approve?".into(),
+        (_, true, _) => "setting up".into(),
         (true, false, Some(at)) if at > now => format!("in {}", relative_time(at, now)),
         (true, false, _) => "due".into(),
         (false, false, _) if !heartbeat.is_complete() => "empty".into(),
@@ -215,7 +215,7 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) 
 
 /// What a button says: its key and word, or what a second `d` does.
 fn action_text(app: &App, heartbeat: &Heartbeat, action: BeatAction) -> (&'static str, String) {
-    let (key, word) = action.label(heartbeat);
+    let (key, word) = action.label();
     let armed = action == BeatAction::Delete && app.beats.deleting.as_ref() == Some(&heartbeat.id);
     (key, if armed { "again deletes" } else { word }.to_string())
 }
@@ -335,12 +335,10 @@ fn draw_whole(
     };
     let mut pieces: Vec<Vec<(String, Style)>> = Vec::new();
     if heartbeat.awaiting_approval {
-        let orange = Style::default().fg(p.accent_orange);
-        pieces.push(vec![
-            ("An agent made or changed it · ".into(), orange),
-            ("e".into(), bold),
-            (" approves".into(), orange),
-        ]);
+        pieces.push(vec![(
+            "Its agent is setting it up: it turns on once its prompt and schedule are saved".into(),
+            quiet,
+        )]);
         pieces.push(Vec::new());
     }
     pieces.push(field(
@@ -380,13 +378,12 @@ fn draw_whole(
             .flat_map(|line| wrap_spans(line, usize::from(cols)))
             .collect()
     };
-    // It leaves the runs room for a few, unless an agent's change waits to
-    // be read whole; taller than its room, it scrolls, a scrollbar down its
-    // last column.
+    // It leaves the runs room for a few; taller than its room, it scrolls,
+    // a scrollbar down its last column.
     let runs = app.beats.runs();
     let record_error = app.beats.record.as_ref().and_then(|r| r.error.clone());
     let wanted = match runs {
-        Some(runs) if !heartbeat.awaiting_approval => (runs.len().max(1) + 2).min(8) as u16,
+        Some(runs) => (runs.len().max(1) + 2).min(8) as u16,
         _ => 2,
     };
     let room = usize::from(area.height.saturating_sub(wanted));

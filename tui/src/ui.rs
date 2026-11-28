@@ -3688,7 +3688,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn beats_shows_a_heartbeat_whole_before_approving_it_and_n_starts_its_setup() {
+    async fn beats_shows_a_heartbeat_its_agent_sets_up_and_n_starts_its_setup() {
         let mut h = harness(vec![view("A", "fix-login", 20)]);
         h.fake.state.lock().unwrap().heartbeats = vec![
             heartbeat(
@@ -3708,17 +3708,24 @@ mod tests {
                 .collect::<Vec<_>>()
         };
 
-        // B: the drawer on Heartbeats, the agent's heartbeat first, waiting.
+        // B: the drawer on Heartbeats, by name: the one its agent is
+        // setting up among them, marked so.
         h.press(KeyCode::Char('B')).await;
         assert!(h.app.beats_has_keys());
         let screen = render(&mut h.app, 160, 48);
         assert!(screen.contains("♥  Heartbeats"), "{screen}");
-        assert!(screen.contains("? nightly"), "{screen}");
-        assert!(screen.contains("approve?"), "{screen}");
+        assert!(screen.contains("◌ nightly"), "{screen}");
+        assert!(screen.contains("setting up"), "{screen}");
+        assert!(!screen.contains("approve"), "{screen}");
         assert!(screen.contains("● deps"), "{screen}");
+        h.press(KeyCode::Char('j')).await;
+        assert_eq!(
+            h.app.beats.selected().map(|b| b.name.as_str()),
+            Some("nightly")
+        );
 
         // e from the list shows it whole: its prompt and command, nothing
-        // enabled yet; e there approves it.
+        // enabled yet; e there enables it.
         h.press(KeyCode::Char('e')).await;
         assert!(enables(&h).is_empty());
         let screen = render(&mut h.app, 160, 48);
@@ -3728,13 +3735,14 @@ mod tests {
             screen.contains("--dangerously-skip-permissions"),
             "{screen}"
         );
-        assert!(screen.contains("e approves"), "{screen}");
+        assert!(screen.contains("Its agent is setting it up"), "{screen}");
+        assert!(screen.contains("e enable"), "{screen}");
         h.press(KeyCode::Char('e')).await;
         assert_eq!(enables(&h), ["heartbeat_enable HB1 true"]);
         assert!(h
             .app
             .status()
-            .is_some_and(|m| m.contains("Approved nightly")));
+            .is_some_and(|m| m.contains("nightly runs on its schedule")));
 
         // r runs it now; its run is among its runs, and listed with ♥.
         h.press(KeyCode::Char('r')).await;
@@ -3777,7 +3785,8 @@ mod tests {
         h.press(KeyCode::Char('d')).await;
         assert!(enables(&h).contains(&"heartbeat_delete HB2".to_string()));
 
-        // n: the form; Ask agent makes an empty heartbeat, and a session
+        // n: the form; Ask agent makes an empty heartbeat for its agent
+        // (on once the agent saves its prompt and schedule), and a session
         // running its command whose agent is asked (typed, not sent) to fill
         // it in.
         h.press(KeyCode::Char('n')).await;
@@ -3787,6 +3796,16 @@ mod tests {
         h.press(KeyCode::Enter).await;
         assert!(matches!(h.app.mode, AppMode::Normal));
         assert!(enables(&h).contains(&"heartbeat_create Heartbeat".to_string()));
+        let made = h
+            .fake
+            .state
+            .lock()
+            .unwrap()
+            .heartbeats
+            .last()
+            .cloned()
+            .unwrap();
+        assert!(!made.enabled && made.awaiting_approval, "{made:?}");
         let setup = h.fake.creates().last().cloned().unwrap();
         assert_eq!(
             setup.startup_cmds,

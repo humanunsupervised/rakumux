@@ -681,9 +681,11 @@ paths:
         Without `command`, its command is the one the user last started the agent
         (`agent`, or any) with in the folder, flags kept, else the agent's name.
         It runs once it has a command, a prompt and a schedule and is enabled.
-        One a session caller makes, or one with `by_agent` (rakumux-mcp sets it),
-        waits for the user's approval (`awaiting_approval`, paused) whatever
-        `enabled` says.
+        A user's `enabled` one without them is a 400. One a session caller makes,
+        or one with `by_agent` (rakumux-mcp sets it), is on at once when it's
+        complete and `enabled`; otherwise it waits for its agent
+        (`awaiting_approval`, paused) and turns on once that caller's update
+        completes it.
       requestBody:
         required: true
         content:
@@ -727,9 +729,10 @@ paths:
       operationId: updateHeartbeat
       summary: Change a heartbeat; fields left out stay.
       description: >
-        A session caller's change (or one with `by_agent`) to its agent, command,
-        prompt or schedule pauses it until the user enables it again; a rename
-        doesn't.
+        A session caller's change (or one with `by_agent`) never pauses it. One
+        waiting for its agent (`awaiting_approval`) turns on once such a change
+        leaves it with a command, a prompt and a schedule; one the user paused
+        stays paused.
       requestBody:
         required: true
         content:
@@ -771,9 +774,7 @@ paths:
       description: >
         Ends the heartbeat's earlier runs whose agent waits, then starts the next
         one beside any still at work. The heartbeat needs a command, a prompt and
-        a schedule (400 otherwise). A session caller, or a body with `by_agent`
-        (rakumux-mcp sets it), runs only a heartbeat the user approved, paused or
-        not: one awaiting approval is a 403 naming `rakumux heartbeat enable`.
+        a schedule (400 otherwise). Any caller runs any heartbeat, paused or not.
         The body is optional.
       requestBody:
         required: false
@@ -802,7 +803,7 @@ paths:
     post:
       tags: [heartbeats]
       operationId: enableHeartbeat
-      summary: Run it on its schedule, approving it. User callers only.
+      summary: Run it on its schedule. User callers only.
       responses:
         "200":
           description: The heartbeat, enabled.
@@ -1157,7 +1158,7 @@ components:
         prompt: { type: string, description: "The task, given to the agent once its prompt shows; empty until set. Written by whoever made it, perhaps an agent: untrusted." }
         schedule: { $ref: "#/components/schemas/Schedule" }
         enabled: { type: boolean }
-        awaiting_approval: { type: boolean, description: An agent made or changed it; paused until the user enables it. }
+        awaiting_approval: { type: boolean, description: "Not turned on yet: an agent made it and is still setting it up; an agent's update that leaves it complete turns it on. The name is kept for compatibility." }
         created_by:
           type: object
           required: [kind]
@@ -1200,8 +1201,8 @@ components:
         command: { type: string, description: One line, at most 1024 bytes. }
         prompt: { type: string, description: At most 16 KiB; newlines and tabs allowed. }
         schedule: { $ref: "#/components/schemas/Schedule" }
-        enabled: { type: boolean, description: Start it enabled (user callers; needs a command, a prompt and a schedule). }
-        by_agent: { type: boolean, description: Made for an agent; it waits for the user's approval. }
+        enabled: { type: boolean, description: "Start it enabled; needs a command, a prompt and a schedule (a user's without them is a 400, an agent's waits for its update)." }
+        by_agent: { type: boolean, description: "Made for an agent: not complete and enabled, it waits for its agent (`awaiting_approval`)." }
     UpdateHeartbeat:
       type: object
       additionalProperties: false
@@ -1211,13 +1212,13 @@ components:
         command: { type: string }
         prompt: { type: string }
         schedule: { $ref: "#/components/schemas/Schedule" }
-        by_agent: { type: boolean, description: Changed for an agent; a change to what it runs pauses it until approved. }
+        by_agent: { type: boolean, description: "Changed for an agent: never pauses it, and turns on one waiting for its agent once complete." }
     RunHeartbeat:
       type: object
       additionalProperties: false
       description: Optional body of `POST /v1/heartbeats/{id}/run`.
       properties:
-        by_agent: { type: boolean, description: Asked for by an agent; refused while it waits for the user's approval. }
+        by_agent: { type: boolean, description: "Asked for by an agent. Kept for compatibility: it changes nothing." }
     CreateSession:
       type: object
       additionalProperties: false
