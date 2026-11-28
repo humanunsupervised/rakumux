@@ -197,6 +197,7 @@ fn draw_feed_list(
         first = before;
     }
     let mut y = area.y;
+    let mut shown = 0;
     for (index, card) in cards.iter().enumerate().skip(first) {
         let headed = index == first || period(index) != period(index - 1);
         let header = if headed { PERIOD_ROWS } else { 0 };
@@ -204,6 +205,7 @@ fn draw_feed_list(
         if y + header + rows > area.bottom() {
             break;
         }
+        shown += 1;
         if headed {
             let count = (0..cards.len())
                 .filter(|other| period(*other) == period(index))
@@ -229,6 +231,83 @@ fn draw_feed_list(
         hits.push((cell, Hit::FeedEntry(index)));
         y += rows + CARD_GAP;
     }
+    // Where the cards shown sit among them all, by their places in the list
+    // (only these were measured), in the column right of the cards.
+    draw_scrollbar(f, area, first, shown.max(1), cards.len(), focused);
+}
+
+/// The rows of a `rows`-tall track the thumb covers, `(start, end)`, when
+/// only `shown` of `total` items from `first` are on screen: their share of
+/// it, at least a row, at the top only when the first item shows and at
+/// the bottom only when the last does. None while everything shows.
+pub(crate) fn scroll_thumb(
+    rows: u16,
+    first: usize,
+    shown: usize,
+    total: usize,
+) -> Option<(u16, u16)> {
+    if rows == 0 || total == 0 || (first == 0 && first + shown >= total) {
+        return None;
+    }
+    let last = (first + shown).min(total);
+    let rows_of = |items: usize| (items * rows as usize) as f64 / total as f64;
+    let mut start = rows_of(first).floor() as u16;
+    if first > 0 && rows > 2 {
+        start = start.max(1);
+    }
+    let mut end = if last == total {
+        rows
+    } else {
+        (rows_of(last).ceil() as u16).max(start + 1)
+    };
+    if last < total && rows > 2 {
+        end = end.min(rows - 1);
+    }
+    end = end.min(rows);
+    start = start.min(end - 1);
+    Some((start, end))
+}
+
+/// A scrollbar down the last column of `area` while only `shown` of `total`
+/// items from `first` are on screen: its thumb (`▐`) where they sit, in the
+/// accent while the feed has the keys; nothing while everything shows.
+fn draw_scrollbar(
+    f: &mut Frame,
+    area: Rect,
+    first: usize,
+    shown: usize,
+    total: usize,
+    focused: bool,
+) {
+    if area.width < 3 {
+        return;
+    }
+    let Some((start, end)) = scroll_thumb(area.height, first, shown, total) else {
+        return;
+    };
+    let p = theme::palette();
+    let style = Style::default().fg(if focused {
+        p.accent_primary
+    } else {
+        p.text_muted
+    });
+    let lines: Vec<Line> = (0..area.height)
+        .map(|row| {
+            if (start..end).contains(&row) {
+                Line::from(Span::styled("▐", style))
+            } else {
+                Line::from(" ")
+            }
+        })
+        .collect();
+    f.render_widget(
+        Paragraph::new(lines),
+        Rect {
+            x: area.right() - 1,
+            width: 1,
+            ..area
+        },
+    );
 }
 
 /// When `card` last changed, in Unix seconds (a prompt of unknown time
@@ -372,14 +451,48 @@ pub(crate) fn card_stamp(at: i64, now: i64, short: bool) -> String {
 }
 
 /// A card's border: the accent's on the selected card while the feed has
-/// the keys, lighter than the others' on it otherwise.
+/// the keys (bold), lighter than the others' on it otherwise.
 fn card_border(chosen: bool, focused: bool) -> Style {
     let p = theme::palette();
-    Style::default().fg(match (chosen, focused) {
+    let style = Style::default().fg(match (chosen, focused) {
         (true, true) => p.accent_primary,
         (true, false) => p.neutral_gray,
         (false, _) => p.border,
-    })
+    });
+    if chosen && focused {
+        style.add_modifier(Modifier::BOLD)
+    } else {
+        style
+    }
+}
+
+/// A card's border lines: heavy around the selected card (`┏━┓┃┗┛`), so the
+/// selection reads in any colours; rounded around the others.
+struct Edges {
+    /// The sides and bottom, drawn by the block.
+    kind: BorderType,
+    top_left: &'static str,
+    top: &'static str,
+    top_right: &'static str,
+}
+
+/// The border lines of a card, selected (`chosen`) or not.
+fn card_edges(chosen: bool) -> Edges {
+    if chosen {
+        Edges {
+            kind: BorderType::Thick,
+            top_left: "┏",
+            top: "━",
+            top_right: "┓",
+        }
+    } else {
+        Edges {
+            kind: BorderType::Rounded,
+            top_left: "╭",
+            top: "─",
+            top_right: "╮",
+        }
+    }
 }
 
 /// One card in `cell`, a column in from each side: the top border says when
@@ -410,7 +523,7 @@ fn draw_card(
     f.render_widget(
         Block::default()
             .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-            .border_type(BorderType::Rounded)
+            .border_type(card_edges(chosen).kind)
             .border_style(border),
         Rect {
             y: card.y + 1,
@@ -648,6 +761,7 @@ fn card_top(
 ) -> Line<'static> {
     let p = theme::palette();
     let border = card_border(chosen, focused);
+    let edges = card_edges(chosen);
     let muted = Style::default().fg(p.text_muted);
     let name_style = Style::default()
         .fg(if chosen {
@@ -691,7 +805,7 @@ fn card_top(
         String::new()
     };
     let mut spans = vec![
-        Span::styled("╭", border),
+        Span::styled(edges.top_left, border),
         Span::raw(" "),
         Span::styled(stamp, Style::default().fg(p.neutral_gray)),
         Span::raw("  "),
@@ -706,9 +820,9 @@ fn card_top(
     spans.push(Span::raw(" "));
     used += 1;
     let fill = width.saturating_sub(used + right_width + 1);
-    spans.push(Span::styled("─".repeat(fill), border));
+    spans.push(Span::styled(edges.top.repeat(fill), border));
     spans.extend(right);
-    spans.push(Span::styled("╮", border));
+    spans.push(Span::styled(edges.top_right, border));
     Line::from(spans)
 }
 
@@ -859,8 +973,36 @@ fn draw_feed_reply(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, H
     body.extend(thread_lines(app, entry, width));
     let room = (inner.height as usize).saturating_sub(head);
     let scroll = app.feed.scroll.min(body.len().saturating_sub(room));
+    let total = body.len();
     lines.extend(body.into_iter().skip(scroll).take(room));
     f.render_widget(Paragraph::new(lines), inner);
+    draw_body_scrollbar(f, app, inner, head, (scroll, room, total));
+}
+
+/// The scrollbar of what's read whole, beside the `room` rows of its body
+/// under the `head` rows of its heading in `inner` (in the column right of
+/// it, past the margin), while not all of its `total` lines show from
+/// `scroll`.
+fn draw_body_scrollbar(
+    f: &mut Frame,
+    app: &App,
+    inner: Rect,
+    head: usize,
+    (scroll, room, total): (usize, usize, usize),
+) {
+    let Ok(head) = u16::try_from(head) else {
+        return;
+    };
+    if head >= inner.height {
+        return;
+    }
+    let track = Rect {
+        y: inner.y + head,
+        height: inner.height - head,
+        width: inner.width + 2,
+        ..inner
+    };
+    draw_scrollbar(f, track, scroll, room, total, app.feed_has_keys());
 }
 
 /// What can be done with the selected card, under its heading: `Enter` goes
@@ -967,8 +1109,10 @@ fn draw_open(
     body.push(working_line());
     let room = (inner.height as usize).saturating_sub(head);
     let scroll = app.feed.scroll.min(body.len().saturating_sub(room));
+    let total = body.len();
     lines.extend(body.into_iter().skip(scroll).take(room));
     f.render_widget(Paragraph::new(lines), inner);
+    draw_body_scrollbar(f, app, inner, head, (scroll, room, total));
 }
 
 /// The rows of a reply written back shown in a thread.

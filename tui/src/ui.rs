@@ -2628,14 +2628,16 @@ mod tests {
         // the mark, short of room).
         assert!(pane[0].starts_with("   ◷ last hour  "), "{wide}");
         assert!(pane[0].ends_with("  2"), "{wide}");
-        assert!(pane[1].contains(" · now  api  claude · repo ─"), "{wide}");
-        assert!(pane[1].ends_with(" ╮"), "{wide}");
-        assert!(pane[2].starts_with(" │ Done: the parser handles"), "{wide}");
+        // The selected card is drawn heavy all round, the others rounded.
+        assert!(pane[1].contains(" · now  api  claude · repo ━"), "{wide}");
+        assert!(pane[1].starts_with(" ┏ "), "{wide}");
+        assert!(pane[1].ends_with(" ┓"), "{wide}");
+        assert!(pane[2].starts_with(" ┃ Done: the parser handles"), "{wide}");
         // As tall as what it says, so nothing to expand; a row between
         // cards, the next under the same period.
         let end = pane
             .iter()
-            .position(|row| row.starts_with(" ╰─"))
+            .position(|row| row.starts_with(" ┗━"))
             .unwrap_or_else(|| panic!("{wide}"));
         assert!(!pane[end].contains("more"), "{wide}");
         assert_eq!(pane[end + 1], "", "{wide}");
@@ -2645,6 +2647,10 @@ mod tests {
         assert!(next.ends_with(" ● ╮"), "{wide}");
         // Its text isn't muted, selected or not.
         let buffer = terminal.backend().buffer();
+        // The selected card's heavy border is the accent's while the Inbox
+        // has the keys; the next one's is plain.
+        assert_eq!(buffer.get(1, 1).fg, p.accent_primary, "{wide}");
+        assert_eq!(buffer.get(1, end as u16 + 2).fg, p.border, "{wide}");
         for row in [2, end + 3] {
             assert_eq!(buffer.get(3, row as u16).fg, p.text_primary, "{wide}");
         }
@@ -2747,17 +2753,18 @@ mod tests {
         let wide = render(&mut h.app, 240, 48);
         let pane = list_column(&wide, 70);
         assert!(
-            pane[1].contains(" · 3m  parser  claude · repo ⎇ fix/csv ─"),
+            pane[1].contains(" · 3m  parser  claude · repo ⎇ fix/csv ━"),
             "{wide}"
         );
-        assert!(pane[1].ends_with("─ ✓ answered ╮"), "{wide}");
+        // Selected, so heavy.
+        assert!(pane[1].ends_with("━ ✓ answered ┓"), "{wide}");
         // Short of room, the status's word goes first: the mark stays.
         let phone = render(&mut h.app, 45, 30);
         let top = phone
             .lines()
             .find(|line| line.contains("  parser  "))
             .unwrap_or_else(|| panic!("{phone}"));
-        assert!(top.trim_end().ends_with(" ✓ ╮"), "{phone}");
+        assert!(top.trim_end().ends_with(" ✓ ┓"), "{phone}");
     }
 
     #[test]
@@ -3183,7 +3190,7 @@ mod tests {
             "{screen}"
         );
         assert!(cards[1].starts_with("   ◷ last hour"), "{screen}");
-        assert!(cards[2].contains(" · 2m  api  claude · repo ─"), "{screen}");
+        assert!(cards[2].contains(" · 2m  api  claude · repo ━"), "{screen}");
         assert!(rows[2].chars().nth(width) == Some('│'), "{screen}");
         assert!(screen.contains("finished 2m ago"), "{screen}");
         assert!(!screen.contains("hello from the fake"), "{screen}");

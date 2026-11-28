@@ -1322,7 +1322,8 @@ async fn cards_show_the_prompt_then_the_answer_or_that_it_is_coming() {
             .unwrap_or_else(|| panic!("{needle:?} not in\n{text}"))
     };
     // Newest first: the waiting prompt, then the finished turn.
-    assert!(at("│  Now the docs") < at("agent is working on a reply"));
+    // The selected card's borders are heavy.
+    assert!(at("┃  Now the docs") < at("agent is working on a reply"));
     assert!(at("agent is working on a reply") < at("│  Fix the flaky parser test"));
     assert!(at("│  Fix the flaky parser test") < at("Reply A"));
     assert!(
@@ -1476,6 +1477,190 @@ fn the_services_name_for_this_machine_replaces_the_hostname() {
     assert_eq!(store.machine(), "studio-6m8b");
 }
 
+/// The feed's column right of its cards, top to bottom, as drawn.
+fn scrollbar_column(h: &mut Harness) -> String {
+    feed_lines(h)
+        .iter()
+        .map(|line| {
+            let width = usize::from(h.app.left_body().unwrap().width);
+            let cells: Vec<char> = line.chars().collect();
+            cells.get(width - 1).copied().unwrap_or(' ')
+        })
+        .collect()
+}
+
+/// The selected card is drawn heavy all round (`┏━┓┃┗┛`), in the accent
+/// while the Inbox has the keys, the others rounded; moving the selection
+/// moves the heavy border, and nothing shifts.
+#[tokio::test]
+async fn the_selected_card_is_drawn_heavy_all_round() {
+    let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
+    let entries = (1..=3)
+        .map(|n| entry(&format!("E{n}"), "A", 1_000 * n, Some(n as u64)))
+        .collect();
+    account.queue_feed(page(1, 1, entries, false));
+    h.app.resize(160, 48);
+    show_feed(&mut h).await;
+    tick(&mut h, Duration::from_millis(10));
+    let tops = |lines: &[String]| -> Vec<(usize, char)> {
+        lines
+            .iter()
+            .enumerate()
+            .filter_map(|(row, line)| {
+                let corner = line.chars().nth(1)?;
+                matches!(corner, '┏' | '╭').then_some((row, corner))
+            })
+            .collect()
+    };
+    let lines = feed_lines(&mut h);
+    let before = tops(&lines);
+    assert_eq!(
+        before.iter().map(|(_, c)| *c).collect::<String>(),
+        "┏╭╭",
+        "{lines:#?}"
+    );
+    let (top, _) = before[0];
+    assert!(lines[top].trim_end().ends_with('┓'), "{lines:#?}");
+    assert!(lines[top + 1].starts_with(" ┃ "), "{lines:#?}");
+    assert!(lines[top + 1].trim_end().ends_with('┃'), "{lines:#?}");
+    assert!(lines[top + 2].starts_with(" ┗━"), "{lines:#?}");
+    assert!(lines[top + 2].trim_end().ends_with("━┛"), "{lines:#?}");
+    // In the accent, bold, while the Inbox has the keys; the others not.
+    let area = h.app.area;
+    let mut terminal =
+        ratatui::Terminal::new(ratatui::backend::TestBackend::new(area.width, area.height))
+            .unwrap();
+    terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+    let body = h.app.left_body().unwrap();
+    let p = crate::theme::palette();
+    let cell = |row: usize| {
+        terminal
+            .backend()
+            .buffer()
+            .get(body.x + 1, body.y + row as u16)
+            .clone()
+    };
+    assert_eq!(cell(top).fg, p.accent_primary);
+    assert!(cell(top).modifier.contains(ratatui::style::Modifier::BOLD));
+    assert_eq!(cell(before[1].0).fg, p.border);
+    // Down: the next card is the heavy one, every card where it was.
+    h.press(KeyCode::Down).await;
+    let after = tops(&feed_lines(&mut h));
+    assert_eq!(after.iter().map(|(_, c)| *c).collect::<String>(), "╭┏╭");
+    assert_eq!(
+        after.iter().map(|(row, _)| *row).collect::<Vec<_>>(),
+        before.iter().map(|(row, _)| *row).collect::<Vec<_>>()
+    );
+}
+
+/// The cards have a scrollbar in the column right of them (`▐`) once they
+/// don't all fit: at the top with the first card shown, at the bottom with
+/// the last; none while they all fit. A reply read whole longer than the
+/// pane has one too.
+#[tokio::test]
+async fn the_inbox_has_a_scrollbar_when_its_cards_overflow() {
+    let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
+    account.queue_feed(page(1, 1, vec![entry("E1", "A", 1_000, Some(1))], false));
+    h.app.resize(160, 48);
+    show_feed(&mut h).await;
+    tick(&mut h, Duration::from_millis(10));
+    let column = scrollbar_column(&mut h);
+    assert!(!column.contains('▐'), "{:#?}", feed_lines(&mut h));
+
+    let entries = (1..=40)
+        .map(|n| entry(&format!("E{n}"), "A", 1_000 * n, Some(n as u64)))
+        .collect();
+    account.queue_feed(page(2, 1, entries, false));
+    tick(&mut h, Duration::from_secs(3));
+    assert_eq!(h.app.feed.cards().len(), 40);
+    let column = scrollbar_column(&mut h);
+    let thumb: Vec<usize> = column
+        .chars()
+        .enumerate()
+        .filter_map(|(row, c)| (c == '▐').then_some(row))
+        .collect();
+    let rows = column.chars().count();
+    assert!(!thumb.is_empty(), "{:#?}", feed_lines(&mut h));
+    assert_eq!(thumb[0], 0, "{column:?}");
+    assert!(thumb.len() < rows / 2, "{column:?}");
+    // In one piece, nowhere but that column.
+    assert_eq!(
+        thumb.last().unwrap() - thumb[0] + 1,
+        thumb.len(),
+        "{column:?}"
+    );
+    let lines = feed_lines(&mut h);
+    let width = usize::from(h.app.left_body().unwrap().width);
+    assert!(lines
+        .iter()
+        .all(|line| !line.chars().take(width - 1).any(|c| c == '▐')));
+    // In the accent while the Inbox has the keys.
+    let area = h.app.area;
+    let mut terminal =
+        ratatui::Terminal::new(ratatui::backend::TestBackend::new(area.width, area.height))
+            .unwrap();
+    terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+    let body = h.app.left_body().unwrap();
+    let thumb_cell = terminal
+        .backend()
+        .buffer()
+        .get(body.right() - 1, body.y)
+        .clone();
+    assert_eq!(thumb_cell.fg, crate::theme::palette().accent_primary);
+
+    // Down the list it moves down; at the last card it's at the bottom.
+    for _ in 0..20 {
+        h.press(KeyCode::Down).await;
+    }
+    let middle = scrollbar_column(&mut h);
+    let at = middle.find('▐').map(|byte| middle[..byte].chars().count());
+    assert!(at.is_some_and(|at| at > 0), "{middle:?}");
+    assert!(!middle.ends_with('▐'), "{middle:?}");
+    h.press(KeyCode::End).await;
+    let end = scrollbar_column(&mut h);
+    assert!(end.ends_with('▐'), "{end:?}");
+    assert!(!end.starts_with('▐'), "{end:?}");
+
+    // A reply read whole that's longer than the pane.
+    let mut long = entry("L", "A", 100_000, Some(41));
+    long.text = (1..=80)
+        .map(|n| format!("Line {n} of the answer."))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let mut entries: Vec<FeedEntry> = vec![long];
+    entries.push(entry("E1", "A", 1_000, Some(1)));
+    account.queue_feed(page(3, 1, entries, false));
+    tick(&mut h, Duration::from_secs(30));
+    assert_eq!(h.app.feed.cards().len(), 2);
+    h.press(KeyCode::Home).await;
+    h.press(KeyCode::Enter).await;
+    assert!(h.app.feed.reading);
+    let column = scrollbar_column(&mut h);
+    assert!(column.contains('▐'), "{:#?}", feed_lines(&mut h));
+    // The heading's rows have none; the thumb starts at the body's top.
+    assert!(!column.starts_with('▐'), "{column:?}");
+    for _ in 0..400 {
+        h.press(KeyCode::Down).await;
+    }
+    let column = scrollbar_column(&mut h);
+    assert!(column.ends_with('▐'), "{column:?}");
+}
+
+#[test]
+fn a_scrollbar_thumb_covers_the_share_shown() {
+    use crate::components::feed::scroll_thumb;
+    assert_eq!(scroll_thumb(20, 0, 5, 5), None);
+    assert_eq!(scroll_thumb(20, 0, 0, 0), None);
+    assert_eq!(scroll_thumb(20, 0, 5, 10), Some((0, 10)));
+    assert_eq!(scroll_thumb(20, 5, 5, 10), Some((10, 20)));
+    // Off the top and the bottom while neither end shows.
+    assert_eq!(scroll_thumb(20, 1, 1, 100), Some((1, 2)));
+    assert_eq!(scroll_thumb(20, 98, 1, 100), Some((18, 19)));
+    // At least a row.
+    assert_eq!(scroll_thumb(10, 0, 1, 500), Some((0, 1)));
+    assert_eq!(scroll_thumb(10, 499, 1, 500), Some((9, 10)));
+}
+
 /// The feed's lines from its left edge, each row's end trimmed.
 fn feed_lines(h: &mut Harness) -> Vec<String> {
     let area = h.app.area;
@@ -1535,10 +1720,11 @@ async fn cards_show_ten_lines_of_an_answer_and_expand_to_show_all_they_say() {
     // The header names the folder, then the repository (this machine's
     // session, named unlike its folder) and the branch.
     assert!(
-        lines[top].contains("docs  claude · repo · focal-md ⎇ paper-links ─"),
+        lines[top].contains("docs  claude · repo · focal-md ⎇ paper-links ━"),
         "{lines:#?}"
     );
-    // Ten lines of the answer, and `▾ more` on its bottom border.
+    // Ten lines of the answer, and `▾ more` on its bottom border (heavy:
+    // the card is selected).
     assert!(
         lines[top + 1].contains("Line 1 of the answer."),
         "{lines:#?}"
@@ -1547,8 +1733,8 @@ async fn cards_show_ten_lines_of_an_answer_and_expand_to_show_all_they_say() {
         lines[top + 10].contains("Line 10 of the answer. …"),
         "{lines:#?}"
     );
-    assert!(lines[top + 11].contains("╰─"), "{lines:#?}");
-    assert!(lines[top + 11].contains(" ▾ more ─╯"), "{lines:#?}");
+    assert!(lines[top + 11].contains("┗━"), "{lines:#?}");
+    assert!(lines[top + 11].contains(" ▾ more ━┛"), "{lines:#?}");
     // A row, then the next card: another machine's, so no repository is
     // known; all it says fits, so nothing to expand.
     assert_eq!(lines[top + 12], "", "{lines:#?}");
@@ -1569,11 +1755,11 @@ async fn cards_show_ten_lines_of_an_answer_and_expand_to_show_all_they_say() {
             .any(|line| line.contains("Line 20 of the answer.")),
         "{lines:#?}"
     );
-    assert_eq!(lines[top + 2].trim_matches(|c| c == ' ' || c == '│'), "");
+    assert_eq!(lines[top + 2].trim_matches(|c| c == ' ' || c == '┃'), "");
     // Line n is on row 2n - 1 inside; the bottom border after line 20.
     let bottom = top + 40;
     assert!(lines[bottom - 1].contains("Line 20"), "{lines:#?}");
-    assert!(lines[bottom].contains(" ▴ less ─╯"), "{lines:#?}");
+    assert!(lines[bottom].contains(" ▴ less ━┛"), "{lines:#?}");
     assert!(lines[bottom + 2].contains("  nightly  "), "{lines:#?}");
     h.press(KeyCode::Char(' ')).await;
     assert!(feed_lines(&mut h)[top + 11].contains(" ▾ more "));

@@ -1866,8 +1866,9 @@ screen while it has the keys (`App::rtop_has_keys`): `t` shows it with them, giv
 the left column has them, and hides it while it has them; a click gives them to the side it lands
 on; `Esc` gives them back, hiding it where it would leave the screen (a phone); session mode gives
 them back too. The footer names the selected
-card's session (rtop's selected row's) while a panel has the keys. On the Inbox, the selected card's
-border is in the accent while it has the keys. With them `↑`/`↓`/`j`/`k` go through the cards, `Enter` (or a second click,
+card's session (rtop's selected row's) while a panel has the keys. On the Inbox, the selected card is drawn
+heavy all round (`┏━┓┃┗┛`, the others rounded; same rows, so nothing shifts), in the accent and bold
+while it has the keys, grey otherwise. With them `↑`/`↓`/`j`/`k` go through the cards, `Enter` (or a second click,
 a tap on a phone) reads the selected reply whole in the cards' place (the `‹` over it, or `Esc`,
 goes back; `↑`/`↓` scroll it; `Ctrl-d`/`Ctrl-u`, PgUp/PgDn page it), and `Enter` there (or beside
 the cards) goes into its session when it runs here; `Space` (or a click on a card's `▾ more`)
@@ -1890,7 +1891,11 @@ prompt on a bar (its first line), then the answer's first 10 lines (`ANSWER_LINE
 drawn in the text's own colour, not muted (`▾ more` on its bottom
 border when there's more; expanded, all of it, at most the feed's height)
 (`components/markdown.rs`, pulldown-cmark); a prompt still waiting shows a spinner and `agent is
-working on a reply` there. Only the cards around the selected one are measured each frame. A prompt
+working on a reply` there. Only the cards around the selected one are measured each frame; while
+they don't all fit, a scrollbar in the column right of them (a `▐` thumb, the accent's while the
+Inbox has the keys; `scroll_thumb`) says where the cards shown sit among them all, by their places in
+the list, at the top only when the first shows and at the bottom only when the last does. A reply
+read whole longer than its pane has one beside its body too. A prompt
 still waiting for its answer (rakumux.com's `open` turns, from the uploaded chats) is a card of
 its own, `working`, until the entry that answers it takes the card over. A reply read whole is
 its turn, its Markdown drawn, then its thread when someone wrote back; `r` (or a click on its
