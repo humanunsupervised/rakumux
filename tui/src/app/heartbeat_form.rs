@@ -12,11 +12,18 @@
 //! rows `↑`/`↓` go through those first; Alt-Enter or Ctrl-J starts a new
 //! line), `←`/`→` choose, Space ticks a day, Esc closes.
 //!
+//! The prompt grows with its text while the screen has room, then scrolls:
+//! the cursor stays in view as it types or moves (`↑`/`↓`, PgUp/PgDn a
+//! page, Home/End the start and end of the text), and the wheel over it
+//! scrolls it without moving the cursor ([`PromptView`]).
+//!
 //! Each agent has arguments of its own, at first those with which it doesn't
 //! stop to ask (`AgentCommand::unattended`). On the agent or its arguments
 //! the form lists what the agent takes (`argument_suggest.rs`); typing
 //! narrows it, `↑`/`↓` pick, Tab or Enter (or a click) takes one, Esc leaves
 //! what's typed as it is.
+
+use std::cell::Cell;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use session_core::api::{ApiError, CreateSession, ErrorCode, FirstInput};
@@ -30,6 +37,7 @@ use super::argument_suggest::{suggest, Suggestions};
 use super::folders::compare_folders;
 use super::heartbeats::setup_prompt;
 use super::runtime::AppEvent;
+use super::sessions::WHEEL_ROWS;
 use super::types::AppMode;
 use super::{env_snapshot, App, Hit, TextInput};
 use crate::components::heartbeat_form::prompt_cols;
@@ -147,6 +155,22 @@ impl AgentChoice {
     }
 }
 
+/// The prompt's rows on screen, kept by the drawing: the first one, and how
+/// many show. It follows the cursor, unless the wheel moved it since the
+/// last key.
+///
+/// ```text
+/// 200 rows, 8 on screen, the cursor on row 150: top 143, rows 8
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct PromptView {
+    pub top: Cell<usize>,
+    pub rows: Cell<usize>,
+    /// The columns its text is wrapped to.
+    pub cols: Cell<usize>,
+    pub wheeled: Cell<bool>,
+}
+
 /// The heartbeat being edited, with what the form showed of it at first.
 #[derive(Debug, Clone)]
 pub struct Editing {
@@ -176,6 +200,7 @@ pub struct HeartbeatForm {
     /// The suggested argument Tab and Enter take.
     pub pick: Option<usize>,
     pub prompt: TextInput,
+    pub prompt_view: PromptView,
     pub field: FormField,
     pub error: Option<String>,
     /// Being made.
@@ -199,6 +224,7 @@ impl HeartbeatForm {
             agent: 0,
             pick: None,
             prompt: TextInput::multiline(),
+            prompt_view: PromptView::default(),
             field: FormField::Name,
             error: None,
             busy: false,
@@ -426,6 +452,7 @@ impl HeartbeatForm {
         if self.busy {
             return;
         }
+        self.prompt_view.wheeled.set(false);
         let one_line = self.field != FormField::Prompt;
         if let Some(input) = self.text_mut() {
             match one_line {
@@ -435,6 +462,32 @@ impl HeartbeatForm {
             self.error = None;
             self.suggest_again();
         }
+    }
+
+    /// PgUp/PgDn in the prompt: its view and the cursor a page up or down
+    /// (`pages` -1 or 1): the rows shown but one, the cursor to the first or
+    /// last row at most (its column kept).
+    fn page_prompt(&mut self, pages: isize) {
+        let cols = self.prompt_view.cols.get();
+        let page = self.prompt_view.rows.get().saturating_sub(1).max(1) as isize;
+        let last = self.prompt.rows(cols).len().saturating_sub(1);
+        let (row, _) = self.prompt.cursor_at(cols);
+        let target = row.saturating_add_signed(pages * page).min(last);
+        self.prompt.move_rows(target as isize - row as isize, cols);
+        let view = &self.prompt_view;
+        view.top
+            .set(view.top.get().saturating_add_signed(pages * page));
+    }
+
+    /// The wheel over the prompt: its rows `delta` up or down; the cursor
+    /// stays where it is, out of view if need be, until a key.
+    fn scroll_prompt(&mut self, delta: isize, cols: usize) {
+        let total = self.prompt.rows(cols).len();
+        let view = &self.prompt_view;
+        let max = total.saturating_sub(view.rows.get());
+        view.top
+            .set(view.top.get().saturating_add_signed(delta).min(max));
+        view.wheeled.set(true);
     }
 
     /// The schedule filled in, or what's wrong with it.
@@ -631,6 +684,9 @@ impl App {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+        // A key: the prompt's view follows its cursor again.
+        form.prompt_view.wheeled.set(false);
+        form.prompt_view.cols.set(cols);
         match (key.code, form.field) {
             // Off the suggestion, then off the form.
             (KeyCode::Esc, _) if form.pick.is_some() => form.pick = None,
@@ -642,6 +698,8 @@ impl App {
             (KeyCode::Enter, FormField::AskAgent) => self.submit_heartbeat(true),
             (KeyCode::Up, FormField::Prompt) if form.prompt.move_rows(-1, cols) => {}
             (KeyCode::Down, FormField::Prompt) if form.prompt.move_rows(1, cols) => {}
+            (KeyCode::PageUp, FormField::Prompt) => form.page_prompt(-1),
+            (KeyCode::PageDown, FormField::Prompt) => form.page_prompt(1),
             (KeyCode::Up, FormField::Arguments) if form.step_pick(-1) => {}
             (KeyCode::Down, FormField::Arguments) if form.step_pick(1) => {}
             (KeyCode::Tab | KeyCode::Enter, FormField::Arguments) if form.pick.is_some() => {
@@ -666,9 +724,13 @@ impl App {
     /// The mouse while the form is open. A click off it leaves it open: what
     /// was written isn't lost.
     pub(super) fn heartbeat_form_mouse(&mut self, event: MouseEvent) {
-        if event.kind != MouseEventKind::Down(MouseButton::Left) {
-            return;
-        }
+        let wheel = match event.kind {
+            MouseEventKind::ScrollUp => Some(-WHEEL_ROWS as isize),
+            MouseEventKind::ScrollDown => Some(WHEEL_ROWS as isize),
+            MouseEventKind::Down(MouseButton::Left) => None,
+            _ => return,
+        };
+        let cols = prompt_cols(self.area.width);
         let hit = self.hits.iter().find_map(|(area, hit)| match hit {
             Hit::HeartbeatForm(hit)
                 if event.column >= area.x
@@ -684,6 +746,13 @@ impl App {
             return;
         };
         if form.busy {
+            return;
+        }
+        // The wheel scrolls the prompt under it.
+        if let Some(delta) = wheel {
+            if hit == Some(FormHit::Field(FormField::Prompt)) {
+                form.scroll_prompt(delta, cols);
+            }
             return;
         }
         match hit {

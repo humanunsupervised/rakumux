@@ -809,7 +809,8 @@ tui/
     app.rs, app/             # TUI state, folders and the folder filter, handlers, session pipelines, config
                              # (see tui/src/app/AGENTS.md)
     ui.rs, components/       # rendering: session list, detail, Folders modal, dialogs, footer (session,
-                             # messages, workspace), welcome tour, phone access (offer, pairing dialog with QR code)
+                             # messages, workspace), welcome tour, phone access (offer, pairing dialog with QR code),
+                             # scrollbar (Help, a heartbeat's prompt)
     terminal_view/           # live terminal pane widget, key/mouse/paste encoding
     layout/                  # Master detail / Tabs geometry, tab bar, session cycling
     help/                    # Settings modal (General, Keys: actions table) and Help modal (docs, license)
@@ -2178,7 +2179,9 @@ name. Under the selected one its buttons (`BeatAction`: `r run`, `p pause` or `e
 `c edit`, `d delete`; short of room edit and delete stay), each a click target, and under
 them all `+ New heartbeat`, a row to select like them (`BeatsView::on_new`; the only one when
 there are none). `↑`/`↓` (`j`/`k`) select; `Enter` shows one whole (its
-buttons, how it runs, its command and prompt in full, then every run the daemon recorded,
+buttons, how it runs, its command and prompt in full (wrapped here, `wrap_spans`; taller than its
+room it scrolls, a scrollbar beside it: `PgUp`/`PgDn`, which otherwise scroll the run's output,
+and the wheel over it; `BeatsView::text_top`), then every run the daemon recorded,
 newest first (`heartbeat_runs`, read with the heartbeats; more as the selection nears the last
 read): its number, what became of it (`working`, `done`, `ended`, `deleted`, `skipped: …`,
 `failed: …`) and when; the newest is selected and stays so as runs come, another stays selected
@@ -2199,7 +2202,11 @@ otherwise, at a time), Folder (the current one; any the daemon knows), then the 
 is: Agent (those used most recently first, in the folder, then anywhere), Arguments (each agent's
 own, kept while another is chosen; at first those with which it doesn't stop to ask,
 `AgentCommand::unattended`: `claude --dangerously-skip-permissions`) and Prompt (several lines:
-`Alt-Enter` or `Ctrl-J` starts one, a paste keeps its own); under them the command as it will run,
+`Alt-Enter` or `Ctrl-J` starts one, a paste keeps its own; as many rows as its text takes, 8 at
+least, while the screen has them, then it scrolls with its cursor: `↑`/`↓`, `PgUp`/`PgDn` a page,
+`Home`/`End` its start and end, and the wheel over it, which leaves the cursor until a key
+(`PromptView`, kept by the drawing); a scrollbar down its last column, `components/scrollbar.rs`,
+Help's); under them the command as it will run,
 while there's room. On the agent or its arguments a list over the rows under them says what that
 agent takes (`app/argument_suggest.rs`): typing narrows it, or lists the values of the argument
 before the cursor; a half-typed word's best is picked, `↑`/`↓` pick another, `Tab`, `Enter` or a

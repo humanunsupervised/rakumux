@@ -686,11 +686,12 @@ impl KeyAction {
             KeyAction::Beats => "Commands Rakumux runs on a clock: the Heartbeats tab at \
                  the bottom of the left column. At each due time a new session (♥) in the heartbeat's folder \
                  runs its command, an agent with its arguments and the prompt; earlier runs that wait are \
-                 ended. Enter shows one whole: its prompt, command and every run, the selected \
-                 run beside it (live while it runs, its saved output once it ended); Enter there \
+                 ended. Enter shows one whole: its prompt (PgUp/PgDn or the wheel scroll a \
+                 long one), command and every run, the selected run beside it (live while it runs, its saved output once it ended); Enter there \
                  goes into it. e approves or enables it (one an agent made or changed waits for \
                  you, marked ?; an agent runs only those you approved), p pauses, r runs it now, c edits it (Ctrl-S saves), d twice deletes it. n or + \
-                 New heartbeat makes one: its schedule, folder, agent, arguments and prompt. An \
+                 New heartbeat makes one: its schedule, folder, agent, arguments and prompt (it \
+                 grows with its text, then scrolls: PgUp/PgDn, Home/End, the wheel). An \
                  agent's arguments start as those with which it doesn't stop to ask \
                  (claude --dangerously-skip-permissions: it runs whatever it decides to, so \
                  change them if that's too much), and what else it takes is listed as you \
@@ -1168,7 +1169,13 @@ fn draw_body(f: &mut Frame, body: Rect, lines: Vec<Line<'static>>, scroll: u16, 
     };
     f.render_widget(Paragraph::new(visible), text_area);
     if max_scroll > 0 && body.width >= 3 && body.height > 0 {
-        draw_scrollbar(f, body, scroll, max_scroll, total);
+        crate::components::scrollbar::draw_scrollbar(
+            f,
+            body,
+            usize::from(scroll),
+            usize::from(max_scroll),
+            usize::from(total),
+        );
     }
 }
 
@@ -1598,29 +1605,6 @@ fn setting_label_width(ctx: &ModalContext) -> usize {
         .max()
         .unwrap_or(0)
         + 2
-}
-
-/// A quiet scrollbar down `body`'s last column: a thin muted thumb on a
-/// dim track.
-fn draw_scrollbar(f: &mut Frame, body: Rect, scroll: u16, max_scroll: u16, total: u16) {
-    let palette = theme::palette();
-    let height = u32::from(body.height);
-    let thumb = ((height * height) / u32::from(total.max(1))).clamp(1, height);
-    let track = height - thumb;
-    let offset = u32::from(scroll) * track / u32::from(max_scroll.max(1));
-    let x = body.right() - 1;
-    let buf = f.buffer_mut();
-    for row in 0..height {
-        let in_thumb = row >= offset && row < offset + thumb;
-        let (symbol, color) = if in_thumb {
-            ("┃", palette.text_muted)
-        } else {
-            ("│", palette.border_dim)
-        };
-        buf.get_mut(x, body.y + row as u16)
-            .set_symbol(symbol)
-            .set_fg(color);
-    }
 }
 
 /// The modal's last row: the first of `hints` (keys and what they do) that

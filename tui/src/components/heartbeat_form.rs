@@ -2,7 +2,9 @@
 //! row, the text ones on a surface of their own, the schedule's and the
 //! agent's choices side by side or between `‹` and `›`, the command they
 //! make, then the buttons. On the agent or its arguments what the agent takes
-//! is listed over the rows under them.
+//! is listed over the rows under them. The prompt takes as many rows as its
+//! text, from [`PROMPT_ROWS`] to what the screen has, then scrolls, a
+//! scrollbar down its last column.
 
 use ratatui::{
     layout::Rect,
@@ -16,6 +18,7 @@ use session_core::heartbeat::Weekday;
 
 use super::dialogs::{dialog_frame, error_line, padded, padding};
 use super::format::truncate;
+use super::scrollbar::draw_scrollbar;
 use super::utils::get_spinner_char;
 use crate::app::argument_suggest::Suggestions;
 use crate::app::heartbeat_form::{FormField, FormHit, HeartbeatForm, Repeat};
@@ -28,7 +31,8 @@ use crate::theme;
 const WIDTH: u16 = 92;
 /// The labels' column.
 const LABEL: u16 = 10;
-/// The prompt's rows, while the screen has them.
+/// The prompt's rows at least, while the screen has them; more as its text
+/// takes them.
 const PROMPT_ROWS: u16 = 8;
 /// Fewer than these and the blank rows and the command go.
 const PROMPT_MIN_ROWS: u16 = 3;
@@ -42,7 +46,8 @@ fn popup_cols(width: u16) -> u16 {
     WIDTH.min(width.saturating_sub(2))
 }
 
-/// The columns the prompt is written in on a screen `width` columns wide.
+/// The columns the prompt is written in on a screen `width` columns wide:
+/// its field's, but for the scrollbar's.
 pub fn prompt_cols(width: u16) -> usize {
     let popup = Rect {
         width: popup_cols(width).saturating_sub(2),
@@ -50,7 +55,7 @@ pub fn prompt_cols(width: u16) -> usize {
         ..Rect::default()
     };
     let (x, _) = padding(Rect { width, ..popup });
-    usize::from(padded(popup, x, 0).width.saturating_sub(LABEL)).max(1)
+    usize::from(padded(popup, x, 0).width.saturating_sub(LABEL + 1)).max(1)
 }
 
 /// The text a one-line field shows in `cols`, and its cursor's column.
@@ -80,15 +85,21 @@ pub fn draw_heartbeat_form(
     let room = area.height.saturating_sub(fixed + borders);
     let spare = 3 + COMMAND_ROWS;
     let gap = u16::from(room >= PROMPT_MIN_ROWS + spare);
-    let prompt_rows = PROMPT_ROWS.min(room.saturating_sub(spare * gap)).max(1);
+    let text_rows = form.prompt.rows(prompt_cols(area.width)).len();
+    let wanted = u16::try_from(text_rows)
+        .unwrap_or(u16::MAX)
+        .max(PROMPT_ROWS);
+    let prompt_rows = wanted.min(room.saturating_sub(spare * gap)).max(1);
     let width = popup_cols(area.width);
     let height = (fixed + borders + prompt_rows + spare * gap).min(area.height);
     if width < 24 || height < 6 {
         return;
     }
+    // Where it is with a short prompt; a longer one grows it down, then up.
+    let short = (height - prompt_rows + prompt_rows.min(PROMPT_ROWS)).min(area.height);
     let popup = Rect {
         x: area.x + (area.width - width) / 2,
-        y: area.y + (area.height - height) / 3,
+        y: (area.y + (area.height - short) / 3).min(area.bottom() - height),
         width,
         height,
     };
@@ -290,25 +301,38 @@ pub fn draw_heartbeat_form(
     // The suggestions are over what's under them, for clicks too.
     let under = hits.len();
 
-    // The prompt, word-wrapped, the cursor's row in view.
+    // The prompt, word-wrapped, the cursor's row in view (unless the wheel
+    // moved it), a scrollbar beside it when it's taller than its field.
     if let Some(rect) = row(y, prompt_rows) {
         label(f, rect, "Prompt", on(FormField::Prompt));
         let cell = value_of(rect);
-        let cols = usize::from(cell.width).max(1);
+        let cols = usize::from(cell.width.saturating_sub(1)).max(1);
         let rows = form.prompt.rows(cols);
         let (cursor_row, cursor_col) = form.prompt.cursor_at(cols);
-        let first = (cursor_row + 1).saturating_sub(usize::from(cell.height));
+        let height = usize::from(cell.height).max(1);
+        let view = &form.prompt_view;
+        let mut top = view.top.get();
+        if !view.wheeled.get() {
+            top = top.clamp((cursor_row + 1).saturating_sub(height), cursor_row);
+        }
+        let max = rows.len().saturating_sub(height);
+        let top = top.min(max);
+        view.top.set(top);
+        view.rows.set(height);
         let lines: Vec<Line> = rows
             .iter()
-            .skip(first)
-            .take(usize::from(cell.height))
+            .skip(top)
+            .take(height)
             .map(|range| Line::from(form.prompt.value()[range.clone()].to_string()))
             .collect();
         f.render_widget(Paragraph::new(lines).style(field_bg), cell);
-        if on(FormField::Prompt) {
+        if max > 0 {
+            draw_scrollbar(f, cell, top, max, rows.len());
+        }
+        if on(FormField::Prompt) && (top..top + height).contains(&cursor_row) {
             f.set_cursor(
                 cell.x + cursor_col as u16,
-                cell.y + (cursor_row - first) as u16,
+                cell.y + (cursor_row - top) as u16,
             );
         }
         hits.push((rect, form_hit(FormHit::Field(FormField::Prompt))));

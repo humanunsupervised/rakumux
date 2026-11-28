@@ -16,10 +16,11 @@ use session_core::heartbeat::{Heartbeat, RunOutcome};
 
 use super::drawer::draw_back;
 use crate::app::heartbeats::{run_state, BeatAction};
-use crate::app::{App, Hit};
-use crate::components::dialogs::{error_line, text_rows};
+use crate::app::{App, Hit, TextInput};
+use crate::components::dialogs::error_line;
 use crate::components::feed::card_stamp;
 use crate::components::format::{now_secs, relative_time, status_glyph, truncate};
+use crate::components::scrollbar::draw_scrollbar;
 use crate::components::utils::get_spinner_char;
 use crate::layout::str_width;
 use crate::printable::printable;
@@ -297,11 +298,13 @@ fn draw_whole(
         .fg(p.text_bright)
         .add_modifier(Modifier::BOLD);
     let (glyph, glyph_style) = mark(heartbeat);
+    // Each line as its pieces: wrapped here, a row a line, so what's
+    // counted is what shows.
     let field = |label: &str, value: String| {
-        Line::from(vec![
-            Span::styled(format!("{label:<9}"), quiet),
-            Span::styled(printable(&value).into_owned(), plain),
-        ])
+        vec![
+            (format!("{label:<9}"), quiet),
+            (printable(&value).into_owned(), plain),
+        ]
     };
     f.render_widget(
         Paragraph::new(vec![
@@ -330,65 +333,90 @@ fn draw_whole(
         height: buttons.height.saturating_sub(used + 1),
         ..area
     };
-    let mut lines = Vec::new();
+    let mut pieces: Vec<Vec<(String, Style)>> = Vec::new();
     if heartbeat.awaiting_approval {
-        lines.push(Line::from(vec![
-            Span::styled(
-                "An agent made or changed it · ",
-                Style::default().fg(p.accent_orange),
-            ),
-            Span::styled("e", bold),
-            Span::styled(" approves", Style::default().fg(p.accent_orange)),
-        ]));
-        lines.push(Line::default());
+        let orange = Style::default().fg(p.accent_orange);
+        pieces.push(vec![
+            ("An agent made or changed it · ".into(), orange),
+            ("e".into(), bold),
+            (" approves".into(), orange),
+        ]);
+        pieces.push(Vec::new());
     }
-    lines.push(field(
+    pieces.push(field(
         "schedule",
         heartbeat
             .schedule
             .as_ref()
             .map_or_else(|| "-".into(), ToString::to_string),
     ));
-    lines.push(field("next", when(heartbeat, now)));
-    lines.push(field(
+    pieces.push(field("next", when(heartbeat, now)));
+    pieces.push(field(
         "last",
         last(heartbeat, now).unwrap_or_else(|| "-".into()),
     ));
-    lines.push(field("folder", app.folders.name_of(&heartbeat.scope)));
-    lines.push(field(
+    pieces.push(field("folder", app.folders.name_of(&heartbeat.scope)));
+    pieces.push(field(
         "command",
         match heartbeat.command.is_empty() {
             true => "-".into(),
             false => heartbeat.command.clone(),
         },
     ));
-    lines.push(Line::default());
-    lines.push(Line::from(Span::styled("prompt", quiet)));
-    match heartbeat.prompt.trim() {
-        "" => lines.push(Line::from(Span::styled("-", plain))),
-        prompt => lines.extend(
-            prompt
-                .lines()
-                .map(|line| Line::from(Span::styled(printable(line).into_owned(), plain))),
-        ),
-    }
-    // The text above the runs wraps: measure it as drawn. It leaves the
-    // runs room for a few, unless an agent's change waits to be read
-    // whole.
+    pieces.push(Vec::new());
+    pieces.push(vec![("prompt".into(), quiet)]);
+    let prompt = match heartbeat.prompt.trim() {
+        "" => "-".to_string(),
+        prompt => prompt
+            .lines()
+            .map(|line| printable(line).into_owned())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    };
+    pieces.push(vec![(prompt, plain)]);
+    let wrap = |cols: u16| -> Vec<Line<'static>> {
+        pieces
+            .iter()
+            .flat_map(|line| wrap_spans(line, usize::from(cols)))
+            .collect()
+    };
+    // It leaves the runs room for a few, unless an agent's change waits to
+    // be read whole; taller than its room, it scrolls, a scrollbar down its
+    // last column.
     let runs = app.beats.runs();
     let record_error = app.beats.record.as_ref().and_then(|r| r.error.clone());
     let wanted = match runs {
         Some(runs) if !heartbeat.awaiting_approval => (runs.len().max(1) + 2).min(8) as u16,
         _ => 2,
     };
-    let head_rows = text_rows(&lines, area.width).min(area.height.saturating_sub(wanted));
+    let room = usize::from(area.height.saturating_sub(wanted));
+    let mut lines = wrap(area.width);
+    let scrolls = lines.len() > room && area.width > 1;
+    if scrolls {
+        lines = wrap(area.width - 1);
+    }
+    let total = lines.len();
+    let shown = total.min(room);
+    let max = total - shown;
+    let top = app.beats.text_top.min(max);
+    let head_rows = shown as u16;
+    let head = Rect {
+        height: head_rows,
+        ..area
+    };
+    app.beats.text_max.set(max);
+    app.beats.text_rows.set(shown);
+    app.beats.text_area.set(head);
     f.render_widget(
-        Paragraph::new(lines).wrap(Wrap { trim: false }),
+        Paragraph::new(lines.into_iter().skip(top).take(shown).collect::<Vec<_>>()),
         Rect {
-            height: head_rows,
-            ..area
+            width: area.width - u16::from(scrolls),
+            ..head
         },
     );
+    if max > 0 {
+        draw_scrollbar(f, head, top, max, total);
+    }
     let area = Rect {
         y: area.y + head_rows,
         height: area.height - head_rows,
@@ -472,4 +500,37 @@ fn draw_whole(
         f.render_widget(paragraph, cell);
         hits.push((cell, Hit::BeatRow(index)));
     }
+}
+
+/// `pieces` (text and style) word-wrapped to `cols` as the New heartbeat
+/// form wraps its prompt (spaces kept, `\n` a new row), a line a row, each
+/// piece keeping its style. Drawn without wrapping, every row counts.
+///
+/// ```text
+/// [("command  ", quiet), ("claude --x", plain)] in 12 columns:
+/// "command  " "claude "   (one row)
+/// "--x"                   (the next)
+/// ```
+fn wrap_spans(pieces: &[(String, Style)], cols: usize) -> Vec<Line<'static>> {
+    let text: String = pieces.iter().map(|(text, _)| text.as_str()).collect();
+    let mut bounds = Vec::with_capacity(pieces.len());
+    let mut at = 0;
+    for (piece, style) in pieces {
+        bounds.push((at, at + piece.len(), *style));
+        at += piece.len();
+    }
+    TextInput::new(text.clone())
+        .rows(cols)
+        .into_iter()
+        .map(|row| {
+            let spans: Vec<Span<'static>> = bounds
+                .iter()
+                .filter_map(|&(start, end, style)| {
+                    let (start, end) = (start.max(row.start), end.min(row.end));
+                    (start < end).then(|| Span::styled(text[start..end].to_string(), style))
+                })
+                .collect();
+            Line::from(spans)
+        })
+        .collect()
 }

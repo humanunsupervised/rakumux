@@ -144,6 +144,7 @@ sessions. The tab counts the replies that came in since you last looked.
 `B` shows your **Heartbeats**: commands Rakumux runs on a clock, such as `claude
 --dangerously-skip-permissions "<prompt>"` every morning, each run a new session. `n` (or
 `+ New heartbeat`) makes one: its schedule, agent, arguments (suggested as you type) and prompt.
+A long prompt, typed or pasted, scrolls there and when you read it (`PgUp` `PgDn`, the wheel).
 `c` edits it (`Ctrl-S` saves), `d` twice deletes it. `Enter` shows one with every run it made:
 the session pane shows the selected run, live while it runs, and `Enter` goes into it
 (`rakumux heartbeat runs <name>` lists them too). An agent in a session can make or change one,

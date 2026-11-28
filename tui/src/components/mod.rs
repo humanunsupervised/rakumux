@@ -17,6 +17,7 @@ pub mod left;
 pub mod markdown;
 pub mod phone_access;
 pub mod rtop;
+pub mod scrollbar;
 pub mod section_picker;
 pub mod session_detail;
 pub mod session_list;

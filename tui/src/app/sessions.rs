@@ -32,7 +32,7 @@ use crate::layout::{self, SessionLayout};
 use crate::terminal_view::{self, TerminalView, DEFAULT_SCROLLBACK_ROWS};
 
 /// Rows scrolled per mouse wheel step.
-const WHEEL_ROWS: i32 = 3;
+pub(super) const WHEEL_ROWS: i32 = 3;
 
 pub(super) fn decode_checkpoint(checkpoint: &str) -> Result<Vec<u8>, String> {
     base64::engine::general_purpose::STANDARD
@@ -1595,7 +1595,15 @@ impl App {
                 _ => return,
             };
             if self.left_tab() == LeftTab::Beats {
-                return self.beats_move(step);
+                // Over the text of one read whole that doesn't all show, it
+                // scrolls; else it goes through the heartbeats or the runs.
+                let on_text = self.beats.reading.is_some()
+                    && self.beats.text_max.get() > 0
+                    && inside(Some(self.beats.text_area.get()));
+                return match on_text {
+                    true => self.beats_scroll_text(step * WHEEL_ROWS as isize),
+                    false => self.beats_move(step),
+                };
             }
             let on_reply = match self.feed_columns() {
                 Some((_, _, reply)) => inside(Some(reply)),

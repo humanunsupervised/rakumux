@@ -6,7 +6,8 @@
 //! With Rakumux mode's keys: `↑`/`↓` (`j`/`k`) select, `Enter` reads the
 //! selected heartbeat whole (its prompt, command and every run, from the
 //! daemon's record of them, `heartbeat_runs`; there `↑`/`↓` pick a run, the
-//! session pane shows it, live while it runs, and `Enter` goes into it), `e`
+//! session pane shows it, live while it runs, and `Enter` goes into it; a
+//! text taller than its room scrolls with PgUp/PgDn and the wheel over it), `e`
 //! approves or enables (from the list it
 //! first shows the heartbeat whole, so its prompt and command are read before
 //! they run), `p` pauses, `r` runs it now, `c` edits it, `d` twice deletes it, `n` (or Enter or a click on `+ New heartbeat`, the list's last
@@ -14,9 +15,11 @@
 //! The selected heartbeat shows these as buttons ([`BeatAction`]). `B` (or
 //! Settings) shows the tab.
 
+use std::cell::Cell;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::layout::Rect;
 use session_core::api::{ApiError, ErrorCode};
 use session_core::client::SessionApi;
 use session_core::heartbeat::{
@@ -92,6 +95,14 @@ pub struct BeatsView {
     pub run: Option<u64>,
     /// The run record of the heartbeat read whole, as last read.
     pub record: Option<RunRecord>,
+    /// The heartbeat read whole: its text's first row on screen (PgUp/PgDn
+    /// and the wheel move it, when it's taller than its room).
+    pub text_top: usize,
+    /// Kept by the drawing: the largest `text_top` that's useful (0 when it
+    /// all shows), the rows shown and where.
+    pub text_max: Cell<usize>,
+    pub text_rows: Cell<usize>,
+    pub text_area: Cell<Rect>,
     /// How many of its runs to read.
     want: usize,
     /// `d` was pressed once on this heartbeat: a second deletes it.
@@ -143,6 +154,7 @@ impl BeatsView {
         if self.reading.as_ref() != Some(id) {
             self.run = None;
             self.want = RUN_PAGE;
+            self.text_top = 0;
         }
         self.reading = Some(id.clone());
     }
@@ -481,7 +493,13 @@ impl App {
             return false;
         }
         let deleting = self.beats.deleting.take();
+        // Read whole, a text that doesn't all show scrolls; else they go on
+        // to the session pane, the run's output.
+        let scrolls = self.beats.reading.is_some() && self.beats.text_max.get() > 0;
+        let page = self.beats.text_rows.get().saturating_sub(1).max(1) as isize;
         match key.code {
+            KeyCode::PageUp if scrolls => self.beats_scroll_text(-page),
+            KeyCode::PageDown if scrolls => self.beats_scroll_text(page),
             KeyCode::Down | KeyCode::Char('j') => self.beats_move(1),
             KeyCode::Up | KeyCode::Char('k') => self.beats_move(-1),
             KeyCode::Home => self.beats_move(isize::MIN / 2),
@@ -500,6 +518,17 @@ impl App {
             _ => return false,
         }
         true
+    }
+
+    /// The text of the heartbeat read whole, `delta` rows up or down.
+    pub fn beats_scroll_text(&mut self, delta: isize) {
+        let max = self.beats.text_max.get();
+        self.beats.text_top = self
+            .beats
+            .text_top
+            .min(max)
+            .saturating_add_signed(delta)
+            .min(max);
     }
 
     /// Move the selection (or, reading one, the selected run) `delta`.
