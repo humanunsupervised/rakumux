@@ -50,6 +50,11 @@ CREATE TABLE IF NOT EXISTS heartbeat_run_log (
 );
 CREATE INDEX IF NOT EXISTS heartbeat_run_log_heartbeat ON heartbeat_run_log(heartbeat_id, seq);
 CREATE INDEX IF NOT EXISTS heartbeat_run_log_session ON heartbeat_run_log(session_id);
+-- One-time changes to what the registry holds, each done once: its name.
+CREATE TABLE IF NOT EXISTS registry_steps (
+  name TEXT PRIMARY KEY,
+  done_at INTEGER NOT NULL
+);
 -- Runs listed before the record was kept (0.1.82 and earlier) start it.
 INSERT INTO heartbeat_run_log (heartbeat_id, run, at, session_id, outcome)
   SELECT r.heartbeat_id, r.run, r.started_at, r.session_id, 'unknown' FROM heartbeat_runs r
@@ -85,6 +90,16 @@ impl Registry {
             }
         }
         Ok((heartbeats, bad))
+    }
+
+    /// Claim the one-time step `name`: true the first time it's asked on
+    /// this registry (the caller then does it), false ever after.
+    pub fn take_step(&self, name: &str, now_ms: i64) -> Result<bool> {
+        let added = self.conn.execute(
+            "INSERT OR IGNORE INTO registry_steps (name, done_at) VALUES (?1, ?2)",
+            params![name, now_ms],
+        )?;
+        Ok(added == 1)
     }
 
     /// Insert or replace `heartbeat` (by id). Another heartbeat of its

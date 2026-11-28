@@ -1242,7 +1242,11 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   up), and an agent's update that leaves it complete turns it on (`next_run_at` set). An agent's
   update never pauses one, and one the user paused (not `awaiting_approval`) stays paused; the
   user's `enabled` create of an incomplete one is `invalid_argument`, and without `enabled` a
-  plain pause. Enabling needs a command, a prompt and a known schedule (`invalid_argument` names
+  plain pause. The first start of a daemon from 0.1.89 on turns on, once, every complete one
+  still `awaiting_approval` (left so by 0.1.87 and earlier, which paused what an agent made or
+  changed until the user approved it), recorded in the registry's `registry_steps`
+  (`heartbeats.approval_leftovers`), so one an agent sets up later waits for its update as
+  above whatever restarts. Enabling needs a command, a prompt and a known schedule (`invalid_argument` names
   what's missing), clears `awaiting_approval` and sets `next_run_at`. At most 50 heartbeats, names unique in a folder (`Heartbeat`, `Heartbeat 2`, …
   without one). **Runs**: on the control tick, an enabled heartbeat whose `next_run_at` came
   starts `<name> #<n>` in its folder as the daemon for the user (`created_by: user`, depth 0, the
@@ -1408,7 +1412,8 @@ accidents; they don't stop a hostile process running as the same user.
   awaiting_approval, created_by_json, created_at, updated_at, next_run_at, runs, last_run_json)`
   (unique `(scope_root, name)`), `heartbeat_runs(session_id, heartbeat_id, run, started_at)`
   (a listed run; its row goes with its session's delete) and `heartbeat_run_log(seq, heartbeat_id,
-  run, at, session_id, outcome, detail)` (every run, kept until the heartbeat is deleted), created
+  run, at, session_id, outcome, detail)` (every run, kept until the heartbeat is deleted), and
+  `registry_steps(name, done_at)` (one-time changes already made, `Registry::take_step`), created
   when missing.
   `workspaces(id, name, created_at)` (unique `name`) and `session_workspaces(session_id,
   workspace_id)` (a session in none has no row; kept while the session is in the history,

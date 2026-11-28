@@ -14,6 +14,7 @@ use runtime_support::{wait_until, TestHome};
 use session_core::api::{CreateSession, FirstInput, ReviveSession};
 use session_core::client::{AuthMode, Client, ClientConfig, SessionApi};
 use session_core::heartbeat::{HeartbeatFields, HeartbeatSpec, RunOutcome, Schedule};
+use session_core::ids::HeartbeatId;
 use session_core::model::ScopeRoot;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -425,4 +426,66 @@ fn every_run_is_recorded_and_a_deleted_runs_output_stays_readable() {
             (1, RunOutcome::TaskGiven, Some(RunPlace::History)),
         ]
     );
+}
+
+/// A heartbeat an agent made, with its prompt and schedule, and never
+/// enabled: 0.1.87 and earlier left every one an agent made or changed so,
+/// waiting for the user's approval.
+fn waiting(client: &Client, scope: &ScopeRoot, name: &str, prompt: Option<&str>) -> HeartbeatId {
+    let heartbeat = client
+        .heartbeat_create(HeartbeatSpec {
+            scope: Some(scope.clone()),
+            name: Some(name.into()),
+            fields: HeartbeatFields {
+                agent: Some("claude".into()),
+                command: Some("claude".into()),
+                prompt: prompt.map(String::from),
+                schedule: Some(Schedule::Daily { at: "06:30".into() }),
+                by_agent: true,
+                ..Default::default()
+            },
+            enabled: false,
+        })
+        .unwrap();
+    assert!(heartbeat.awaiting_approval && !heartbeat.enabled);
+    heartbeat.id
+}
+
+#[test]
+fn heartbeats_left_waiting_for_approval_turn_on_once_at_the_first_start() {
+    let home = TestHome::new();
+    let bin = home.dir.path().join("bin");
+    let input: PathBuf = home.dir.path().join("typed");
+    install_stand_in(&bin);
+    let scope = ScopeRoot::from_canonical(std::fs::canonicalize(&home.work).unwrap());
+    let (daemon, client) = start(&home, &bin, &input);
+    client.add_project(scope.path()).ok();
+    let complete = waiting(&client, &scope, "qa", Some("audit the site"));
+    let unfinished = waiting(&client, &scope, "half", None);
+    drop(client);
+    drop(daemon);
+
+    // A registry from 0.1.87 or earlier: no record of the step.
+    let registry = rusqlite::Connection::open(home.layout.registry_db()).unwrap();
+    registry
+        .execute_batch("DROP TABLE registry_steps;")
+        .unwrap();
+    drop(registry);
+
+    let (daemon, client) = start(&home, &bin, &input);
+    let on = client.heartbeat(&complete).unwrap();
+    assert!(on.enabled && !on.awaiting_approval, "{on:?}");
+    assert!(on.next_run_at.is_some(), "{on:?}");
+    // Without its prompt it is still being set up.
+    let half = client.heartbeat(&unfinished).unwrap();
+    assert!(half.awaiting_approval && !half.enabled, "{half:?}");
+
+    // Once only: one its agent is setting up now stays so across restarts.
+    let later = waiting(&client, &scope, "later", Some("check the deps"));
+    drop(client);
+    drop(daemon);
+    let (_daemon, client) = start(&home, &bin, &input);
+    let later = client.heartbeat(&later).unwrap();
+    assert!(later.awaiting_approval && !later.enabled, "{later:?}");
+    assert!(client.heartbeat(&complete).unwrap().enabled);
 }

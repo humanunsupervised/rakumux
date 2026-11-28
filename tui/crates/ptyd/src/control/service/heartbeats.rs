@@ -25,6 +25,10 @@
 //!   asked for, skipped and failed ones too, with its session's id and what
 //!   became of its task, kept as long as the heartbeat; each says where its
 //!   session is now (listed, in the history, gone).
+//! - **Leftovers from 0.1.87 and earlier**, which paused what an agent
+//!   made or changed until the user approved it: the first start of a
+//!   daemon with this rule turns on, once, each heartbeat still waiting
+//!   that has everything a run needs ([`LEFTOVERS_STEP`]).
 //! - **Missed due times** (the machine asleep, the daemon down) give one run
 //!   when it's back, then the next due time is counted from then.
 
@@ -1062,8 +1066,14 @@ impl Inner {
     }
 }
 
+/// The registry step that turned on, once, the heartbeats left waiting for
+/// approval by 0.1.87 and earlier: complete ones, which an agent no longer
+/// needs the user to approve. Later ones waiting are still being set up.
+const LEFTOVERS_STEP: &str = "heartbeats.approval_leftovers";
+
 /// The heartbeats and runs the registry holds, as the daemon starts; an
-/// enabled one without a due time gets one.
+/// enabled one without a due time gets one. The first time, a complete one
+/// left waiting for approval turns on ([`LEFTOVERS_STEP`]).
 pub(super) fn load(
     registry: &crate::control::registry::Registry,
     now_ms: i64,
@@ -1084,9 +1094,33 @@ pub(super) fn load(
         }
     };
     let now = now_ms.div_euclid(1000);
+    let leftovers = registry
+        .take_step(LEFTOVERS_STEP, now_ms)
+        .unwrap_or_else(|error| {
+            crate::log_warn!("control: marking heartbeat leftovers: {error}");
+            false
+        });
     let heartbeats = heartbeats
         .into_iter()
         .map(|mut heartbeat| {
+            if leftovers
+                && heartbeat.awaiting_approval
+                && !heartbeat.enabled
+                && heartbeat.is_complete()
+            {
+                heartbeat.enabled = true;
+                heartbeat.awaiting_approval = false;
+                heartbeat.next_run_at = next_due(&heartbeat, now);
+                match registry.save_heartbeat(&heartbeat) {
+                    Ok(()) => crate::log_info!(
+                        "control: heartbeat {} left waiting for approval is on",
+                        heartbeat.handle()
+                    ),
+                    Err(error) => {
+                        crate::log_warn!("control: turning heartbeat leftover on: {error}")
+                    }
+                }
+            }
             if heartbeat.enabled && heartbeat.next_run_at.is_none() {
                 heartbeat.next_run_at = next_due(&heartbeat, now);
             }
