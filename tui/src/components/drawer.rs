@@ -57,18 +57,48 @@ pub(super) fn panel_icon(app: &App, panel: Panel) -> &'static str {
 /// where the sessions do: its mark and name, bold and underlined, in the
 /// accent while it has the keys.
 fn draw_band(f: &mut Frame, app: &App, area: Rect) {
+    draw_panel_band(f, app, Panel::Rtop, app.rtop_has_keys(), false, area);
+}
+
+/// `panel`'s band in `area` (the drawer's, or the left column's over the
+/// Inbox and Heartbeats): its mark and name, bold and underlined, in the
+/// accent while `focused`; with `back`, a `‹` before them while one thing is
+/// read whole (a click on the band then goes back).
+pub(super) fn draw_panel_band(
+    f: &mut Frame,
+    app: &App,
+    panel: Panel,
+    focused: bool,
+    back: bool,
+    area: Rect,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
     let p = theme::palette();
     f.render_widget(Block::default().style(Style::default().bg(p.surface)), area);
-    let (mark, label) = if app.rtop_has_keys() {
+    let (mark, label) = if focused {
         (p.accent_primary, p.text_bright)
     } else {
         (p.neutral_gray, p.neutral_gray)
     };
-    let icon = panel_icon(app, Panel::Rtop);
-    let name = Panel::Rtop.label();
+    let icon = panel_icon(app, panel);
+    // Two after Heartbeats' `♥`, as on its tab: many fonts draw it wider.
+    let gap = match panel {
+        Panel::Beats if str_width(icon) == 1 => "  ",
+        _ => " ",
+    };
+    let name = panel.label();
+    let arrow = if back { "‹ " } else { "" };
     let line = Line::from(vec![
         Span::raw(" ".repeat(INDENT)),
-        Span::styled(format!("{icon} "), Style::default().fg(mark)),
+        Span::styled(
+            arrow,
+            Style::default()
+                .fg(p.accent_primary)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(format!("{icon}{gap}"), Style::default().fg(mark)),
         Span::styled(
             name,
             Style::default().fg(label).add_modifier(Modifier::BOLD),
@@ -84,9 +114,9 @@ fn draw_band(f: &mut Frame, app: &App, area: Rect) {
     );
     if area.height >= 3 {
         let under = Rect {
-            x: area.x.saturating_add(INDENT as u16),
+            x: area.x.saturating_add((INDENT + str_width(arrow)) as u16),
             y: area.bottom() - 1,
-            width: (str_width(icon) + 1 + str_width(name)) as u16,
+            width: (str_width(icon) + gap.len() + str_width(name)) as u16,
             height: 1,
         }
         .intersection(area);
@@ -97,41 +127,5 @@ fn draw_band(f: &mut Frame, app: &App, area: Rect) {
             )),
             under,
         );
-    }
-}
-
-/// A row saying what `‹` goes back to while one thing is read whole; a click
-/// anywhere on it is `hit`. Returns the rest of `area`.
-pub(super) fn draw_back(
-    f: &mut Frame,
-    to: &str,
-    area: Rect,
-    hit: Hit,
-    hits: &mut Vec<(Rect, Hit)>,
-) -> Rect {
-    let p = theme::palette();
-    let row = Rect {
-        height: area.height.min(1),
-        ..area
-    };
-    f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::raw(" ".repeat(INDENT)),
-            Span::styled(
-                "‹ ",
-                Style::default()
-                    .fg(p.accent_primary)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(to.to_string(), Style::default().fg(p.text_muted)),
-        ]))
-        .style(Style::default().bg(p.surface)),
-        row,
-    );
-    hits.push((row, hit));
-    Rect {
-        y: row.bottom(),
-        height: area.height - row.height,
-        ..area
     }
 }

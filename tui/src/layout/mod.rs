@@ -603,6 +603,35 @@ pub fn left_split(area: Rect) -> (Rect, Rect) {
     (body, tabs)
 }
 
+/// Rows of the band over the Inbox and Heartbeats in a body `height` tall:
+/// as tall as the list's tabs (3, or 1 on short columns), so what's under it
+/// starts where the sessions do; none in a body too short for it.
+pub const fn panel_band_rows(height: u16) -> u16 {
+    if height >= 8 {
+        3
+    } else if height >= 2 {
+        1
+    } else {
+        0
+    }
+}
+
+/// The left column's body while it shows the Inbox or Heartbeats: their
+/// band, then what's under it.
+pub fn panel_split(body: Rect) -> (Rect, Rect) {
+    let rows = panel_band_rows(body.height);
+    let band = Rect {
+        height: rows,
+        ..body
+    };
+    let rest = Rect {
+        y: band.bottom(),
+        height: body.height - rows,
+        ..body
+    };
+    (band, rest)
+}
+
 /// The Tabs layout's Inbox, when `area` is wide enough for both
 /// (from [`SINGLE_PANE_BELOW`] columns): the cards in a column as wide as
 /// Master detail's list, a one-column line, then the selected reply.

@@ -2622,6 +2622,17 @@ mod tests {
         let p = crate::theme::palette();
         let mark = terminal.backend().buffer().get(18, 45).fg;
         assert_eq!(mark, p.accent_primary);
+        // A band over it names it, as rtop's: its mark and name, underlined,
+        // in the accent while it has the keys, on the surface's colour.
+        assert_eq!(pane[0], "", "{wide}");
+        assert_eq!(pane[1], "   ≡ Inbox", "{wide}");
+        assert_eq!(pane[2], "   ▁▁▁▁▁▁▁", "{wide}");
+        let band = terminal.backend().buffer();
+        assert_eq!(band.get(3, 1).fg, p.accent_primary, "{wide}");
+        assert_eq!(band.get(5, 1).fg, p.text_bright, "{wide}");
+        assert_eq!(band.get(40, 0).bg, p.surface, "{wide}");
+        assert_eq!(band.get(3, 2).fg, p.accent_primary, "{wide}");
+        let pane = &pane[3..];
         // Under its time period, the newest first, each a card: when, its
         // session, agent and folder (no branch known) on the top border,
         // then `sending` while it isn't uploaded, `done` once it is (only
@@ -2649,9 +2660,9 @@ mod tests {
         let buffer = terminal.backend().buffer();
         // The selected card's heavy border is the accent's while the Inbox
         // has the keys; the next one's is plain.
-        assert_eq!(buffer.get(1, 1).fg, p.accent_primary, "{wide}");
-        assert_eq!(buffer.get(1, end as u16 + 2).fg, p.border, "{wide}");
-        for row in [2, end + 3] {
+        assert_eq!(buffer.get(1, 4).fg, p.accent_primary, "{wide}");
+        assert_eq!(buffer.get(1, end as u16 + 5).fg, p.border, "{wide}");
+        for row in [5, end + 6] {
             assert_eq!(buffer.get(3, row as u16).fg, p.text_primary, "{wide}");
         }
         assert_eq!(
@@ -2669,11 +2680,20 @@ mod tests {
             "{footer:?}"
         );
         assert!(!footer.contains("FEED"), "{footer:?}");
-        // Enter: the reply whole in the cards' place, under `‹`.
+        // Enter: the reply whole in the cards' place, the band's `‹` going
+        // back (a click on the band too).
         h.press(KeyCode::Enter).await;
         let wide = render(&mut h.app, 160, 48);
         let pane = list_column(&wide, 48);
-        assert_eq!(pane[0], "   ‹ Inbox", "{wide}");
+        assert_eq!(pane[1], "   ‹ ≡ Inbox", "{wide}");
+        assert_eq!(pane[2], "     ▁▁▁▁▁▁▁", "{wide}");
+        assert!(
+            h.app
+                .hits
+                .iter()
+                .any(|(area, hit)| *hit == Hit::FeedBack && area.y == 0 && area.height == 3),
+            "{wide}"
+        );
         assert!(wide.contains("Enter goes into its session"), "{wide}");
         assert!(wide.contains("Run cargo test to check."), "{wide}");
         assert!(wide.contains("hello from the fake"), "{wide}");
@@ -2753,11 +2773,11 @@ mod tests {
         let wide = render(&mut h.app, 240, 48);
         let pane = list_column(&wide, 70);
         assert!(
-            pane[1].contains(" · 3m  parser  claude · repo ⎇ fix/csv ━"),
+            pane[4].contains(" · 3m  parser  claude · repo ⎇ fix/csv ━"),
             "{wide}"
         );
         // Selected, so heavy.
-        assert!(pane[1].ends_with("━ ✓ answered ┓"), "{wide}");
+        assert!(pane[4].ends_with("━ ✓ answered ┓"), "{wide}");
         // Short of room, the status's word goes first: the mark stays.
         let phone = render(&mut h.app, 45, 30);
         let top = phone
@@ -3024,7 +3044,7 @@ mod tests {
             h.press(KeyCode::Down).await;
             let screen = render(&mut h.app, 160, 20);
             let pane = list_column(&screen, 48);
-            assert!(pane[0].contains("◷ "), "{screen}");
+            assert!(pane[3].contains("◷ "), "{screen}");
             let name = h.app.feed.selected().unwrap().session_name.clone();
             assert!(
                 pane.iter().any(|row| row.contains(&format!("  {name}  "))),
@@ -3138,13 +3158,19 @@ mod tests {
             "   ❯ Workspaces   ≡ Inbox   ♥  Heartbeats",
             "{phone}"
         );
+        // Its band over the cards, on a phone too.
+        assert_eq!(
+            phone.lines().nth(1).unwrap().trim_end(),
+            "   ≡ Inbox",
+            "{phone}"
+        );
         assert!(phone.contains("nightly-build"), "{phone}");
         assert!(!phone.contains("◔ Status"), "{phone}");
         h.press(KeyCode::Enter).await;
         let reading = render(&mut h.app, 45, 40);
         assert_eq!(
-            reading.lines().next().unwrap().trim_end(),
-            "   ‹ Inbox",
+            reading.lines().nth(1).unwrap().trim_end(),
+            "   ‹ ≡ Inbox",
             "{reading}"
         );
         assert!(reading.contains("finished 5m ago"), "{reading}");
@@ -3189,9 +3215,12 @@ mod tests {
             cards[45], "   ❯ Workspaces (w)   ≡ Inbox (f)   ♥  Heartbeat",
             "{screen}"
         );
-        assert!(cards[1].starts_with("   ◷ last hour"), "{screen}");
-        assert!(cards[2].contains(" · 2m  api  claude · repo ━"), "{screen}");
-        assert!(rows[2].chars().nth(width) == Some('│'), "{screen}");
+        // Under the band, which spans both.
+        assert_eq!(cards[2], "   ≡ Inbox", "{screen}");
+        assert!(cards[4].starts_with("   ◷ last hour"), "{screen}");
+        assert!(cards[5].contains(" · 2m  api  claude · repo ━"), "{screen}");
+        assert!(rows[2].chars().nth(width) == Some(' '), "{screen}");
+        assert!(rows[5].chars().nth(width) == Some('│'), "{screen}");
         assert!(screen.contains("finished 2m ago"), "{screen}");
         assert!(!screen.contains("hello from the fake"), "{screen}");
         // The selected tab is highlighted, no session's is.

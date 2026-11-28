@@ -1,5 +1,6 @@
-//! The left column (`app/left.rs`): what its tab shows (the sessions, the
-//! Inbox or Heartbeats), and its tabs fixed at the bottom, `▴ Launch   ≡ Inbox
+//! The left column (`app/left.rs`): what its tab shows (the sessions, or the
+//! Inbox or Heartbeats under a band naming it, `≡ Inbox`, as the drawer's
+//! `▥ rtop`, with `‹` before it while one thing is read whole), and its tabs fixed at the bottom, `▴ Launch   ≡ Inbox
 //! ●2   ♥ Heartbeats`: a band, the active one bold with a line over it, in the
 //! accent while the column has the keys; beside the session, `«` at its right
 //! hides the column. A rail is what's left of it then.
@@ -12,14 +13,16 @@ use ratatui::{
     Frame,
 };
 
+use super::drawer::draw_panel_band;
 use super::feed::draw_feed;
 use super::footer::feed_count;
 use super::heartbeats::draw_beats;
 use super::session_list::{draw_session_list, folder_item_height};
+use crate::app::drawer::Panel;
 use crate::app::left::LeftTab;
 use crate::app::types::{AppMode, Focus};
 use crate::app::{App, Hit};
-use crate::layout::{left_split, str_width, truncate};
+use crate::layout::{left_split, panel_split, str_width, truncate};
 use crate::printable::printable;
 use crate::theme;
 
@@ -40,9 +43,26 @@ pub fn draw_left(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit
                 Block::default().style(Style::default().fg(p.text_primary).bg(p.panel)),
                 body,
             );
+            let (band, rest) = panel_split(body);
+            let (panel, focused, back) = match app.left_tab() {
+                LeftTab::Beats => (
+                    Panel::Beats,
+                    app.beats_has_keys(),
+                    app.beats.read().is_some().then_some(Hit::BeatBack),
+                ),
+                _ => (
+                    Panel::Feed,
+                    app.feed_has_keys(),
+                    (app.feed.reading && app.feed_columns().is_none()).then_some(Hit::FeedBack),
+                ),
+            };
+            draw_panel_band(f, app, panel, focused, back.is_some(), band);
+            if let Some(hit) = back {
+                hits.push((band, hit));
+            }
             match app.left_tab() {
-                LeftTab::Beats => draw_beats(f, app, body, hits),
-                _ => draw_feed(f, app, body, hits),
+                LeftTab::Beats => draw_beats(f, app, rest, hits),
+                _ => draw_feed(f, app, rest, hits),
             }
             hits.push((body, Hit::LeftPane));
         }

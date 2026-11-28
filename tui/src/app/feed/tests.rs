@@ -1482,7 +1482,7 @@ fn scrollbar_column(h: &mut Harness) -> String {
     feed_lines(h)
         .iter()
         .map(|line| {
-            let width = usize::from(h.app.left_body().unwrap().width);
+            let width = usize::from(h.app.left_panel_body().unwrap().width);
             let cells: Vec<char> = line.chars().collect();
             cells.get(width - 1).copied().unwrap_or(' ')
         })
@@ -1531,7 +1531,7 @@ async fn the_selected_card_is_drawn_heavy_all_round() {
         ratatui::Terminal::new(ratatui::backend::TestBackend::new(area.width, area.height))
             .unwrap();
     terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
-    let body = h.app.left_body().unwrap();
+    let body = h.app.left_panel_body().unwrap();
     let p = crate::theme::palette();
     let cell = |row: usize| {
         terminal
@@ -1590,7 +1590,7 @@ async fn the_inbox_has_a_scrollbar_when_its_cards_overflow() {
         "{column:?}"
     );
     let lines = feed_lines(&mut h);
-    let width = usize::from(h.app.left_body().unwrap().width);
+    let width = usize::from(h.app.left_panel_body().unwrap().width);
     assert!(lines
         .iter()
         .all(|line| !line.chars().take(width - 1).any(|c| c == '▐')));
@@ -1600,7 +1600,7 @@ async fn the_inbox_has_a_scrollbar_when_its_cards_overflow() {
         ratatui::Terminal::new(ratatui::backend::TestBackend::new(area.width, area.height))
             .unwrap();
     terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
-    let body = h.app.left_body().unwrap();
+    let body = h.app.left_panel_body().unwrap();
     let thumb_cell = terminal
         .backend()
         .buffer()
@@ -1667,7 +1667,7 @@ fn feed_lines(h: &mut Harness) -> Vec<String> {
     let backend = ratatui::backend::TestBackend::new(area.width, area.height);
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
     terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
-    let feed = h.app.left_body().unwrap();
+    let feed = h.app.left_panel_body().unwrap();
     let buffer = terminal.backend().buffer();
     (feed.y..feed.bottom())
         .map(|y| {

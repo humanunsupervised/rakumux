@@ -312,6 +312,10 @@ fn the_left_columns_tabs_switch_and_help_is_searched_in_the_real_tui() {
     screen.send("f", &[]);
     let inbox = screen.shows("Sign in to see your inbox");
     assert!(!inbox.contains("◔ Status"), "{inbox}");
+    // Under a band naming it, its name underlined.
+    let band: Vec<&str> = inbox.lines().take(3).collect();
+    assert!(band[1].starts_with("   ≡ Inbox "), "{inbox}");
+    assert!(band[2].starts_with("   ▁▁▁▁▁▁▁ "), "{inbox}");
     screen.keys(&["esc"]);
     screen.until("the sessions", |text| {
         text.contains("◔ Status") && !text.contains("Sign in to see")
@@ -324,7 +328,15 @@ fn the_left_columns_tabs_switch_and_help_is_searched_in_the_real_tui() {
         .unwrap();
     let heartbeats = tabs[..tabs.find("♥  Heartbeats").unwrap()].chars().count() as u16;
     screen.click(heartbeats + 3, 46);
-    screen.shows("+ New heartbeat");
+    let beats = screen.shows("+ New heartbeat");
+    assert!(
+        beats
+            .lines()
+            .nth(1)
+            .unwrap()
+            .starts_with("   ♥  Heartbeats "),
+        "{beats}"
+    );
     // The Workspaces tab's shows the sessions and the menu over it; Esc
     // closes the menu.
     screen.click(5, 46);
@@ -629,6 +641,15 @@ fn a_heartbeats_runs_are_listed_and_watched_in_the_real_tui() {
     // Its run, and the run's output beside it as it comes.
     let shown = screen.shows("#1 running");
     assert!(shown.contains("runs"), "{shown}");
+    // Read whole, its band has `‹` to go back.
+    assert!(
+        shown
+            .lines()
+            .nth(1)
+            .unwrap()
+            .starts_with("   ‹ ♥  Heartbeats "),
+        "{shown}"
+    );
     screen.shows("tick one");
     screen.shows("tick two");
     let runs: Value =
@@ -644,6 +665,16 @@ fn a_heartbeats_runs_are_listed_and_watched_in_the_real_tui() {
     assert!(deleted.contains("tick two"), "{deleted}");
     let table = world.ok("inner", &["heartbeat", "runs", "ticker"]);
     assert!(table.contains("deleted (rakumux restore)"), "{table}");
+    // A click on the band goes back to the list.
+    screen.click(5, 2);
+    let list = screen.shows("+ New heartbeat");
+    assert!(
+        list.lines()
+            .nth(1)
+            .unwrap()
+            .starts_with("   ♥  Heartbeats "),
+        "{list}"
+    );
 }
 
 /// A prompt of 200 lines in the real TUI: pasted into the New heartbeat form

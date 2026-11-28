@@ -5,7 +5,7 @@
 //! it once expanded: Space, or the `▾ more` on its bottom border), or what
 //! the feed is waiting for (a
 //! sign-in, the switch, the first read). The reply read whole (Enter) takes
-//! the cards' place, under a `‹` row to go back; the Tabs layout's wide one shows it
+//! the cards' place, the band over it going back; the Tabs layout's wide one shows it
 //! beside them. It's its whole turn in order once it's read (the prompt,
 //! the agent's reasoning, its tool calls with the start of their output, its
 //! text), else the reply alone, then its thread when someone wrote back
@@ -23,7 +23,6 @@ use ratatui::{
 };
 use session_core::api::{TranscriptMessage, TranscriptPart, TranscriptRole};
 
-use super::drawer::draw_back;
 use super::format::{now_secs, read_period_style, relative_time, truncate};
 use super::markdown;
 use super::utils::get_spinner_char;
@@ -66,8 +65,8 @@ fn status(app: &App) -> FeedStatus {
     }
 }
 
-/// The feed in `area` (the left column's, over its tabs): the cards, or the
-/// reply read in their place under a row to go back; the Tabs layout's wide
+/// The feed in `area` (the left column's, under its band): the cards, or the
+/// reply read in their place; the Tabs layout's wide
 /// one, the cards with the selected reply beside them.
 pub fn draw_feed(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) {
     if area.width == 0 || area.height == 0 {
@@ -84,8 +83,7 @@ pub fn draw_feed(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit
         draw_feed_list(f, app, cards, focused, hits);
         draw_feed_reply(f, app, reply, hits);
     } else if app.feed.reading {
-        let below = draw_back(f, "Inbox", area, Hit::FeedBack, hits);
-        draw_feed_reply(f, app, below, hits);
+        draw_feed_reply(f, app, area, hits);
     } else {
         draw_feed_list(f, app, area, focused, hits);
     }

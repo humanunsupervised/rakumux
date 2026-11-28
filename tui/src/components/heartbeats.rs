@@ -14,7 +14,6 @@ use ratatui::{
 };
 use session_core::heartbeat::{Heartbeat, RunOutcome};
 
-use super::drawer::draw_back;
 use crate::app::heartbeats::{run_state, BeatAction};
 use crate::app::{App, Hit, TextInput};
 use crate::components::dialogs::error_line;
@@ -26,14 +25,10 @@ use crate::layout::str_width;
 use crate::printable::printable;
 use crate::theme;
 
-/// The tab in `area` (the left column's, over its tabs).
+/// The tab in `area` (the left column's, under its band).
 pub fn draw_beats(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) {
     let p = theme::palette();
     let view = &app.beats;
-    let area = match view.read() {
-        Some(_) => draw_back(f, "Heartbeats", area, Hit::BeatBack, hits),
-        None => area,
-    };
     // A row down, a column each side, as rtop.
     let body = Rect {
         x: area.x.saturating_add(1),

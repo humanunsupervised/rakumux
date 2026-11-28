@@ -53,7 +53,7 @@ impl App {
             return None;
         }
         let panel = self.screen().panel?;
-        layout::feed_tab_columns(layout::left_split(panel).0)
+        layout::feed_tab_columns(layout::panel_split(layout::left_split(panel).0).1)
     }
 
     /// The selected reply is on screen whole: read in the cards' place, or
@@ -408,7 +408,7 @@ impl App {
         let area = self
             .feed_columns()
             .map(|(_, _, reply)| reply)
-            .or_else(|| self.left_body());
+            .or_else(|| self.left_panel_body());
         area.map_or(20, |area| (area.height.saturating_sub(4) as isize).max(1))
     }
 }

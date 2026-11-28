@@ -1842,8 +1842,11 @@ each a click target (`Hit::LeftTab`; on the active one, what's read whole goes b
 and, beside the session, `«` at their right, which hides the column. Workspaces is the
 sessions of the workspace shown, the list with its own tabs over it, and its tab names that
 workspace and opens the menu of them (below); the Inbox (`f`, or Settings; `app/feed/pane.rs`) and Heartbeats (`B`, or Settings;
-below) show in its place, with nothing over them but a `‹` row while one thing is read whole
-(`Hit::FeedBack`, `Hit::BeatBack`). What the tab shows has Rakumux mode's keys
+below) show in its place under a band naming them as the drawer's does (`≡ Inbox`, `♥  Heartbeats`:
+the mark and name, bold and underlined, in the accent while they have the keys, on
+`Palette::surface`; as tall as the list's tabs, 3 rows or 1, `layout::panel_split`), and `‹`
+before the name while one thing is read whole, the band then going back (`Hit::FeedBack`,
+`Hit::BeatBack`). What the tab shows has Rakumux mode's keys
 (`App::keys_panel`, `drawer::Panel`; `App::panel_key`) unless the drawer has them; `f` (`B`) again,
 or `Esc` (after a pending key and from a reply or heartbeat read whole), goes back to the sessions
 (`App::show_sessions_tab`, as picking a grouping, a folder or a workspace does). Session mode leaves
@@ -1877,7 +1880,7 @@ them back too. The footer names the selected
 card's session (rtop's selected row's) while a panel has the keys. On the Inbox, the selected card is drawn
 heavy all round (`┏━┓┃┗┛`, the others rounded; same rows, so nothing shifts), in the accent and bold
 while it has the keys, grey otherwise. With them `↑`/`↓`/`j`/`k` go through the cards, `Enter` (or a second click,
-a tap on a phone) reads the selected reply whole in the cards' place (the `‹` over it, or `Esc`,
+a tap on a phone) reads the selected reply whole in the cards' place (the band's `‹`, or `Esc`,
 goes back; `↑`/`↓` scroll it; `Ctrl-d`/`Ctrl-u`, PgUp/PgDn page it), and `Enter` there (or beside
 the cards) goes into its session when it runs here; `Space` (or a click on a card's `▾ more`)
 shows the selected card whole in the list (`▴ less`, or `Space` again, back; `FeedStore::expanded`,
